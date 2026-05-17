@@ -6,6 +6,7 @@ import {
 import {
   ArrowLeft, MessageSquare, CheckCircle2, XCircle, Download, Loader2,
   ImageIcon, BookOpen, ExternalLink, Table2, Activity, Beaker,
+  FileText, Layers,
 } from "lucide-react";
 import { db } from "@/firebase";
 import { downloadProjectBlobAsText, getProjectStorage } from "@/projectAuth";
@@ -14,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Markdown } from "@/components/Markdown";
+import { cn } from "@/lib/utils";
 
 interface Section {
   id: string;
@@ -97,6 +99,7 @@ export function Paper() {
   const [figures, setFigures] = useState<Figure[]>([]);
   const [tables, setTables] = useState<PaperTable[]>([]);
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
+  const [viewMode, setViewMode] = useState<"sections" | "compiled">("sections");
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
@@ -138,6 +141,23 @@ export function Paper() {
     () => new Set(references.map((r) => r.doi).filter((d): d is string => !!d)),
     [references],
   );
+
+  const compiled = useMemo<string>(() => {
+    const title = (paper?.title as string) ?? slug ?? "Untitled";
+    const lines = [`# ${title}`, ""];
+    const ordered = [...sections].sort(
+      (a, b) => (a.sort_order ?? 999) - (b.sort_order ?? 999),
+    );
+    for (const s of ordered) {
+      lines.push(`## ${s.title || s.key}`);
+      if (s.body) {
+        lines.push("");
+        lines.push(s.body);
+      }
+      lines.push("");
+    }
+    return lines.join("\n");
+  }, [paper, sections, slug]);
 
   const downloadManuscript = async () => {
     if (!pid || !slug) return;
@@ -188,7 +208,7 @@ export function Paper() {
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
         <Card>
-          <CardHeader className="flex flex-row items-start justify-between space-y-0">
+          <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
             <div>
               <CardTitle>Manuscript</CardTitle>
               <CardDescription>
@@ -196,24 +216,62 @@ export function Paper() {
                 {sections.reduce((s, x) => s + (x.word_count ?? 0), 0)} words
               </CardDescription>
             </div>
-            <Button size="sm" variant="outline" onClick={downloadManuscript} disabled={downloading}>
-              {downloading ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Download className="mr-2 h-4 w-4" />
-              )}
-              {downloading ? "Downloading…" : "Download .md"}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex rounded-md border p-0.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("sections")}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded px-2 py-1 transition-colors",
+                    viewMode === "sections"
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-accent",
+                  )}
+                  aria-pressed={viewMode === "sections"}
+                  title="Per-section view with comment buttons"
+                >
+                  <Layers className="h-3 w-3" /> Sections
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("compiled")}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded px-2 py-1 transition-colors",
+                    viewMode === "compiled"
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-accent",
+                  )}
+                  aria-pressed={viewMode === "compiled"}
+                  title="Compiled view — single continuous document"
+                >
+                  <FileText className="h-3 w-3" /> Compiled
+                </button>
+              </div>
+              <Button size="sm" variant="outline" onClick={downloadManuscript} disabled={downloading}>
+                {downloading ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="mr-2 h-4 w-4" />
+                )}
+                {downloading ? "Downloading…" : "Download .md"}
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
-            {sections.map((s) => (
-              <SectionView key={s.id} section={s} pid={pid} paperSlug={slug} knownDois={knownDois} />
-            ))}
-            {!sections.length && (
+            {!sections.length ? (
               <p className="text-sm italic text-muted-foreground">
                 No sections yet. Create one from Claude Code with{" "}
                 <code className="bg-muted px-1 py-0.5 text-xs">/paper-writing</code>.
               </p>
+            ) : viewMode === "sections" ? (
+              sections.map((s) => (
+                <SectionView
+                  key={s.id} section={s} pid={pid} paperSlug={slug}
+                  knownDois={knownDois}
+                />
+              ))
+            ) : (
+              <Markdown className="text-sm" knownDois={knownDois}>{compiled}</Markdown>
             )}
             {downloadError && (
               <p className="mt-2 text-xs text-destructive">{downloadError}</p>
