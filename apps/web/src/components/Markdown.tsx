@@ -20,6 +20,7 @@ import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 
 import { cn } from "@/lib/utils";
+import { remarkDoi } from "@/lib/remarkDoi";
 
 interface MarkdownProps {
   children: string;
@@ -30,7 +31,7 @@ export function Markdown({ children, className }: MarkdownProps) {
   return (
     <div className={cn("prose-co-scientist", className)}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
+        remarkPlugins={[remarkGfm, remarkMath, remarkDoi]}
         rehypePlugins={[rehypeKatex]}
         components={{
           // Use Tailwind classes rather than @tailwindcss/typography to keep
