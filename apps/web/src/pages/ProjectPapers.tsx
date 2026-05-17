@@ -29,8 +29,6 @@ interface Paper {
 }
 
 const FIREBASE_PROJECT = "co-scientist-5af1a";
-const FIREBASE_BUCKET = "co-scientist-5af1a.firebasestorage.app";
-const FIREBASE_WEB_API_KEY = "AIzaSyCap5WxY6br-vo-D0l6mIS7uohPxuROz4E";
 const INSTRUCTIONS_GIST = "";
 
 function buildMcpJson(_pid: string, apiKey: string): string {
