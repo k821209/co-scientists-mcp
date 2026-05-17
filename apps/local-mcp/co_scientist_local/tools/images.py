@@ -32,7 +32,7 @@ def generate_image(
     figure_number: int | None = None,
     asset_filename: str | None = None,
     aspect_ratio: str = "1:1",
-    model: str = "imagen-3",
+    model: str = "gpt-image-1",
     caption: str | None = None,
 ) -> dict:
     """Generate an image; either register it as a figure or store as an asset.

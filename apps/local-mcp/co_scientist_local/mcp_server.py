@@ -542,10 +542,17 @@ def build_mcp(state: State) -> FastMCP:
         figure_number: int | None = None,
         asset_filename: str | None = None,
         aspect_ratio: str = "1:1",
-        model: str = "imagen-3",
+        model: str = "gpt-image-1",
         caption: str | None = None,
     ) -> dict[str, Any]:
         """Generate an image via the configured ImageGenerator (local or cloud-fn).
+
+        Default backend (hosted service) is OpenAI gpt-image-1. Requires a
+        Pro+ subscription — the /generate_image Cloud Function refuses with
+        403 for free-plan users.
+
+        Supported aspect_ratio values: "1:1" (1024x1024), "16:9"/"3:2"/
+        "landscape" (1536x1024), "9:16"/"2:3"/"portrait" (1024x1536).
 
         If `figure_number` is set, registers the result as a figure for the paper.
         Otherwise stores as an asset under papers/{slug}/assets/.

@@ -29,7 +29,7 @@ class ImageGenerator(Protocol):
         *,
         prompt: str,
         aspect_ratio: str = "1:1",
-        model: str = "imagen-3",
+        model: str = "gpt-image-1",
     ) -> bytes:
         """Generate an image. Returns the PNG (or other format) bytes."""
         ...
@@ -227,7 +227,7 @@ class FakeImageGenerator:
         *,
         prompt: str,
         aspect_ratio: str = "1:1",
-        model: str = "imagen-3",
+        model: str = "gpt-image-1",
     ) -> bytes:
         if self._quota_exceeded:
             raise QuotaExceeded("test-quota-exceeded")
