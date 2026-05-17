@@ -25,9 +25,18 @@ import { remarkDoi } from "@/lib/remarkDoi";
 interface MarkdownProps {
   children: string;
   className?: string;
+  /** DOIs that ARE registered in the paper's references collection — used
+   *  to badge `{doi:…}` citations ✓ when present, ⚠ when missing. */
+  knownDois?: ReadonlySet<string>;
 }
 
-export function Markdown({ children, className }: MarkdownProps) {
+function extractDoiFromHref(href: string | undefined): string | null {
+  if (!href) return null;
+  const m = href.match(/^https?:\/\/(?:dx\.)?doi\.org\/(.+)$/i);
+  return m ? m[1] : null;
+}
+
+export function Markdown({ children, className, knownDois }: MarkdownProps) {
   return (
     <div className={cn("prose-co-scientist", className)}>
       <ReactMarkdown
@@ -43,16 +52,47 @@ export function Markdown({ children, className }: MarkdownProps) {
           ul: ({ children }) => <ul className="my-2 ml-5 list-disc space-y-1">{children}</ul>,
           ol: ({ children }) => <ol className="my-2 ml-5 list-decimal space-y-1">{children}</ol>,
           li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-          a: ({ href, children }) => (
-            <a
-              href={href}
-              target="_blank"
-              rel="noreferrer"
-              className="text-primary underline underline-offset-2 hover:no-underline"
-            >
-              {children}
-            </a>
-          ),
+          a: ({ href, children }) => {
+            const doi = extractDoiFromHref(href);
+            if (doi !== null) {
+              // DOI link — check against paper's registered references
+              const known = knownDois?.has(doi);
+              if (knownDois) {
+                const cls = known
+                  ? "text-emerald-700 hover:text-emerald-900"
+                  : "text-amber-700 hover:text-amber-900";
+                const title = known
+                  ? "registered reference"
+                  : "DOI not in this paper's references — run /literature-review or add it";
+                return (
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={title}
+                    className={cn(
+                      "inline-flex items-baseline gap-1 underline underline-offset-2 hover:no-underline",
+                      cls,
+                    )}
+                  >
+                    <span aria-hidden="true">{known ? "✓" : "⚠"}</span>
+                    <span>{children}</span>
+                  </a>
+                );
+              }
+              // No knownDois passed — render as a plain DOI link
+            }
+            return (
+              <a
+                href={href}
+                target="_blank"
+                rel="noreferrer"
+                className="text-primary underline underline-offset-2 hover:no-underline"
+              >
+                {children}
+              </a>
+            );
+          },
           code: ({ className: codeClass, children, ...rest }) => {
             const isInline = !codeClass?.startsWith("language-");
             return isInline ? (

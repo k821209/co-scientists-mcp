@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   addDoc, collection, doc, onSnapshot, orderBy, query, updateDoc,
@@ -36,11 +36,22 @@ interface Review {
   resolved_at?: string | null;
 }
 
+interface Reference {
+  id: string;
+  citation_key: string;
+  doi?: string | null;
+  title?: string;
+  authors?: string[] | string | null;
+  year?: number | null;
+  journal?: string | null;
+}
+
 export function Paper() {
   const { pid, slug } = useParams<{ pid: string; slug: string }>();
   const [paper, setPaper] = useState<Record<string, unknown> | null>(null);
   const [sections, setSections] = useState<Section[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
+  const [references, setReferences] = useState<Reference[]>([]);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
@@ -56,8 +67,17 @@ export function Paper() {
     const unsubRev = onSnapshot(query(reviewsRef, orderBy("created_at", "desc")), (snap) =>
       setReviews(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Review, "id">) }))),
     );
-    return () => { unsubPaper(); unsubSec(); unsubRev(); };
+    const referencesRef = collection(paperRef, "references");
+    const unsubRefs = onSnapshot(referencesRef, (snap) =>
+      setReferences(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Reference, "id">) }))),
+    );
+    return () => { unsubPaper(); unsubSec(); unsubRev(); unsubRefs(); };
   }, [pid, slug]);
+
+  const knownDois = useMemo<ReadonlySet<string>>(
+    () => new Set(references.map((r) => r.doi).filter((d): d is string => !!d)),
+    [references],
+  );
 
   const downloadManuscript = async () => {
     if (!pid || !slug) return;
@@ -127,7 +147,7 @@ export function Paper() {
           </CardHeader>
           <CardContent>
             {sections.map((s) => (
-              <SectionView key={s.id} section={s} pid={pid} paperSlug={slug} />
+              <SectionView key={s.id} section={s} pid={pid} paperSlug={slug} knownDois={knownDois} />
             ))}
             {!sections.length && (
               <p className="text-sm italic text-muted-foreground">
@@ -162,7 +182,7 @@ export function Paper() {
           </Card>
 
           {reviews.map((r) => (
-            <ReviewView key={r.id} review={r} pid={pid} paperSlug={slug} />
+            <ReviewView key={r.id} review={r} pid={pid} paperSlug={slug} knownDois={knownDois} />
           ))}
         </div>
       </div>
@@ -170,7 +190,9 @@ export function Paper() {
   );
 }
 
-function SectionView({ section, pid, paperSlug }: { section: Section; pid: string; paperSlug: string }) {
+function SectionView({ section, pid, paperSlug, knownDois }: {
+  section: Section; pid: string; paperSlug: string; knownDois: ReadonlySet<string>;
+}) {
   const [showComment, setShowComment] = useState(false);
   return (
     <div className="group mb-6 border-l-2 border-transparent pl-4 hover:border-accent">
@@ -190,7 +212,7 @@ function SectionView({ section, pid, paperSlug }: { section: Section; pid: strin
         </div>
       </div>
       {section.body ? (
-        <Markdown className="text-sm">{section.body}</Markdown>
+        <Markdown className="text-sm" knownDois={knownDois}>{section.body}</Markdown>
       ) : (
         <p className="text-sm italic text-muted-foreground">empty</p>
       )}
@@ -257,7 +279,9 @@ function NewCommentBox({ pid, paperSlug, section }: { pid: string; paperSlug: st
   );
 }
 
-function ReviewView({ review, pid, paperSlug }: { review: Review; pid: string; paperSlug: string }) {
+function ReviewView({ review, pid, paperSlug, knownDois }: {
+  review: Review; pid: string; paperSlug: string; knownDois: ReadonlySet<string>;
+}) {
   const isResolved = review.status !== "open";
   return (
     <Card>
@@ -281,11 +305,11 @@ function ReviewView({ review, pid, paperSlug }: { review: Review; pid: string; p
             <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-emerald-500" />
           ) : null}
         </div>
-        <Markdown className="text-sm">{review.comment}</Markdown>
+        <Markdown className="text-sm" knownDois={knownDois}>{review.comment}</Markdown>
         {review.response && (
           <div className="rounded-md bg-muted p-2 text-xs">
             <div className="mb-1 font-medium">Claude's response:</div>
-            <Markdown className="text-xs">{review.response}</Markdown>
+            <Markdown className="text-xs" knownDois={knownDois}>{review.response}</Markdown>
           </div>
         )}
         {!isResolved && (
