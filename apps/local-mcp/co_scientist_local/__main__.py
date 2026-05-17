@@ -92,13 +92,18 @@ def _build_api_key_state() -> State:
         user_token_provider=auth_client.get_id_token,
     )
 
-    # 5. Image generator — default route is the Cloud Function (gpt-image-2,
-    #    Pro+ gating server-side). Free-plan users get a clean 403 from the
-    #    function. Power users can override with OPENAI_API_KEY in their
-    #    env to skip the gate (still bills them — direct OpenAI call).
-    image_gen = None
-    if os.environ.get("OPENAI_API_KEY"):
-        image_gen = LocalOpenAIImageGenerator(api_key=os.environ["OPENAI_API_KEY"])
+    # 5. Image generator — always route through the Cloud Function in API-key
+    #    mode. The function enforces plan gating (free → 403, Pro+ → quota →
+    #    gpt-image-2). A stray OPENAI_API_KEY in the user's shell must NOT
+    #    redirect to direct OpenAI calls — explicit opt-in only via
+    #    CO_SCIENTIST_USE_LOCAL_OPENAI=1.
+    if os.environ.get("CO_SCIENTIST_USE_LOCAL_OPENAI") == "1":
+        local_key = os.environ.get("OPENAI_API_KEY")
+        if not local_key:
+            raise RuntimeError(
+                "CO_SCIENTIST_USE_LOCAL_OPENAI=1 set but OPENAI_API_KEY is empty"
+            )
+        image_gen = LocalOpenAIImageGenerator(api_key=local_key)
     else:
         gen_image_url = os.environ.get(
             "CO_SCIENTIST_GENERATE_IMAGE_URL",
