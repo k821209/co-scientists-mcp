@@ -5,7 +5,7 @@ import {
 } from "firebase/firestore";
 import {
   ArrowLeft, MessageSquare, CheckCircle2, XCircle, Download, Loader2,
-  ImageIcon, BookOpen, ExternalLink,
+  ImageIcon, BookOpen, ExternalLink, Table2,
 } from "lucide-react";
 import { db } from "@/firebase";
 import { downloadProjectBlobAsText, getProjectStorage } from "@/projectAuth";
@@ -57,6 +57,15 @@ interface Figure {
   status?: string;
 }
 
+interface PaperTable {
+  id: string;
+  table_number: number;
+  title: string;
+  content: string;        // markdown table source
+  caption?: string | null;
+  status?: string;
+}
+
 export function Paper() {
   const { pid, slug } = useParams<{ pid: string; slug: string }>();
   const [paper, setPaper] = useState<Record<string, unknown> | null>(null);
@@ -64,6 +73,7 @@ export function Paper() {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [references, setReferences] = useState<Reference[]>([]);
   const [figures, setFigures] = useState<Figure[]>([]);
+  const [tables, setTables] = useState<PaperTable[]>([]);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
@@ -87,7 +97,11 @@ export function Paper() {
     const unsubFigs = onSnapshot(query(figuresRef, orderBy("figure_number")), (snap) =>
       setFigures(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Figure, "id">) }))),
     );
-    return () => { unsubPaper(); unsubSec(); unsubRev(); unsubRefs(); unsubFigs(); };
+    const tablesRef = collection(paperRef, "tables");
+    const unsubTabs = onSnapshot(query(tablesRef, orderBy("table_number")), (snap) =>
+      setTables(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<PaperTable, "id">) }))),
+    );
+    return () => { unsubPaper(); unsubSec(); unsubRev(); unsubRefs(); unsubFigs(); unsubTabs(); };
   }, [pid, slug]);
 
   const knownDois = useMemo<ReadonlySet<string>>(
@@ -184,6 +198,17 @@ export function Paper() {
             </h2>
             {figures.map((f) => (
               <FigureCard key={f.id} pid={pid} figure={f} knownDois={knownDois} />
+            ))}
+          </div>
+        )}
+
+        {tables.length > 0 && (
+          <div className="lg:col-span-1 space-y-4">
+            <h2 className="flex items-center gap-2 text-lg font-semibold">
+              <Table2 className="h-5 w-5" /> Tables
+            </h2>
+            {tables.map((t) => (
+              <TableCard key={t.id} table={t} knownDois={knownDois} />
             ))}
           </div>
         )}
@@ -326,6 +351,36 @@ function ReferencesCard({ references, cited }: {
             </div>
           );
         })}
+      </CardContent>
+    </Card>
+  );
+}
+
+
+function TableCard({ table, knownDois }: {
+  table: PaperTable;
+  knownDois: ReadonlySet<string>;
+}) {
+  return (
+    <Card id={`table-${table.table_number}`} className="scroll-mt-4">
+      <CardHeader>
+        <CardTitle className="flex items-baseline gap-2 text-base">
+          <span className="rounded bg-primary px-1.5 py-0.5 text-xs text-primary-foreground">
+            Tab {table.table_number}
+          </span>
+          <span className="flex-1 truncate">{table.title}</span>
+          {table.status && (
+            <Badge variant="outline" className="text-[10px]">{table.status}</Badge>
+          )}
+        </CardTitle>
+        {table.caption && <CardDescription>{table.caption}</CardDescription>}
+      </CardHeader>
+      <CardContent>
+        {table.content ? (
+          <Markdown className="text-xs" knownDois={knownDois}>{table.content}</Markdown>
+        ) : (
+          <p className="text-xs italic text-muted-foreground">no content yet</p>
+        )}
       </CardContent>
     </Card>
   );
