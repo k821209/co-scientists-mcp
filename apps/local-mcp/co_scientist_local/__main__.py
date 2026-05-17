@@ -48,13 +48,23 @@ def _build_api_key_state() -> State:
     )
     from .backends.firestore import FirestoreBackend
 
+    from .constants import (
+        DEFAULT_EXCHANGE_URL_TEMPLATE,
+        DEFAULT_FIREBASE_PROJECT_ID,
+        DEFAULT_FIREBASE_STORAGE_BUCKET,
+        DEFAULT_FIREBASE_WEB_API_KEY,
+    )
+
     api_key = os.environ["CO_SCIENTIST_API_KEY"]
-    fb_project = os.environ["FIREBASE_PROJECT_ID"]
-    bucket = os.environ["FIREBASE_STORAGE_BUCKET"]
-    web_api_key = os.environ["FIREBASE_WEB_API_KEY"]
+    # Only the API key is user-specific. The Firebase project/bucket/web-key are
+    # constants of the hosted service; defaults are baked into constants.py and
+    # can be overridden via env (for self-hosted forks).
+    fb_project = os.environ.get("FIREBASE_PROJECT_ID", DEFAULT_FIREBASE_PROJECT_ID)
+    bucket = os.environ.get("FIREBASE_STORAGE_BUCKET", DEFAULT_FIREBASE_STORAGE_BUCKET)
+    web_api_key = os.environ.get("FIREBASE_WEB_API_KEY", DEFAULT_FIREBASE_WEB_API_KEY)
     exchange_url = os.environ.get(
         "CO_SCIENTIST_EXCHANGE_URL",
-        f"https://us-central1-{fb_project}.cloudfunctions.net/exchange_key",
+        DEFAULT_EXCHANGE_URL_TEMPLATE.format(project_id=fb_project),
     )
 
     # 1. Exchange API key for custom token + project/owner ids

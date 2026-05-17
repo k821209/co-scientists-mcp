@@ -34,8 +34,9 @@ const FIREBASE_WEB_API_KEY = "AIzaSyCap5WxY6br-vo-D0l6mIS7uohPxuROz4E";
 const INSTRUCTIONS_GIST = "";
 
 function buildMcpJson(_pid: string, apiKey: string): string {
-  // Note: project_id is NOT in env — the MCP gets it from /exchange_key
-  // along with owner_uid, so leaking the key only compromises one project.
+  // The Firebase project/bucket/web-key are constants baked into the
+  // co_scientist_local package; only the API key is user-specific.
+  // Self-hosters can override the constants by adding env vars here.
   return JSON.stringify(
     {
       mcpServers: {
@@ -45,9 +46,6 @@ function buildMcpJson(_pid: string, apiKey: string): string {
           args: ["-m", "co_scientist_local"],
           env: {
             CO_SCIENTIST_API_KEY: apiKey,
-            FIREBASE_PROJECT_ID: FIREBASE_PROJECT,
-            FIREBASE_STORAGE_BUCKET: FIREBASE_BUCKET,
-            FIREBASE_WEB_API_KEY: FIREBASE_WEB_API_KEY,
           },
         },
       },
