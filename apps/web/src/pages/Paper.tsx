@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Markdown } from "@/components/Markdown";
 
 interface Section {
   id: string;
@@ -189,7 +190,7 @@ function SectionView({ section, pid, paperSlug }: { section: Section; pid: strin
         </div>
       </div>
       {section.body ? (
-        <p className="whitespace-pre-wrap text-sm leading-relaxed">{section.body}</p>
+        <Markdown className="text-sm">{section.body}</Markdown>
       ) : (
         <p className="text-sm italic text-muted-foreground">empty</p>
       )}
@@ -280,11 +281,11 @@ function ReviewView({ review, pid, paperSlug }: { review: Review; pid: string; p
             <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-emerald-500" />
           ) : null}
         </div>
-        <p className="text-sm">{review.comment}</p>
+        <Markdown className="text-sm">{review.comment}</Markdown>
         {review.response && (
           <div className="rounded-md bg-muted p-2 text-xs">
-            <span className="font-medium">Claude's response: </span>
-            {review.response}
+            <div className="mb-1 font-medium">Claude's response:</div>
+            <Markdown className="text-xs">{review.response}</Markdown>
           </div>
         )}
         {!isResolved && (

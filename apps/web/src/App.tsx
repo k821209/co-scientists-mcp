@@ -1,3 +1,4 @@
+import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./auth";
 import { Layout } from "./components/Layout";
@@ -7,9 +8,26 @@ import { ProjectShell } from "./pages/ProjectShell";
 import { ProjectPapers } from "./pages/ProjectPapers";
 import { ProjectPresentations } from "./pages/ProjectPresentations";
 import { ProjectSetup } from "./pages/ProjectSetup";
-import { Paper } from "./pages/Paper";
 import { Account } from "./pages/Account";
 import { Admin } from "./pages/Admin";
+
+// Paper detail uses react-markdown + KaTeX (~300 KB). Lazy-load so the initial
+// dashboard bundle doesn't pay for it — only loaded when a user opens a paper.
+const Paper = lazy(() => import("./pages/Paper").then((m) => ({ default: m.Paper })));
+
+function LazyPaper() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-[200px] items-center justify-center text-sm text-muted-foreground">
+          Loading…
+        </div>
+      }
+    >
+      <Paper />
+    </Suspense>
+  );
+}
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -37,8 +55,8 @@ export default function App() {
                 <Route index element={<Navigate to="/projects" replace />} />
                 <Route path="projects" element={<Projects />} />
 
-                {/* Paper detail — outside the tab shell, has its own layout */}
-                <Route path="projects/:pid/papers/:slug" element={<Paper />} />
+                {/* Paper detail — lazy-loaded (react-markdown + KaTeX) */}
+                <Route path="projects/:pid/papers/:slug" element={<LazyPaper />} />
 
                 {/* Project shell with tabs */}
                 <Route path="projects/:pid" element={<ProjectShell />}>
