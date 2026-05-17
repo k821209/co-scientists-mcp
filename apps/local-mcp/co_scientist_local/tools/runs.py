@@ -63,6 +63,11 @@ def record_analysis_run(
     run_key = run_key or _new_run_key()
     doc = {
         "run_key": run_key,
+        # Denormalized fields so cross-paper collectionGroup queries on
+        # "runs" can filter by project_id and link back to origin paper.
+        "project_id": state.project_id,
+        "paper_slug": slug,
+        "analysis_name": analysis,
         "command": command,
         "host": host,
         "env_name": env_name,

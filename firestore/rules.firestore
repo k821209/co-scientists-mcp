@@ -66,6 +66,30 @@ service cloud.firestore {
       }
     }
 
+    // ───── collectionGroup query support: "runs" ──────────────────────────
+    // The dashboard's project-level Runs tab issues
+    //   collectionGroup(db, "runs").where("project_id", "==", pid)
+    // to surface running jobs across all papers in a project. CollectionGroup
+    // queries are evaluated against this match (path-wildcard form) — the
+    // nested /projects/{pid}/{document=**} rule above doesn't apply because
+    // collectionGroup queries don't carry a fixed parent path.
+    //
+    // Auth: holder of the project_id custom claim, or the project owner
+    // (via Firestore get of the project doc). Each run carries a
+    // denormalized `project_id` field stamped at write time by the local MCP.
+    match /{path=**}/runs/{runId} {
+      allow read: if isAdmin()
+                  || (isSignedIn()
+                      && resource.data.project_id != null
+                      && (hasProjectClaim(resource.data.project_id)
+                          || get(/databases/$(database)/documents/projects/$(resource.data.project_id))
+                              .data.owner_uid == request.auth.uid));
+      // Writes still go through the per-project path rule above (the local
+      // MCP writes to /projects/{pid}/papers/{slug}/analyses/{name}/runs/{key}
+      // with project-claim auth, so the nested rule fires).
+      allow write: if false;
+    }
+
     // ───── /plans/{plan_id} — public plan catalog ─────────────────────────
     match /plans/{plan_id} {
       allow read:  if isSignedIn();
