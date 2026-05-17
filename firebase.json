@@ -21,7 +21,12 @@
     {
       "source": "apps/cloud-functions/generate-image",
       "codebase": "generate-image",
-      "runtime": "python311"
+      "runtime": "python312"
+    },
+    {
+      "source": "apps/cloud-functions/exchange-key",
+      "codebase": "exchange-key",
+      "runtime": "python312"
     }
   ],
   "emulators": {

@@ -1,15 +1,27 @@
-"""Entry point: `python -m co_scientist_local` or via the console script.
+"""Entry point: `python -m co_scientist_local`.
 
-Three startup modes, in priority order:
+Startup modes, in priority order:
 
   1. **Memory** (CO_SCIENTIST_USE_MEMORY=1) — InMemoryBackend, no network.
-  2. **Env-var Firestore** (CO_SCIENTIST_PROJECT_ID + GOOGLE_APPLICATION_CREDENTIALS
-     set, no ~/.co-scientist/config.toml). v0 demo path: dashboard creates a
-     project, user copies its ID into `.mcp.json`'s env. owner_uid is read
-     from `/projects/{pid}.owner_uid`.
-  3. **Config-file** — full bundle from a downloaded MCP config (refresh_token,
-     api key, function URLs). Not yet shipped in v0; falls back to env-var
-     Firestore if the file isn't present.
+  2. **API-key mode** (CO_SCIENTIST_API_KEY set) — preferred multi-user path.
+     Exchanges the key via /exchange_key Cloud Function, signs in with the
+     resulting custom token, uses the ID token for all Firestore + Storage
+     writes. Security rules enforce per-project scope.
+  3. **Service-account mode** (GOOGLE_APPLICATION_CREDENTIALS + CO_SCIENTIST_PROJECT_ID)
+     — developer / smoke fallback. Bypasses rules. End users never need this.
+
+Env vars per mode:
+
+    API-key mode:
+        CO_SCIENTIST_API_KEY          per-project API key from the dashboard
+        FIREBASE_PROJECT_ID           the Firebase project (e.g. co-scientist-5af1a)
+        FIREBASE_STORAGE_BUCKET       the bucket
+        FIREBASE_WEB_API_KEY          public web SDK API key (Identity Toolkit)
+        CO_SCIENTIST_EXCHANGE_URL     [optional] override the default Cloud Function URL
+
+    Service-account mode (developer):
+        CO_SCIENTIST_PROJECT_ID, FIREBASE_PROJECT_ID, FIREBASE_STORAGE_BUCKET,
+        GOOGLE_APPLICATION_CREDENTIALS
 """
 from __future__ import annotations
 
@@ -22,24 +34,56 @@ from .state import State
 
 
 def _build_dev_state() -> State:
-    """Lightweight in-memory state for smoke tests / mcp inspector."""
     pid = os.environ.get("CO_SCIENTIST_PROJECT_ID", "dev-project")
     uid = os.environ.get("CO_SCIENTIST_UID", "local-dev")
     return State(project_id=pid, owner_uid=uid, backend=InMemoryBackend())
 
 
-def _build_env_firestore_state() -> State:
-    """v0 demo path: env-var-only Firestore.
+def _build_api_key_state() -> State:
+    """Preferred multi-user path: API key → custom token → ID token → Firestore."""
+    from .auth import (
+        FirebaseAuthClient,
+        HttpCustomTokenSignIn,
+        exchange_api_key,
+    )
+    from .backends.firestore import FirestoreBackend
 
-    Requires:
-        CO_SCIENTIST_PROJECT_ID — the project doc id from the dashboard
-        FIREBASE_PROJECT_ID     — the Firebase project (e.g. co-scientist-5af1a)
-        FIREBASE_STORAGE_BUCKET — the bucket (e.g. co-scientist-5af1a.firebasestorage.app)
-        GOOGLE_APPLICATION_CREDENTIALS — path to a service-account JSON
+    api_key = os.environ["CO_SCIENTIST_API_KEY"]
+    fb_project = os.environ["FIREBASE_PROJECT_ID"]
+    bucket = os.environ["FIREBASE_STORAGE_BUCKET"]
+    web_api_key = os.environ["FIREBASE_WEB_API_KEY"]
+    exchange_url = os.environ.get(
+        "CO_SCIENTIST_EXCHANGE_URL",
+        f"https://us-central1-{fb_project}.cloudfunctions.net/exchange_key",
+    )
 
-    Owner uid is fetched from /projects/{pid}.owner_uid at startup so the
-    paper docs get the right owner stamp.
-    """
+    # 1. Exchange API key for custom token + project/owner ids
+    exch = exchange_api_key(api_key=api_key, exchange_url=exchange_url)
+    project_id = exch["projectId"]
+    owner_uid = exch["ownerUid"]
+
+    # 2. Custom token → ID token + refresh token
+    signin = HttpCustomTokenSignIn().sign_in(exch["customToken"], web_api_key)
+
+    # 3. Auth client seeded with the initial token
+    auth_client = FirebaseAuthClient(
+        web_api_key=web_api_key,
+        refresh_token=signin["refreshToken"],
+        initial_id_token=signin["idToken"],
+        initial_expires_in=int(signin.get("expiresIn", 3600)),
+    )
+
+    # 4. FirestoreBackend authenticated as the user
+    backend = FirestoreBackend(
+        project_id=fb_project,
+        bucket_name=bucket,
+        user_token_provider=auth_client.get_id_token,
+    )
+    return State(project_id=project_id, owner_uid=owner_uid, backend=backend)
+
+
+def _build_service_account_state() -> State:
+    """Developer fallback: service-account JSON, bypasses rules."""
     from .backends.firestore import FirestoreBackend
 
     pid = os.environ["CO_SCIENTIST_PROJECT_ID"]
@@ -55,77 +99,43 @@ def _build_env_firestore_state() -> State:
     owner_uid = project_doc.get("owner_uid")
     if not owner_uid:
         raise RuntimeError(f"project {pid!r} has no owner_uid set")
-
     return State(project_id=pid, owner_uid=owner_uid, backend=backend)
-
-
-def _build_prod_state() -> State:
-    """Read full bundle config.toml, wire Firestore + Auth + image gen."""
-    from .auth import FirebaseAuthClient
-    from .backends.firestore import FirestoreBackend
-    from .config import load_and_validate
-    from .image_gen import (
-        CloudFunctionImageGenerator,
-        LocalGeminiImageGenerator,
-    )
-
-    cfg = load_and_validate()
-    backend = FirestoreBackend(
-        project_id=cfg["project_id"],
-        bucket_name=cfg["storage_bucket"],
-        credentials_path=cfg.get("credentials_path"),
-    )
-    auth_client = FirebaseAuthClient(
-        web_api_key=cfg["web_api_key"],
-        refresh_token=cfg["refresh_token"],
-    )
-    image_gen = None
-    mode = cfg.get("image_gen_mode", "disabled")
-    if mode == "cloud":
-        image_gen = CloudFunctionImageGenerator(
-            function_url=cfg["function_urls"]["generate_image"],
-            get_id_token=auth_client.get_id_token,
-        )
-    elif mode == "local":
-        image_gen = LocalGeminiImageGenerator(api_key=cfg["gemini_api_key"])
-    return State(
-        project_id=cfg["co_scientist_project_id"],
-        owner_uid=cfg["uid"],
-        backend=backend,
-        image_gen=image_gen,
-    )
 
 
 def main() -> None:
     if os.environ.get("CO_SCIENTIST_USE_MEMORY") == "1":
         state = _build_dev_state()
-        print("co-scientist-local: in-memory backend (dev mode)", file=sys.stderr)
-    elif os.environ.get("CO_SCIENTIST_PROJECT_ID") and os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+        print("co-scientist-local: in-memory (dev mode)", file=sys.stderr)
+    elif os.environ.get("CO_SCIENTIST_API_KEY"):
         try:
-            state = _build_env_firestore_state()
+            state = _build_api_key_state()
         except (KeyError, RuntimeError) as e:
             print(f"co-scientist-local: {e}", file=sys.stderr)
             sys.exit(2)
         print(
-            f"co-scientist-local: Firestore[{os.environ['FIREBASE_PROJECT_ID']}], "
+            f"co-scientist-local: token-auth, "
+            f"project={state.project_id}, owner={state.owner_uid}",
+            file=sys.stderr,
+        )
+    elif os.environ.get("CO_SCIENTIST_PROJECT_ID") and os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+        try:
+            state = _build_service_account_state()
+        except (KeyError, RuntimeError) as e:
+            print(f"co-scientist-local: {e}", file=sys.stderr)
+            sys.exit(2)
+        print(
+            f"co-scientist-local: service-account (developer fallback), "
             f"project={state.project_id}, owner={state.owner_uid}",
             file=sys.stderr,
         )
     else:
-        try:
-            state = _build_prod_state()
-        except FileNotFoundError as e:
-            print(
-                f"co-scientist-local: {e}\n"
-                "Either set CO_SCIENTIST_PROJECT_ID + FIREBASE_PROJECT_ID + "
-                "FIREBASE_STORAGE_BUCKET + GOOGLE_APPLICATION_CREDENTIALS env vars, "
-                "or set CO_SCIENTIST_USE_MEMORY=1 for dev mode.",
-                file=sys.stderr,
-            )
-            sys.exit(2)
-        except ValueError as e:
-            print(f"co-scientist-local: {e}", file=sys.stderr)
-            sys.exit(2)
+        print(
+            "co-scientist-local: no credentials.\n"
+            "Set CO_SCIENTIST_API_KEY (preferred) and FIREBASE_* env vars,\n"
+            "or CO_SCIENTIST_USE_MEMORY=1 for dev mode.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     mcp = build_mcp(state)
     mcp.run()

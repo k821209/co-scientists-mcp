@@ -1,23 +1,154 @@
 """Firestore + Cloud Storage backend.
 
-Same interface as InMemoryBackend, so tools cannot tell which is in use.
-firebase-admin is lazy-imported so test environments without it still pass.
+Two auth modes, same `Backend` interface:
 
-Initialization:
-    backend = FirestoreBackend(
-        project_id="my-project",
-        bucket_name="my-project.appspot.com",
-        credentials_path="/path/to/serviceAccount.json",  # or None for ADC
-    )
+1. **User-token mode** (preferred, multi-user): pass `user_token_provider`,
+   a callable that returns a valid Firebase ID token.
+     - Firestore: google.cloud.firestore.Client with OAuth2 user creds.
+       Firestore's API endpoint accepts Firebase Auth ID tokens.
+     - Storage: **Firebase Storage REST API** (firebasestorage.googleapis.com).
+       The GCS API (storage.googleapis.com) does NOT accept Firebase Auth
+       tokens, so we go through Firebase's own endpoint which applies
+       Storage security rules.
 
-The local MCP will eventually call this with a Firebase Auth user credential
-rather than a service account, so writes are scoped to the user via security
-rules. For initial production deploys, service-account auth is fine and
-isolation is enforced by always prefixing paths with `users/{uid}/`.
+2. **Service-account mode** (developer / smoke / admin): pass `credentials_path`
+   or rely on Application Default Credentials. Uses firebase-admin SDK.
+   Bypasses security rules.
 """
 from __future__ import annotations
 
+import urllib.error
+import urllib.parse
+import urllib.request
+from typing import Callable
+
 from .base import Backend, NotFound
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Firebase Storage REST client (used in user-token mode)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class _FirebaseStorageBucket:
+    """Bucket-compatible wrapper that talks to firebasestorage.googleapis.com
+    with a Firebase Auth ID token; security rules apply.
+
+    Mirrors `google.cloud.storage.Bucket.blob(path).{upload_from_string,
+    exists, download_as_bytes, delete}` — the only methods our FirestoreBackend
+    uses.
+    """
+
+    def __init__(self, bucket_name: str, token_provider: Callable[[], str]) -> None:
+        self._bucket = bucket_name
+        self._token = token_provider
+
+    def blob(self, path: str) -> "_FirebaseStorageBlob":
+        return _FirebaseStorageBlob(self._bucket, path, self._token)
+
+
+class _FirebaseStorageBlob:
+    def __init__(self, bucket: str, path: str, token_provider: Callable[[], str]) -> None:
+        self._bucket = bucket
+        self._path = path
+        self._token = token_provider
+
+    def _object_url(self) -> str:
+        # Object path is URL-encoded with slashes preserved as %2F
+        encoded = urllib.parse.quote(self._path, safe="")
+        return f"https://firebasestorage.googleapis.com/v0/b/{self._bucket}/o/{encoded}"
+
+    def upload_from_string(
+        self, content: bytes | str,
+        content_type: str = "application/octet-stream",
+    ) -> None:
+        if isinstance(content, str):
+            content = content.encode("utf-8")
+        encoded = urllib.parse.quote(self._path, safe="")
+        url = (
+            f"https://firebasestorage.googleapis.com/v0/b/{self._bucket}/o"
+            f"?name={encoded}&uploadType=media"
+        )
+        req = urllib.request.Request(
+            url, data=content, method="POST",
+            headers={
+                "Authorization": f"Bearer {self._token()}",
+                "Content-Type": content_type,
+            },
+        )
+        try:
+            urllib.request.urlopen(req, timeout=60).read()
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", errors="replace")[:300]
+            raise RuntimeError(f"Storage upload failed (HTTP {e.code}): {body}") from e
+
+    def exists(self) -> bool:
+        req = urllib.request.Request(
+            self._object_url(), method="GET",
+            headers={"Authorization": f"Bearer {self._token()}"},
+        )
+        try:
+            urllib.request.urlopen(req, timeout=30).read()
+            return True
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return False
+            raise
+
+    def download_as_bytes(self) -> bytes:
+        url = self._object_url() + "?alt=media"
+        req = urllib.request.Request(
+            url, method="GET",
+            headers={"Authorization": f"Bearer {self._token()}"},
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return resp.read()
+
+    def delete(self) -> None:
+        req = urllib.request.Request(
+            self._object_url(), method="DELETE",
+            headers={"Authorization": f"Bearer {self._token()}"},
+        )
+        try:
+            urllib.request.urlopen(req, timeout=30).read()
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                raise
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# OAuth2 user credentials wrapper for Firestore client
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def _build_user_credentials(token_provider: Callable[[], str]):
+    """Wrap a token-fetcher callable as a google.auth.credentials.Credentials.
+
+    The wrapper's `refresh()` re-asks the provider for a fresh token; the
+    provider (FirebaseAuthClient.get_id_token) handles expiry caching itself.
+    """
+    from google.oauth2 import credentials as gauth
+
+    class _ProviderCredentials(gauth.Credentials):
+        def __init__(self, provider: Callable[[], str]) -> None:
+            super().__init__(token=provider())
+            self._provider = provider
+
+        @property
+        def expired(self) -> bool:
+            # Delegate expiry tracking to the provider; pretend always valid
+            # so google-auth calls refresh() when it wants a fresh token.
+            return False
+
+        def refresh(self, request) -> None:  # noqa: ARG002
+            self.token = self._provider()
+
+    return _ProviderCredentials(token_provider)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# FirestoreBackend
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 class FirestoreBackend(Backend):
@@ -25,31 +156,38 @@ class FirestoreBackend(Backend):
         self,
         project_id: str,
         bucket_name: str,
+        *,
         credentials_path: str | None = None,
+        user_token_provider: Callable[[], str] | None = None,
         app_name: str = "co-scientist-local",
     ) -> None:
-        # Lazy-import so test deps stay light
-        import firebase_admin
-        from firebase_admin import credentials as fb_credentials
-        from firebase_admin import firestore, storage
-
-        if app_name in firebase_admin._apps:
-            app = firebase_admin.get_app(app_name)
+        if user_token_provider is not None:
+            # --- User-token mode -----------------------------------------
+            from google.cloud import firestore as gcf
+            creds = _build_user_credentials(user_token_provider)
+            self._db = gcf.Client(project=project_id, credentials=creds)
+            self._bucket = _FirebaseStorageBucket(bucket_name, user_token_provider)
         else:
-            if credentials_path:
-                cred = fb_credentials.Certificate(credentials_path)
-            else:
-                # Application Default Credentials (gcloud auth / metadata server)
-                cred = fb_credentials.ApplicationDefault()
-            app = firebase_admin.initialize_app(
-                cred,
-                {"projectId": project_id, "storageBucket": bucket_name},
-                name=app_name,
-            )
+            # --- Service-account mode ------------------------------------
+            import firebase_admin
+            from firebase_admin import credentials as fb_credentials
+            from firebase_admin import firestore, storage
 
-        self._app = app
-        self._db = firestore.client(app=app)
-        self._bucket = storage.bucket(name=bucket_name, app=app)
+            if app_name in firebase_admin._apps:
+                app = firebase_admin.get_app(app_name)
+            else:
+                if credentials_path:
+                    cred = fb_credentials.Certificate(credentials_path)
+                else:
+                    cred = fb_credentials.ApplicationDefault()
+                app = firebase_admin.initialize_app(
+                    cred,
+                    {"projectId": project_id, "storageBucket": bucket_name},
+                    name=app_name,
+                )
+            self._app = app
+            self._db = firestore.client(app=app)
+            self._bucket = storage.bucket(name=bucket_name, app=app)
 
     # --- documents -----------------------------------------------------------
 

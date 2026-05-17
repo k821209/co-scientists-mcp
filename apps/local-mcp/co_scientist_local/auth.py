@@ -1,28 +1,137 @@
-"""Firebase Auth client for the local MCP.
+"""Firebase Auth for the local MCP.
 
-The local MCP runs on the user's machine and talks to Firebase. It uses a
-**refresh token** (long-lived, revocable from the Firebase Console / web
-dashboard) which it exchanges on demand for short-lived **ID tokens** that
-the Cloud Function /generate_image accepts in `Authorization: Bearer …`.
+Three pieces:
 
-Token exchange uses the Firebase Auth REST endpoint:
-    POST https://securetoken.googleapis.com/v1/token?key=<WEB_API_KEY>
-        grant_type=refresh_token&refresh_token=<refresh_token>
-Returns: { id_token, expires_in, refresh_token, user_id, ... }
+1. **TokenRefresher** — refresh_token → id_token via securetoken.googleapis.com.
+   Used by `FirebaseAuthClient` for ongoing token renewal.
 
-The web_api_key is *not a secret* — it identifies the Firebase project and
-ships in every frontend bundle. Security comes from Firebase Auth rules +
-the refresh_token itself.
+2. **CustomTokenSignIn** — customToken → idToken + refreshToken via
+   identitytoolkit.googleapis.com. Bootstrap step that consumes the
+   custom token minted by the /exchange_key Cloud Function.
 
-This module is also useful for FirestoreBackend (future): writing as the
-authenticated user with security rules enforced. For v0 the FirestoreBackend
-uses Admin SDK (service account) and path discipline; that gets tightened
-up later. See architecture_decisions.md.
+3. **exchange_api_key** — calls our /exchange_key Cloud Function with the
+   per-project API key, gets back a customToken + project/owner ids.
+
+End-to-end MCP startup flow:
+    api_key  ──exchange_api_key──►  customToken  ──CustomTokenSignIn──►  idToken
+                                                                              │
+                                                                              ▼
+                                                       FirebaseAuthClient(refresh_token)
+                                                              │
+                                                              ▼
+                                                       refreshed idToken every ~55min,
+                                                       used for all Firestore + Storage
+                                                       writes (security rules apply).
+
+The web_api_key is NOT a secret — it identifies the Firebase project to client
+SDKs and ships in every frontend bundle.
 """
 from __future__ import annotations
 
+import json
 import time
-from typing import Protocol
+import urllib.error
+import urllib.request
+from typing import Callable, Protocol
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# /exchange_key call
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class ExchangeKeyError(Exception):
+    """Raised when /exchange_key returns non-2xx."""
+
+
+def _http_post_json(url: str, body: dict, headers: dict | None = None) -> tuple[int, dict]:
+    data = json.dumps(body).encode("utf-8")
+    hdrs = {"Content-Type": "application/json"}
+    if headers:
+        hdrs.update(headers)
+    req = urllib.request.Request(url, data=data, headers=hdrs)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.status, json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        try:
+            payload = json.loads(e.read())
+        except Exception:
+            payload = {"error": f"http {e.code}"}
+        return e.code, payload
+
+
+def exchange_api_key(
+    *,
+    api_key: str,
+    exchange_url: str,
+    poster: Callable[[str, dict, dict | None], tuple[int, dict]] | None = None,
+) -> dict:
+    """POST to /exchange_key. Returns {customToken, projectId, ownerUid}."""
+    if not api_key:
+        raise ValueError("api_key is required")
+    if not exchange_url:
+        raise ValueError("exchange_url is required")
+    post = poster or _http_post_json
+    status, body = post(exchange_url, {}, {"Authorization": f"Bearer {api_key}"})
+    if status != 200:
+        msg = body.get("error") or f"http {status}"
+        raise ExchangeKeyError(msg)
+    for field in ("customToken", "projectId", "ownerUid"):
+        if field not in body:
+            raise ExchangeKeyError(f"response missing {field!r}: {body!r}")
+    return body
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# customToken → idToken (Identity Toolkit)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class CustomTokenSignIn(Protocol):
+    def sign_in(self, custom_token: str, web_api_key: str) -> dict:
+        """Returns {idToken, refreshToken, expiresIn} (Identity Toolkit shape)."""
+        ...
+
+
+class HttpCustomTokenSignIn:
+    URL = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken"
+
+    def sign_in(self, custom_token: str, web_api_key: str) -> dict:
+        status, body = _http_post_json(
+            f"{self.URL}?key={web_api_key}",
+            {"token": custom_token, "returnSecureToken": True},
+        )
+        if status != 200:
+            raise ExchangeKeyError(
+                f"signInWithCustomToken failed: {body.get('error', f'http {status}')}"
+            )
+        return body
+
+
+class FakeCustomTokenSignIn:
+    """Test impl: returns canned id_token / refresh_token."""
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+        self._counter = 0
+        self._expires_in = 3600
+
+    def set_expires_in(self, seconds: int) -> None:
+        self._expires_in = seconds
+
+    def sign_in(self, custom_token: str, web_api_key: str) -> dict:
+        self._counter += 1
+        self.calls.append({"custom_token": custom_token, "web_api_key": web_api_key})
+        return {
+            "idToken": f"fake-id-{self._counter}",
+            "refreshToken": f"fake-refresh-{self._counter}",
+            "expiresIn": str(self._expires_in),
+        }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# refresh_token → id_token (caching client)
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 class TokenRefresher(Protocol):
@@ -30,34 +139,42 @@ class TokenRefresher(Protocol):
         """Exchange a refresh_token for an id_token.
 
         Returns a dict with keys at least: id_token, expires_in (str/int).
-        May also rotate the refresh_token (returned key 'refresh_token').
         """
         ...
 
 
 class HttpTokenRefresher:
-    """Real refresher: POSTs to Google's securetoken endpoint."""
-
     BASE_URL = "https://securetoken.googleapis.com/v1/token"
 
     def refresh(self, refresh_token: str, web_api_key: str) -> dict:
-        import requests  # type: ignore
-        r = requests.post(
+        status, body = _http_post_json(
             f"{self.BASE_URL}?key={web_api_key}",
-            data={"grant_type": "refresh_token", "refresh_token": refresh_token},
-            timeout=30,
+            # Note: securetoken expects form-encoded; use urlencoded body via
+            # a dedicated helper. urllib.urlopen does this if we set the right
+            # content-type and body.
+            {},  # placeholder
+            None,
         )
-        r.raise_for_status()
-        return r.json()
+        # securetoken needs form encoding — do it manually
+        from urllib.parse import urlencode
+        data = urlencode({"grant_type": "refresh_token", "refresh_token": refresh_token}).encode()
+        req = urllib.request.Request(
+            f"{self.BASE_URL}?key={web_api_key}",
+            data=data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            try:
+                payload = json.loads(e.read())
+            except Exception:
+                payload = {"error": f"http {e.code}"}
+            raise RuntimeError(f"token refresh failed: {payload}") from e
 
 
 class FakeTokenRefresher:
-    """Test refresher: records calls, returns canned tokens.
-
-    Use `set_response(id_token=..., expires_in=...)` to control the next
-    response; defaults to 'fake-id-1' and 1 hour.
-    """
-
     def __init__(self) -> None:
         self.calls: list[dict] = []
         self._counter = 0
@@ -72,7 +189,6 @@ class FakeTokenRefresher:
         self._fail_next = True
 
     def rotate_refresh_token(self) -> None:
-        """Next response will include a new refresh_token (rotation)."""
         self._rotate_refresh = True
 
     def refresh(self, refresh_token: str, web_api_key: str) -> dict:
@@ -80,10 +196,7 @@ class FakeTokenRefresher:
             self._fail_next = False
             raise RuntimeError("simulated token refresh failure")
         self._counter += 1
-        self.calls.append({
-            "refresh_token": refresh_token,
-            "web_api_key": web_api_key,
-        })
+        self.calls.append({"refresh_token": refresh_token, "web_api_key": web_api_key})
         out = {
             "id_token": f"fake-id-{self._counter}",
             "expires_in": str(self._expires_in),
@@ -95,9 +208,13 @@ class FakeTokenRefresher:
 
 
 class FirebaseAuthClient:
-    """Caches an ID token until it's near expiry, then refreshes."""
+    """Caches an ID token until it's near expiry, then refreshes.
 
-    REFRESH_LEAD_SECONDS = 60  # refresh this long before expiry
+    Optionally seeded with an initial token (from CustomTokenSignIn) so the
+    very first get_id_token() doesn't have to hit the network.
+    """
+
+    REFRESH_LEAD_SECONDS = 60
 
     def __init__(
         self,
@@ -105,7 +222,9 @@ class FirebaseAuthClient:
         web_api_key: str,
         refresh_token: str,
         refresher: TokenRefresher | None = None,
-        now_fn=None,  # injectable for tests; defaults to time.time
+        now_fn=None,
+        initial_id_token: str | None = None,
+        initial_expires_in: int | None = None,
     ) -> None:
         if not web_api_key:
             raise ValueError("web_api_key is required")
@@ -115,16 +234,18 @@ class FirebaseAuthClient:
         self._refresh_token = refresh_token
         self._refresher = refresher or HttpTokenRefresher()
         self._now = now_fn or time.time
-        self._id_token: str | None = None
-        self._expiry_epoch: float = 0.0
+        self._id_token: str | None = initial_id_token
+        self._expiry_epoch: float = (
+            self._now() + int(initial_expires_in)
+            if initial_id_token and initial_expires_in
+            else 0.0
+        )
 
     @property
     def refresh_token(self) -> str:
-        """Current refresh token (may have rotated from the original)."""
         return self._refresh_token
 
     def get_id_token(self) -> str:
-        """Return a valid ID token, refreshing if needed."""
         now = self._now()
         if self._id_token is None or now >= self._expiry_epoch - self.REFRESH_LEAD_SECONDS:
             resp = self._refresher.refresh(self._refresh_token, self._web_api_key)
@@ -140,6 +261,5 @@ class FirebaseAuthClient:
         return self._id_token
 
     def invalidate(self) -> None:
-        """Force the next get_id_token() to refresh (e.g. on 401 response)."""
         self._id_token = None
         self._expiry_epoch = 0.0

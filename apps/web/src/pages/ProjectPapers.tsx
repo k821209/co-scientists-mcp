@@ -30,9 +30,12 @@ interface Paper {
 
 const FIREBASE_PROJECT = "co-scientist-5af1a";
 const FIREBASE_BUCKET = "co-scientist-5af1a.firebasestorage.app";
-const INSTRUCTIONS_GIST = ""; // future: a stable URL Claude Code can WebFetch
+const FIREBASE_WEB_API_KEY = "AIzaSyCap5WxY6br-vo-D0l6mIS7uohPxuROz4E";
+const INSTRUCTIONS_GIST = "";
 
-function buildMcpJson(pid: string, apiKey: string): string {
+function buildMcpJson(_pid: string, apiKey: string): string {
+  // Note: project_id is NOT in env — the MCP gets it from /exchange_key
+  // along with owner_uid, so leaking the key only compromises one project.
   return JSON.stringify(
     {
       mcpServers: {
@@ -41,12 +44,10 @@ function buildMcpJson(pid: string, apiKey: string): string {
           command: "python3",
           args: ["-m", "co_scientist_local"],
           env: {
-            CO_SCIENTIST_PROJECT_ID: pid,
             CO_SCIENTIST_API_KEY: apiKey,
             FIREBASE_PROJECT_ID: FIREBASE_PROJECT,
             FIREBASE_STORAGE_BUCKET: FIREBASE_BUCKET,
-            GOOGLE_APPLICATION_CREDENTIALS:
-              "${HOME}/.co-scientist/serviceAccount.json",
+            FIREBASE_WEB_API_KEY: FIREBASE_WEB_API_KEY,
           },
         },
       },
@@ -317,22 +318,28 @@ function ConnectClaudeCode({ pid, project }: { pid: string; project: Project | n
         </div>
 
         <Step n={1} title="Install the local MCP (one-time)">
-          <CodeBlock value={`pip install -e /path/to/co-scientists-web/apps/local-mcp`} />
-        </Step>
-
-        <Step n={2} title="Save a Firebase service-account key (one-time)">
           <p className="mb-2 text-sm text-muted-foreground">
-            Firebase Console → Project Settings → Service Accounts → "Generate new private key".
-            Save to <code className="text-xs">~/.co-scientist/serviceAccount.json</code>, then{" "}
-            <code className="text-xs">chmod 600</code> it.
+            Clone the repo (gives you the source — useful for editing skills, hooks, tools)
+            and install in editable mode:
+          </p>
+          <CodeBlock value={`git clone https://github.com/k821209/co-scientists-mcp.git ~/co-scientists-mcp
+pip install -e ~/co-scientists-mcp/apps/local-mcp`} />
+          <p className="mt-2 text-xs text-muted-foreground">
+            One-line pip-only alternative (no source clone):
+            <br />
+            <code className="text-[10px]">
+              pip install "git+https://github.com/k821209/co-scientists-mcp.git#subdirectory=apps/local-mcp"
+            </code>
           </p>
         </Step>
 
-        <Step n={3} title="Drop these two files into your project directory">
+        <Step n={2} title="Drop these two files into your project directory">
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <p className="flex-1 text-sm text-muted-foreground">
-                <code className="text-xs">.mcp.json</code> — wires up the MCP with your project ID + key
+                <code className="text-xs">.mcp.json</code> — wires up the MCP with your project's API key.
+                The MCP auto-exchanges the key for a project-scoped Firebase token,
+                so no service-account JSON is needed.
               </p>
               <Button size="sm" variant="outline" disabled={!apiKey}
                       onClick={() => downloadFile(".mcp.json", mcp, "application/json")}>
@@ -353,7 +360,7 @@ function ConnectClaudeCode({ pid, project }: { pid: string; project: Project | n
           </div>
         </Step>
 
-        <Step n={4} title="Open Claude Code in that directory">
+        <Step n={3} title="Open Claude Code in that directory">
           <CodeBlock value={`cd /path/to/your/project\nclaude`} />
           <p className="mt-2 text-xs text-muted-foreground">
             Claude Code will auto-load <code>CLAUDE.md</code> + launch the MCP. Try{" "}
