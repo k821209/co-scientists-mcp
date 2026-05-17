@@ -142,6 +142,11 @@ export function Paper() {
     [references],
   );
 
+  const mainFigures = useMemo(() => figures.filter((f) => f.figure_number < 101), [figures]);
+  const suppFigures = useMemo(() => figures.filter((f) => f.figure_number >= 101), [figures]);
+  const mainTables = useMemo(() => tables.filter((t) => t.table_number < 101), [tables]);
+  const suppTables = useMemo(() => tables.filter((t) => t.table_number >= 101), [tables]);
+
   const compiled = useMemo<string>(() => {
     const title = (paper?.title as string) ?? slug ?? "Untitled";
     const lines = [`# ${title}`, ""];
@@ -279,24 +284,49 @@ export function Paper() {
           </CardContent>
         </Card>
 
-        {figures.length > 0 && (
+        {mainFigures.length > 0 && (
           <div className="lg:col-span-1 space-y-4">
             <h2 className="flex items-center gap-2 text-lg font-semibold">
               <ImageIcon className="h-5 w-5" /> Figures
             </h2>
-            {figures.map((f) => (
+            {mainFigures.map((f) => (
               <FigureCard key={f.id} pid={pid} figure={f} knownDois={knownDois} />
             ))}
           </div>
         )}
 
-        {tables.length > 0 && (
+        {mainTables.length > 0 && (
           <div className="lg:col-span-1 space-y-4">
             <h2 className="flex items-center gap-2 text-lg font-semibold">
               <Table2 className="h-5 w-5" /> Tables
             </h2>
-            {tables.map((t) => (
+            {mainTables.map((t) => (
               <TableCard key={t.id} table={t} knownDois={knownDois} />
+            ))}
+          </div>
+        )}
+
+        {suppFigures.length > 0 && (
+          <div className="lg:col-span-1 space-y-4">
+            <h2 className="flex items-center gap-2 text-lg font-semibold">
+              <ImageIcon className="h-5 w-5" /> Supplementary Figures
+            </h2>
+            {suppFigures.map((f) => (
+              <FigureCard
+                key={f.id} pid={pid} figure={f} knownDois={knownDois}
+                supplementary
+              />
+            ))}
+          </div>
+        )}
+
+        {suppTables.length > 0 && (
+          <div className="lg:col-span-1 space-y-4">
+            <h2 className="flex items-center gap-2 text-lg font-semibold">
+              <Table2 className="h-5 w-5" /> Supplementary Tables
+            </h2>
+            {suppTables.map((t) => (
+              <TableCard key={t.id} table={t} knownDois={knownDois} supplementary />
             ))}
           </div>
         )}
@@ -546,16 +576,24 @@ function ReferencesCard({ references, cited }: {
 }
 
 
-function TableCard({ table, knownDois }: {
+function TableCard({ table, knownDois, supplementary = false }: {
   table: PaperTable;
   knownDois: ReadonlySet<string>;
+  supplementary?: boolean;
 }) {
+  const displayNum = supplementary ? table.table_number - 100 : table.table_number;
+  const label = supplementary ? `STab ${displayNum}` : `Tab ${displayNum}`;
   return (
     <Card id={`table-${table.table_number}`} className="scroll-mt-4">
       <CardHeader>
         <CardTitle className="flex items-baseline gap-2 text-base">
-          <span className="rounded bg-primary px-1.5 py-0.5 text-xs text-primary-foreground">
-            Tab {table.table_number}
+          <span className={cn(
+            "rounded px-1.5 py-0.5 text-xs",
+            supplementary
+              ? "bg-secondary text-secondary-foreground"
+              : "bg-primary text-primary-foreground",
+          )}>
+            {label}
           </span>
           <span className="flex-1 truncate">{table.title}</span>
           {table.status && (
@@ -576,9 +614,12 @@ function TableCard({ table, knownDois }: {
 }
 
 
-function FigureCard({ pid, figure, knownDois }: {
+function FigureCard({ pid, figure, knownDois, supplementary = false }: {
   pid: string; figure: Figure; knownDois: ReadonlySet<string>;
+  supplementary?: boolean;
 }) {
+  const displayNum = supplementary ? figure.figure_number - 100 : figure.figure_number;
+  const label = supplementary ? `SFig ${displayNum}` : `Fig ${displayNum}`;
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [imgError, setImgError] = useState<string | null>(null);
 
@@ -602,8 +643,13 @@ function FigureCard({ pid, figure, knownDois }: {
     <Card id={`figure-${figure.figure_number}`} className="scroll-mt-4">
       <CardHeader>
         <CardTitle className="flex items-baseline gap-2 text-base">
-          <span className="rounded bg-primary px-1.5 py-0.5 text-xs text-primary-foreground">
-            Fig {figure.figure_number}
+          <span className={cn(
+            "rounded px-1.5 py-0.5 text-xs",
+            supplementary
+              ? "bg-secondary text-secondary-foreground"
+              : "bg-primary text-primary-foreground",
+          )}>
+            {label}
           </span>
           <span className="flex-1 truncate">{figure.title}</span>
           {figure.status && (
