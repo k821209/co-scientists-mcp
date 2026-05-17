@@ -1,0 +1,33 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() { return request.auth != null; }
+    function isAdmin() { return isSignedIn() && request.auth.token.admin == true; }
+    function hasProjectClaim(pid) {
+      return isSignedIn() && request.auth.token.project_id == pid;
+    }
+
+    // All paper content lives under projects/{pid}/papers/{slug}/…
+    //   - manuscript.md
+    //   - figures/figure_<n>.<ext>
+    //   - exports/<filename>.docx
+    //   - assets/<filename>.png
+    //
+    // Access for both the dashboard user (owner) and the local MCP
+    // (project-claim custom token). Owner check requires a Firestore lookup
+    // which Storage rules can't do — so we rely on the project_id custom
+    // claim for both paths. Frontend reads must use a token from /exchange_key
+    // (TODO: dashboard helper to fetch one for the active project).
+    match /projects/{pid}/{allPaths=**} {
+      allow read, write: if isAdmin() || hasProjectClaim(pid);
+    }
+
+    // Cloud-Function-generated images (server-side writes bypass rules):
+    //   projects/{pid}/generated/<YYYYMM>/<id>.png — covered above on read.
+
+    match /{any=**} {
+      allow read, write: if isAdmin();
+    }
+  }
+}

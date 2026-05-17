@@ -1,0 +1,86 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() { return request.auth != null; }
+    function isAdmin() { return isSignedIn() && request.auth.token.admin == true; }
+    function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
+    function hasProjectClaim(pid) {
+      return isSignedIn() && request.auth.token.project_id == pid;
+    }
+    function onlyChangesField(allowed) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowed);
+    }
+
+    // ───── /users/{uid} — profile, plan, usage ────────────────────────────
+    match /users/{uid} {
+      allow read:   if isOwner(uid) || isAdmin();
+      allow update: if isAdmin()
+                    || (isOwner(uid) && onlyChangesField(
+                          ['display_name', 'notifications', 'last_login_at']));
+      allow create, delete: if isAdmin();
+    }
+
+    // ───── /projects/{pid} — project doc + all subcollections ─────────────
+    // Access is granted to:
+    //   - the project's owner_uid (the user themselves, via the dashboard)
+    //   - the holder of a project-scoped custom token (the local MCP, after
+    //     /exchange_key has minted it with claim `project_id == pid`)
+    //   - admins
+    //
+    // Free-tier cap (3 projects) is enforced server-side by the
+    // /create_project Cloud Function, not by these rules.
+    match /projects/{pid} {
+      allow read: if isAdmin()
+                  || hasProjectClaim(pid)
+                  || (isSignedIn() && resource.data.owner_uid == request.auth.uid);
+      // v0: signed-in users can create their own projects (honor-system
+      // 3-project cap enforced client-side; production hardening adds a
+      // /create_project Cloud Function that checks plan + count).
+      allow create: if isAdmin()
+                    || (isSignedIn()
+                        && request.resource.data.owner_uid == request.auth.uid
+                        && request.resource.data.keys().hasAll(['owner_uid', 'name', 'plan_id'])
+                        && request.resource.data.plan_id in ['free']);
+      allow delete: if isAdmin()
+                    || (isSignedIn() && resource.data.owner_uid == request.auth.uid);
+      // Owner can edit display fields; quota/plan_id are server-managed.
+      allow update: if isAdmin()
+                    || (isSignedIn() && resource.data.owner_uid == request.auth.uid
+                        && onlyChangesField(['name', 'description', 'updated_at']));
+
+      // API keys for the project — never exposed client-side. Only Cloud
+      // Functions (using Admin SDK) issue/revoke them.
+      match /api_keys/{hash} {
+        allow read, write: if isAdmin();
+      }
+
+      // Everything else under the project: papers, sections, reviews,
+      // figures, tables, references, analyses, runs, servers, exports, assets.
+      match /{document=**} {
+        allow read, write: if isAdmin()
+                           || hasProjectClaim(pid)
+                           || (isSignedIn()
+                               && get(/databases/$(database)/documents/projects/$(pid)).data.owner_uid
+                                  == request.auth.uid);
+      }
+    }
+
+    // ───── /plans/{plan_id} — public plan catalog ─────────────────────────
+    match /plans/{plan_id} {
+      allow read:  if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ───── /admins/{uid} — superuser allowlist ───────────────────────────
+    match /admins/{uid} {
+      allow read, write: if isAdmin();
+    }
+
+    // ───── /admin_audit_log/{id} — write-only-from-server, read-admin ─────
+    match /admin_audit_log/{id} {
+      allow read:  if isAdmin();
+      allow write: if false;  // service account only
+    }
+  }
+}

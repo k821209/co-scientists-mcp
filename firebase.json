@@ -1,0 +1,35 @@
+{
+  "firestore": {
+    "rules": "firestore/rules.firestore",
+    "indexes": "firestore/indexes.json"
+  },
+  "storage": {
+    "rules": "firestore/rules.storage"
+  },
+  "hosting": {
+    "public": "apps/web/dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      { "source": "**", "destination": "/index.html" }
+    ]
+  },
+  "functions": [
+    {
+      "source": "apps/cloud-functions/generate-image",
+      "codebase": "generate-image",
+      "runtime": "python311"
+    }
+  ],
+  "emulators": {
+    "auth": { "port": 9099 },
+    "firestore": { "port": 8080 },
+    "storage": { "port": 9199 },
+    "functions": { "port": 5001 },
+    "hosting": { "port": 5000 },
+    "ui": { "enabled": true }
+  }
+}

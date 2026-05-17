@@ -1,0 +1,35 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+.env
+.env.local
+node_modules/
+.DS_Store
+
+# Firebase
+.firebase/
+firebase-debug.log
+ui-debug.log
+# service account keys (NEVER commit) — broad patterns to catch any naming
+*serviceAccount*
+*service-account*
+*service_account*
+*firebase-adminsdk*
+*adminsdk*
+*.pem
+*.key
+*-credentials.json
+google-credentials.json
+
+# user-level co-scientist data (refresh tokens, configs)
+.co-scientist/
+
+# scratch / local
+.firebase_raw
+/tmp/
