@@ -151,7 +151,7 @@ def _call_openai(prompt: str, aspect_ratio: str, model: str | None) -> bytes:
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=290) as resp:
             payload = _json.loads(resp.read())
     except urllib.error.HTTPError as e:
         err_body = e.read().decode("utf-8", errors="replace")[:500]
@@ -201,7 +201,9 @@ if https_fn is not None:  # pragma: no cover — only at deploy time
         # gemini fallback (default provider is openai).
         secrets=["OPENAI_API_KEY"],
         memory=options.MemoryOption.MB_512,
-        timeout_sec=120,
+        # gpt-image-2 can take 2-4 min for complex prompts; OpenAI urlopen
+        # uses timeout=290 internally, give 10s headroom for response + I/O.
+        timeout_sec=300,
     )
     def generate_image(req: https_fn.Request) -> https_fn.Response:
         # 1. Auth

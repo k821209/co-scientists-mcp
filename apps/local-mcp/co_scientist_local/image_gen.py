@@ -190,7 +190,8 @@ class CloudFunctionImageGenerator:
             },
         )
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            # Match the Cloud Function's 300s ceiling — image gen is slow.
+            with urllib.request.urlopen(req, timeout=310) as resp:
                 return resp.read()
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="replace")[:500]
