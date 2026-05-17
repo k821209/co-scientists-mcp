@@ -42,7 +42,7 @@ def generate_image(
         - asset mode: {asset_id, blob_path, size_bytes, prompt, model}
     """
     if state.backend.get_doc(_paper_path(state, slug)) is None:
-        raise NotFound(f"paper not found: {slug!r}")
+        raise NotFound(f"paper not found: {slug!r} in project {state.project_id!r}")
     if not prompt or not prompt.strip():
         raise ValueError("prompt is required")
 
@@ -95,7 +95,7 @@ def generate_image(
 def list_assets(state: State, slug: str) -> list[dict]:
     """List image assets (non-figure generated images) for a paper."""
     if state.backend.get_doc(_paper_path(state, slug)) is None:
-        raise NotFound(f"paper not found: {slug!r}")
+        raise NotFound(f"paper not found: {slug!r} in project {state.project_id!r}")
     pairs = state.backend.list_collection(state.project_path("papers", slug, "assets"))
     items = [data for _, data in pairs]
     items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
@@ -105,7 +105,7 @@ def list_assets(state: State, slug: str) -> list[dict]:
 def delete_asset(state: State, slug: str, asset_id_or_filename: str) -> bool:
     """Delete an asset by asset_id or filename."""
     if state.backend.get_doc(_paper_path(state, slug)) is None:
-        raise NotFound(f"paper not found: {slug!r}")
+        raise NotFound(f"paper not found: {slug!r} in project {state.project_id!r}")
     for filename, data in state.backend.list_collection(
         state.project_path("papers", slug, "assets")
     ):

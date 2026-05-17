@@ -16,7 +16,7 @@ from .papers import _paper_path, _regenerate_manuscript, _section_path
 def get_section(state: State, slug: str, key: str) -> dict:
     """Return a section doc by key."""
     if state.backend.get_doc(_paper_path(state, slug)) is None:
-        raise NotFound(f"paper not found: {slug!r}")
+        raise NotFound(f"paper not found: {slug!r} in project {state.project_id!r}")
     doc = state.backend.get_doc(_section_path(state, slug, key))
     if doc is None:
         raise NotFound(f"section not found: {slug!r}/{key!r}")
@@ -26,7 +26,7 @@ def get_section(state: State, slug: str, key: str) -> dict:
 def list_sections(state: State, slug: str) -> list[dict]:
     """List all sections for a paper, ordered by sort_order."""
     if state.backend.get_doc(_paper_path(state, slug)) is None:
-        raise NotFound(f"paper not found: {slug!r}")
+        raise NotFound(f"paper not found: {slug!r} in project {state.project_id!r}")
     pairs = state.backend.list_collection(
         state.project_path("papers", slug, "sections")
     )
@@ -49,7 +49,7 @@ def update_section(
     Returns the updated section doc.
     """
     if state.backend.get_doc(_paper_path(state, slug)) is None:
-        raise NotFound(f"paper not found: {slug!r}")
+        raise NotFound(f"paper not found: {slug!r} in project {state.project_id!r}")
     path = _section_path(state, slug, key)
     existing = state.backend.get_doc(path)
     if existing is None:
@@ -91,7 +91,7 @@ def add_section(
 ) -> dict:
     """Register a custom section (e.g. journal-specific) beyond the defaults."""
     if state.backend.get_doc(_paper_path(state, slug)) is None:
-        raise NotFound(f"paper not found: {slug!r}")
+        raise NotFound(f"paper not found: {slug!r} in project {state.project_id!r}")
     path = _section_path(state, slug, key)
     if state.backend.get_doc(path) is not None:
         raise ValueError(f"section already exists: {slug!r}/{key!r}")
@@ -113,6 +113,6 @@ def add_section(
 def get_manuscript(state: State, slug: str) -> str:
     """Return the assembled manuscript.md as a string."""
     if state.backend.get_doc(_paper_path(state, slug)) is None:
-        raise NotFound(f"paper not found: {slug!r}")
+        raise NotFound(f"paper not found: {slug!r} in project {state.project_id!r}")
     blob = state.backend.get_blob(state.project_path("papers", slug, "manuscript.md"))
     return blob.decode("utf-8") if blob else ""

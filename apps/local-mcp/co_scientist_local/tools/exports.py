@@ -264,7 +264,7 @@ def export_to_path(
 def list_exports(state: State, slug: str) -> list[dict]:
     """List previously-exported files for a paper."""
     if state.backend.get_doc(state.project_path("papers", slug)) is None:
-        raise NotFound(f"paper not found: {slug!r}")
+        raise NotFound(f"paper not found: {slug!r} in project {state.project_id!r}")
     pairs = state.backend.list_collection(state.project_path("papers", slug, "exports"))
     items = [data for _, data in pairs]
     items.sort(key=lambda x: x.get("updated_at", ""), reverse=True)

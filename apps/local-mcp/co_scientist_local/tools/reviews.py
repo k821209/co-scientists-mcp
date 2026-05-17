@@ -44,7 +44,7 @@ def add_review(
 ) -> dict:
     """Create a new review/comment. Returns the created doc."""
     if state.backend.get_doc(_paper_path(state, slug)) is None:
-        raise NotFound(f"paper not found: {slug!r}")
+        raise NotFound(f"paper not found: {slug!r} in project {state.project_id!r}")
     if source not in _VALID_SOURCES:
         raise ValueError(f"invalid source: {source!r}")
     if severity not in _VALID_SEVERITY:
@@ -90,7 +90,7 @@ def list_reviews(
     Sorted by created_at descending (most recent first).
     """
     if state.backend.get_doc(_paper_path(state, slug)) is None:
-        raise NotFound(f"paper not found: {slug!r}")
+        raise NotFound(f"paper not found: {slug!r} in project {state.project_id!r}")
     pairs = state.backend.list_collection(_reviews_path(state, slug))
     reviews = [data for _, data in pairs]
     if status is not None:

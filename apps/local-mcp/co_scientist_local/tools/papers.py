@@ -30,7 +30,7 @@ def _regenerate_manuscript(state: State, slug: str) -> None:
     """Read all section docs for `slug` and rewrite the manuscript blob."""
     paper = state.backend.get_doc(_paper_path(state, slug))
     if paper is None:
-        raise NotFound(f"paper not found: {slug!r}")
+        raise NotFound(f"paper not found: {slug!r} in project {state.project_id!r}")
     sections = [data for _, data in state.backend.list_collection(
         state.project_path("papers", slug, "sections")
     )]
@@ -112,7 +112,7 @@ def get_paper_state(state: State, slug: str) -> dict:
     """Return paper doc + sections + manuscript text in one bundle."""
     paper = state.backend.get_doc(_paper_path(state, slug))
     if paper is None:
-        raise NotFound(f"paper not found: {slug!r}")
+        raise NotFound(f"paper not found: {slug!r} in project {state.project_id!r}")
     sections = [
         data
         for _, data in state.backend.list_collection(
@@ -142,7 +142,7 @@ def update_paper(
     path = _paper_path(state, slug)
     existing = state.backend.get_doc(path)
     if existing is None:
-        raise NotFound(f"paper not found: {slug!r}")
+        raise NotFound(f"paper not found: {slug!r} in project {state.project_id!r}")
     fields: dict = {"updated_at": now_iso()}
     if title is not None: fields["title"] = title.strip()
     if journal is not None: fields["journal"] = journal

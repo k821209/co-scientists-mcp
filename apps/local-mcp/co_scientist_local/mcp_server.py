@@ -5,6 +5,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from .guide import GUIDE_VERSION, render_guide
 from .state import State
 from .tools import analyses as _analyses
 from .tools import exports as _exports
@@ -23,6 +24,40 @@ from .tools import tables as _tables
 def build_mcp(state: State) -> FastMCP:
     """Construct the MCP server bound to a given State (uid + backend)."""
     mcp = FastMCP("co-scientist-local")
+
+    # ─── session / identity ──────────────────────────────────────────────────
+    @mcp.tool()
+    def whoami() -> dict[str, Any]:
+        """Return the active project context this MCP is bound to.
+
+        Call once on session start to verify the MCP's project_id matches
+        the one your CLAUDE.md mentions. Mismatch means the user mixed
+        `.mcp.json` and `CLAUDE.md` from different dashboard projects —
+        stop and tell them.
+        """
+        info: dict[str, Any] = {
+            "project_id": state.project_id,
+            "owner_uid": state.owner_uid,
+            "guide_version": GUIDE_VERSION,
+        }
+        try:
+            proj = state.backend.get_doc(f"projects/{state.project_id}")
+            if proj:
+                info["project_name"] = proj.get("name")
+                info["project_description"] = proj.get("description")
+        except Exception as e:
+            info["project_lookup_error"] = str(e)
+        return info
+
+    @mcp.tool()
+    def project_guide() -> str:
+        """Return the current session guide (skills, tool surface, citation
+        format, math mode rules, remote-job rule, image-gen tier).
+
+        Lives in the installed `co_scientist_local` package so updates flow
+        via `pip install --upgrade` — no need to re-download CLAUDE.md.
+        """
+        return render_guide()
 
     # ─── papers ──────────────────────────────────────────────────────────────
     @mcp.tool()

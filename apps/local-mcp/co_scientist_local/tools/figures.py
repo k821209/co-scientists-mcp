@@ -37,7 +37,7 @@ def _figure_blob_path(state: State, slug: str, figure_number: int, ext: str) -> 
 
 def _ensure_paper(state: State, slug: str) -> None:
     if state.backend.get_doc(_paper_path(state, slug)) is None:
-        raise NotFound(f"paper not found: {slug!r}")
+        raise NotFound(f"paper not found: {slug!r} in project {state.project_id!r}")
 
 
 def add_figure(

@@ -64,66 +64,30 @@ echo "Next: run 'claude' in this directory."
 
 
 function buildClaudeMd(name: string, description: string | undefined, pid: string): string {
+  // Keep this file TINY: only project identity. The rest (skills list, tool
+  // surface, math/citation/remote conventions) is served by the MCP tool
+  // `project_guide()` so updates flow via `pip install --upgrade` instead of
+  // forcing users to re-download CLAUDE.md.
   return `# co-scientist project: ${name}
 
-You are assisting on the **${name}** project (id: \`${pid}\`).
+Project id: \`${pid}\`
+Dashboard: https://${FIREBASE_PROJECT}.web.app/projects/${pid}/papers
 ${description ? `\n> ${description}\n` : ""}
-This directory is wired to a co-scientist MCP server (Firestore-backed).
-Every paper, section, review, figure, table, reference, and analysis lives
-under \`/projects/${pid}/...\` in Firestore.
+## On session start (every session)
 
-## How this project works
-
-A human collaborator views the dashboard at
-\`https://${FIREBASE_PROJECT}.web.app/projects/${pid}/papers\` and can leave
-inline comments on paragraphs, figures, and claims. Those comments land in
-Firestore as \`reviews\` with \`source='user'\`.
-
-When this Claude Code session starts, check for open user comments:
-
-\`\`\`
-mcp__co_scientist__list_papers()
-\`\`\`
-
-For each paper, run:
-
-\`\`\`
-mcp__co_scientist__count_open_user_comments(slug)
-\`\`\`
-
-If non-zero, surface them and offer \`/paper-revision\` to address them.
-
-## Available skills
-
-- \`/paper-writing [title]\` — create or update manuscript sections
-- \`/paper-revision\` — address open user comments (the bidirectional loop)
-- \`/paper-review\` — run AI reviewers
-- \`/paper-export [docx|tex|pdf]\` — pandoc-based export
-- \`/literature-review [topic]\` — search + add references
-- \`/analysis-run [name] [command]\` — local or registered-HPC
-
-## Tool surface (~60 tools under mcp__co_scientist__*)
-
-papers · sections · reviews · figures · tables · references · analyses · runs
-servers (HPC) · exports · image gen
-
-## Citation format
-
-Inline DOI: \`{doi:10.1234/example}\`. References auto-managed via
-\`mcp__co_scientist__add_reference_by_doi\`, assembled into BibTeX on export.
-
-## Math mode (Pandoc)
-
-Use \`$...$\` (inline) or \`$$...$$\` (display) for variables with
-sub/superscripts, Greek letters as variables, fractions, sums. Leave
-\`n = 69\` / \`q < 0.005\` / \`α-helix\` as plain text. \`prepare_export\` returns
-\`math_warnings\` flagging violations.
-
-## Remote job rule
-
-**Never** launch a long-running remote job via raw \`ssh <alias> "nohup ..."\`.
-Use \`mcp__co_scientist__submit_remote_job\` so the run is tracked in
-\`analysis_runs\` and visible in the dashboard.
+1. Call \`mcp__co_scientist__whoami()\` once.
+   - Verify the returned \`project_id\` equals \`${pid}\`. If they differ,
+     STOP and tell the user — \`.mcp.json\` and \`CLAUDE.md\` were taken
+     from two different dashboard projects. Have them re-download both
+     from the same project's Setup tab.
+2. Call \`mcp__co_scientist__project_guide()\` for the current skill list,
+   tool surface, citation/math/remote conventions. The guide lives in the
+   installed package so \`pip install --upgrade co-scientist-local\` is
+   how you get the latest version — re-downloading this file is rarely
+   needed.
+3. Call \`mcp__co_scientist__list_papers()\` then, for each paper,
+   \`mcp__co_scientist__count_open_user_comments(slug)\`. If non-zero,
+   surface the comments and offer \`/paper-revision\`.
 `;
 }
 
