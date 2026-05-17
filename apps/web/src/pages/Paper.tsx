@@ -5,9 +5,10 @@ import {
 } from "firebase/firestore";
 import {
   ArrowLeft, MessageSquare, CheckCircle2, XCircle, Download, Loader2,
+  ImageIcon,
 } from "lucide-react";
 import { db } from "@/firebase";
-import { downloadProjectBlobAsText } from "@/projectAuth";
+import { downloadProjectBlobAsText, getProjectStorage } from "@/projectAuth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -46,12 +47,23 @@ interface Reference {
   journal?: string | null;
 }
 
+interface Figure {
+  id: string;
+  figure_number: number;
+  title: string;
+  caption?: string | null;
+  legend?: string | null;
+  blob_path?: string | null;
+  status?: string;
+}
+
 export function Paper() {
   const { pid, slug } = useParams<{ pid: string; slug: string }>();
   const [paper, setPaper] = useState<Record<string, unknown> | null>(null);
   const [sections, setSections] = useState<Section[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [references, setReferences] = useState<Reference[]>([]);
+  const [figures, setFigures] = useState<Figure[]>([]);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
@@ -71,7 +83,11 @@ export function Paper() {
     const unsubRefs = onSnapshot(referencesRef, (snap) =>
       setReferences(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Reference, "id">) }))),
     );
-    return () => { unsubPaper(); unsubSec(); unsubRev(); unsubRefs(); };
+    const figuresRef = collection(paperRef, "figures");
+    const unsubFigs = onSnapshot(query(figuresRef, orderBy("figure_number")), (snap) =>
+      setFigures(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Figure, "id">) }))),
+    );
+    return () => { unsubPaper(); unsubSec(); unsubRev(); unsubRefs(); unsubFigs(); };
   }, [pid, slug]);
 
   const knownDois = useMemo<ReadonlySet<string>>(
@@ -161,6 +177,17 @@ export function Paper() {
           </CardContent>
         </Card>
 
+        {figures.length > 0 && (
+          <div className="lg:col-span-1 space-y-4">
+            <h2 className="flex items-center gap-2 text-lg font-semibold">
+              <ImageIcon className="h-5 w-5" /> Figures
+            </h2>
+            {figures.map((f) => (
+              <FigureCard key={f.id} pid={pid} figure={f} knownDois={knownDois} />
+            ))}
+          </div>
+        )}
+
         <div className="space-y-4">
           <Card>
             <CardHeader>
@@ -224,6 +251,73 @@ function SectionView({ section, pid, paperSlug, knownDois }: {
     </div>
   );
 }
+
+function FigureCard({ pid, figure, knownDois }: {
+  pid: string; figure: Figure; knownDois: ReadonlySet<string>;
+}) {
+  const [imgUrl, setImgUrl] = useState<string | null>(null);
+  const [imgError, setImgError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!figure.blob_path) return;
+    (async () => {
+      try {
+        const storage = await getProjectStorage(pid);
+        const { getDownloadURL, ref } = await import("firebase/storage");
+        const url = await getDownloadURL(ref(storage, figure.blob_path!));
+        if (!cancelled) setImgUrl(url);
+      } catch (err) {
+        if (!cancelled) setImgError((err as Error).message);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [pid, figure.blob_path]);
+
+  return (
+    <Card id={`figure-${figure.figure_number}`} className="scroll-mt-4">
+      <CardHeader>
+        <CardTitle className="flex items-baseline gap-2 text-base">
+          <span className="rounded bg-primary px-1.5 py-0.5 text-xs text-primary-foreground">
+            Fig {figure.figure_number}
+          </span>
+          <span className="flex-1 truncate">{figure.title}</span>
+          {figure.status && (
+            <Badge variant="outline" className="text-[10px]">{figure.status}</Badge>
+          )}
+        </CardTitle>
+        {figure.caption && (
+          <CardDescription>{figure.caption}</CardDescription>
+        )}
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {figure.blob_path ? (
+          imgUrl ? (
+            <img
+              src={imgUrl}
+              alt={figure.title}
+              className="max-h-[400px] w-auto max-w-full rounded border"
+            />
+          ) : imgError ? (
+            <p className="text-xs italic text-destructive">image: {imgError}</p>
+          ) : (
+            <p className="text-xs italic text-muted-foreground">loading image…</p>
+          )
+        ) : (
+          <p className="text-xs italic text-muted-foreground">
+            no image uploaded yet
+          </p>
+        )}
+        {figure.legend && (
+          <Markdown className="text-xs text-muted-foreground" knownDois={knownDois}>
+            {figure.legend}
+          </Markdown>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 
 function NewCommentBox({ pid, paperSlug, section }: { pid: string; paperSlug: string; section?: string }) {
   const [text, setText] = useState("");

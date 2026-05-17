@@ -21,6 +21,7 @@ import "katex/dist/katex.min.css";
 
 import { cn } from "@/lib/utils";
 import { remarkDoi } from "@/lib/remarkDoi";
+import { remarkFigureRefs } from "@/lib/remarkFigureRefs";
 
 interface MarkdownProps {
   children: string;
@@ -40,7 +41,7 @@ export function Markdown({ children, className, knownDois }: MarkdownProps) {
   return (
     <div className={cn("prose-co-scientist", className)}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath, remarkDoi]}
+        remarkPlugins={[remarkGfm, remarkMath, remarkDoi, remarkFigureRefs]}
         rehypePlugins={[rehypeKatex]}
         components={{
           // Use Tailwind classes rather than @tailwindcss/typography to keep
@@ -53,6 +54,17 @@ export function Markdown({ children, className, knownDois }: MarkdownProps) {
           ol: ({ children }) => <ol className="my-2 ml-5 list-decimal space-y-1">{children}</ol>,
           li: ({ children }) => <li className="leading-relaxed">{children}</li>,
           a: ({ href, children }) => {
+            // In-page anchor (e.g. #figure-2) — let the browser handle natively
+            if (href?.startsWith("#")) {
+              return (
+                <a
+                  href={href}
+                  className="text-primary underline underline-offset-2 hover:no-underline"
+                >
+                  {children}
+                </a>
+              );
+            }
             const doi = extractDoiFromHref(href);
             if (doi !== null) {
               // DOI link — check against paper's registered references
