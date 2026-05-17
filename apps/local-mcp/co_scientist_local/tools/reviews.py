@@ -13,6 +13,7 @@ from __future__ import annotations
 from ..backends.base import NotFound
 from ..state import State
 from ..util import new_id, now_iso
+from .activity import log_event
 from .papers import _paper_path
 
 _VALID_SOURCES = {"user", "ai", "external"}
@@ -69,6 +70,11 @@ def add_review(
         "resolved_at": None,
     }
     state.backend.set_doc(_review_path(state, slug, review_id), doc)
+    log_event(
+        state, slug, action="review_added",
+        detail={"id": review_id, "source": source, "section": section, "severity": severity},
+        actor="user" if source == "user" else "claude",
+    )
     return doc
 
 
@@ -126,6 +132,12 @@ def update_review(
     if not fields:
         return existing
     state.backend.update_doc(path, fields)
+    if status and status in ("accepted", "rejected", "resolved"):
+        log_event(
+            state, slug, action="review_resolved",
+            detail={"id": review_id, "status": status,
+                    "response_preview": (response or "")[:120]},
+        )
     return state.backend.get_doc(path)
 
 

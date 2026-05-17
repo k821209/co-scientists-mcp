@@ -6,7 +6,7 @@ import {
 import {
   ArrowLeft, MessageSquare, CheckCircle2, XCircle, Download, Loader2,
   ImageIcon, BookOpen, ExternalLink, Table2, Activity, Beaker,
-  FileText, Layers,
+  FileText, Layers, Clock,
 } from "lucide-react";
 import { db } from "@/firebase";
 import { downloadProjectBlobAsText, getProjectStorage } from "@/projectAuth";
@@ -90,6 +90,14 @@ interface AnalysisRun {
   log_path?: string | null;
 }
 
+interface ActivityEntry {
+  id: string;
+  action: string;
+  detail?: Record<string, unknown>;
+  actor?: string;
+  created_at?: string;
+}
+
 export function Paper() {
   const { pid, slug } = useParams<{ pid: string; slug: string }>();
   const [paper, setPaper] = useState<Record<string, unknown> | null>(null);
@@ -99,6 +107,7 @@ export function Paper() {
   const [figures, setFigures] = useState<Figure[]>([]);
   const [tables, setTables] = useState<PaperTable[]>([]);
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
+  const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [viewMode, setViewMode] = useState<"sections" | "compiled">("sections");
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -131,9 +140,16 @@ export function Paper() {
     const unsubAna = onSnapshot(query(analysesRef, orderBy("created_at", "desc")), (snap) =>
       setAnalyses(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Analysis, "id">) }))),
     );
+    const activityRef = collection(paperRef, "activity_log");
+    const unsubAct = onSnapshot(
+      query(activityRef, orderBy("created_at", "desc")),
+      (snap) =>
+        setActivity(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ActivityEntry, "id">) }))),
+      () => {/* empty subcollection is fine */},
+    );
     return () => {
       unsubPaper(); unsubSec(); unsubRev(); unsubRefs();
-      unsubFigs(); unsubTabs(); unsubAna();
+      unsubFigs(); unsubTabs(); unsubAna(); unsubAct();
     };
   }, [pid, slug]);
 
@@ -343,6 +359,12 @@ export function Paper() {
           </div>
         )}
 
+        {activity.length > 0 && (
+          <div className="lg:col-span-1">
+            <ActivityCard entries={activity} />
+          </div>
+        )}
+
         <div className="space-y-4">
           <Card>
             <CardHeader>
@@ -406,6 +428,108 @@ function SectionView({ section, pid, paperSlug, knownDois }: {
     </div>
   );
 }
+
+function ActivityCard({ entries }: { entries: ActivityEntry[] }) {
+  const labels: Record<string, string> = {
+    paper_created: "Paper created",
+    section_updated: "Section updated",
+    review_added: "Comment added",
+    review_resolved: "Comment resolved",
+  };
+  const shown = entries.slice(0, 20);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Clock className="h-4 w-4" /> Activity
+          <Badge variant="secondary" className="ml-auto text-[10px]">
+            {entries.length}
+          </Badge>
+        </CardTitle>
+        <CardDescription>Most recent {shown.length} of {entries.length} events.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {shown.map((e) => {
+          const detail = e.detail || {};
+          const label = labels[e.action] || e.action;
+          const dt = e.created_at ? new Date(e.created_at) : null;
+          return (
+            <div key={e.id} className="flex items-baseline gap-2 text-xs">
+              <Badge
+                variant={e.actor === "user" ? "warning" : "outline"}
+                className="shrink-0 text-[10px]"
+              >
+                {e.actor || "system"}
+              </Badge>
+              <div className="min-w-0 flex-1">
+                <div className="font-medium text-foreground">{label}</div>
+                <ActivityDetail action={e.action} detail={detail} />
+              </div>
+              {dt && (
+                <time
+                  className="shrink-0 text-[10px] text-muted-foreground"
+                  dateTime={e.created_at}
+                  title={dt.toLocaleString()}
+                >
+                  {timeAgo(dt)}
+                </time>
+              )}
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ActivityDetail({ action, detail }: {
+  action: string; detail: Record<string, unknown>;
+}) {
+  if (action === "section_updated") {
+    const key = detail.key as string | undefined;
+    const wc = detail.word_count as number | undefined;
+    return (
+      <div className="text-muted-foreground">
+        <code className="text-[10px]">{key}</code>
+        {wc !== undefined && <span> · {wc} words</span>}
+      </div>
+    );
+  }
+  if (action === "review_added") {
+    const section = detail.section as string | null;
+    const severity = detail.severity as string | undefined;
+    return (
+      <div className="text-muted-foreground">
+        {section && <code className="text-[10px]">{section}</code>}
+        {severity && <span> · {severity}</span>}
+      </div>
+    );
+  }
+  if (action === "review_resolved") {
+    const status = detail.status as string | undefined;
+    const preview = detail.response_preview as string | undefined;
+    return (
+      <div className="text-muted-foreground">
+        <span>{status}</span>
+        {preview && <span className="ml-1 italic">— {preview}</span>}
+      </div>
+    );
+  }
+  if (action === "paper_created") {
+    const title = detail.title as string | undefined;
+    return <div className="truncate text-muted-foreground">{title}</div>;
+  }
+  return null;
+}
+
+function timeAgo(d: Date): string {
+  const diffSec = Math.max(0, (Date.now() - d.getTime()) / 1000);
+  if (diffSec < 60) return `${Math.floor(diffSec)}s ago`;
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
+  return `${Math.floor(diffSec / 86400)}d ago`;
+}
+
 
 function AnalysesCard({ pid, paperSlug, analyses }: {
   pid: string; paperSlug: string; analyses: Analysis[];

@@ -11,6 +11,7 @@ from ..backends.base import NotFound
 from ..manuscript import DEFAULT_SECTIONS, compile_manuscript
 from ..state import State
 from ..util import now_iso, slugify, word_count
+from .activity import log_event
 
 
 def _paper_path(state: State, slug: str) -> str:
@@ -94,6 +95,8 @@ def create_paper(
         )
 
     _regenerate_manuscript(state, slug)
+    log_event(state, slug, action="paper_created",
+              detail={"title": title, "journal": journal})
     return paper
 
 
@@ -160,8 +163,9 @@ def delete_paper(state: State, slug: str) -> bool:
     path = _paper_path(state, slug)
     if state.backend.get_doc(path) is None:
         return False
-    # Subcollections first
-    for col in ("sections", "reviews"):
+    # Subcollections first — include activity_log so delete is fully clean
+    for col in ("sections", "reviews", "activity_log", "figures", "tables",
+                "references", "analyses", "exports", "assets"):
         for doc_id, _ in state.backend.list_collection(
             state.project_path("papers", slug, col)
         ):

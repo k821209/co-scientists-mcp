@@ -9,6 +9,7 @@ from __future__ import annotations
 from ..backends.base import NotFound
 from ..state import State
 from ..util import now_iso, word_count
+from .activity import log_event
 from .papers import _paper_path, _regenerate_manuscript, _section_path
 
 
@@ -68,6 +69,14 @@ def update_section(
     state.backend.update_doc(_paper_path(state, slug), {"updated_at": fields["updated_at"]})
 
     _regenerate_manuscript(state, slug)
+    log_event(
+        state, slug, action="section_updated",
+        detail={
+            "key": key,
+            "word_count": fields.get("word_count"),
+            "status": fields.get("status"),
+        },
+    )
     return state.backend.get_doc(path)
 
 
