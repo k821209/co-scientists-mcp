@@ -41,7 +41,8 @@ def test_build_mcp_registers_expected_tools():
         "record_analysis_run", "list_analysis_runs", "get_analysis_run",
         "mark_run_finished", "launch_local_job", "reap_local_run",
         # SSH-bound server operations
-        "server_status", "submit_remote_job", "tail_remote_log", "kill_remote_job",
+        "server_status", "submit_remote_job", "tail_remote_log", "refresh_log_tail",
+        "kill_remote_job",
         "poll_remote_pids", "auto_finish_stale_runs", "scan_untracked_jobs",
         # exports
         "prepare_export", "export_to_path", "list_exports",

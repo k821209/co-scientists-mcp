@@ -3,7 +3,9 @@ import { Link, useOutletContext } from "react-router-dom";
 import {
   collectionGroup, onSnapshot, orderBy, query, where,
 } from "firebase/firestore";
-import { Activity, CheckCircle2, Loader2, XCircle, Server, FileText } from "lucide-react";
+import {
+  Activity, CheckCircle2, Loader2, XCircle, Server, FileText, ChevronDown, ChevronRight,
+} from "lucide-react";
 import { db } from "@/firebase";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +27,9 @@ interface Run {
   exit_code?: number | null;
   log_path?: string | null;
   notes?: string | null;
+  log_tail?: string | null;
+  log_tail_lines?: number | null;
+  log_tail_updated_at?: string | null;
 }
 
 const RECENT_LIMIT = 50;
@@ -125,6 +130,8 @@ export function ProjectRuns() {
 function RunRow({ run, pid }: { run: Run; pid: string }) {
   const running = !run.finished_at;
   const success = run.exit_code === 0;
+  const [expanded, setExpanded] = useState(running);  // running runs default open
+  const hasTail = !!run.log_tail;
 
   const status = running ? (
     <Badge variant="warning" className="text-[10px]">
@@ -148,6 +155,16 @@ function RunRow({ run, pid }: { run: Run; pid: string }) {
   return (
     <div className="space-y-1 border-l-2 border-muted pl-3 text-sm">
       <div className="flex flex-wrap items-baseline gap-2">
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          className="-ml-1 text-muted-foreground hover:text-foreground"
+          aria-label={expanded ? "collapse" : "expand"}
+        >
+          {expanded
+            ? <ChevronDown className="h-3.5 w-3.5" />
+            : <ChevronRight className="h-3.5 w-3.5" />}
+        </button>
         {status}
         <Link
           to={`/projects/${pid}/papers/${run.paper_slug}`}
@@ -176,6 +193,35 @@ function RunRow({ run, pid }: { run: Run; pid: string }) {
         {run.env_name && <span>· env {run.env_name}</span>}
         {run.pid && <span>· pid {run.pid}</span>}
       </div>
+      {expanded && (
+        <div className="mt-1">
+          {hasTail ? (
+            <>
+              <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                <span>
+                  Log tail · last {run.log_tail_lines ?? 50} lines
+                </span>
+                {run.log_tail_updated_at && (
+                  <span title={new Date(run.log_tail_updated_at).toLocaleString()}>
+                    updated {timeAgo(new Date(run.log_tail_updated_at))}
+                  </span>
+                )}
+              </div>
+              <pre className="mt-1 max-h-[280px] overflow-auto rounded border bg-muted/40 p-2 font-mono text-[11px] leading-snug">
+                {run.log_tail}
+              </pre>
+            </>
+          ) : (
+            <p className="text-[10px] italic text-muted-foreground">
+              No tail yet. In Claude Code, run{" "}
+              <code className="bg-muted px-1 py-0.5">
+                mcp__co_scientist__refresh_log_tail("{run.paper_slug}", "{run.analysis_name}", "{run.run_key}")
+              </code>{" "}
+              to push the latest log here.
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

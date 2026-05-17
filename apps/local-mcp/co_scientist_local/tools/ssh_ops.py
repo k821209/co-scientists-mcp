@@ -392,6 +392,41 @@ def tail_remote_log(
     return {"run_key": run_key, "host": host, "log_path": log_path, "tail": out}
 
 
+def refresh_log_tail(
+    state: State,
+    paper_slug: str,
+    analysis_name: str,
+    run_key: str,
+    *,
+    lines: int = 50,
+) -> dict:
+    """Like tail_remote_log, but ALSO writes the result onto the run doc so
+    the dashboard's Runs tab can render it via its Firestore listener.
+
+    Skill flow: user opens Runs tab, asks Claude to "tail run_xyz", Claude
+    calls this tool, the run doc gets `log_tail` + `log_tail_updated_at`
+    fields, the dashboard updates within ~50ms via the Firestore listener.
+
+    Future: a background thread spawned by launch_local_job / submit_remote_job
+    auto-calls this every 30s while finished_at is null — fully live tail
+    without the agent's involvement.
+    """
+    res = tail_remote_log(state, paper_slug, analysis_name, run_key, lines=lines)
+    if "tail" not in res:
+        return res  # propagate error
+    # Write back onto the run doc
+    from .runs import _run_path
+    state.backend.update_doc(
+        _run_path(state, paper_slug, analysis_name, run_key),
+        {
+            "log_tail": res["tail"],
+            "log_tail_lines": lines,
+            "log_tail_updated_at": now_iso(),
+        },
+    )
+    return {**res, "persisted": True}
+
+
 def kill_remote_job(
     state: State,
     paper_slug: str,

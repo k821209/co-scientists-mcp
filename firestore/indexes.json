@@ -18,10 +18,11 @@
       ]
     },
     {
-      "collectionGroup": "figures",
-      "queryScope": "COLLECTION",
+      "collectionGroup": "runs",
+      "queryScope": "COLLECTION_GROUP",
       "fields": [
-        { "fieldPath": "figure_number", "order": "ASCENDING" }
+        { "fieldPath": "project_id", "order": "ASCENDING" },
+        { "fieldPath": "started_at", "order": "DESCENDING" }
       ]
     }
   ],

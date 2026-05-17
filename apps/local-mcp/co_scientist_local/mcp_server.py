@@ -479,6 +479,17 @@ def build_mcp(state: State) -> FastMCP:
         return _ssh_ops.tail_remote_log(state, slug, analysis, run_key, lines=lines)
 
     @mcp.tool()
+    def refresh_log_tail(
+        slug: str,
+        analysis: str,
+        run_key: str,
+        lines: int = 50,
+    ) -> dict[str, Any]:
+        """Like tail_remote_log, but persists the tail onto the run doc so the
+        dashboard's Runs tab can render it via its Firestore listener."""
+        return _ssh_ops.refresh_log_tail(state, slug, analysis, run_key, lines=lines)
+
+    @mcp.tool()
     def kill_remote_job(slug: str, analysis: str, run_key: str) -> dict[str, Any]:
         """SIGKILL the recorded PID + mark run finished."""
         return _ssh_ops.kill_remote_job(state, slug, analysis, run_key)
