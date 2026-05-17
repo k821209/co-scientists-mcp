@@ -14,6 +14,12 @@ build/
 node_modules/
 .DS_Store
 
+# TypeScript build artifacts (generated .js next to .ts; build cache)
+tsconfig.tsbuildinfo
+apps/web/src/**/*.js
+apps/web/src/**/*.js.map
+apps/web/src/**/*.d.ts
+
 # Firebase
 .firebase/
 firebase-debug.log
