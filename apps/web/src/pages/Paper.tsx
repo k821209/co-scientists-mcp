@@ -5,7 +5,7 @@ import {
 } from "firebase/firestore";
 import {
   ArrowLeft, MessageSquare, CheckCircle2, XCircle, Download, Loader2,
-  ImageIcon,
+  ImageIcon, BookOpen, ExternalLink,
 } from "lucide-react";
 import { db } from "@/firebase";
 import { downloadProjectBlobAsText, getProjectStorage } from "@/projectAuth";
@@ -188,6 +188,12 @@ export function Paper() {
           </div>
         )}
 
+        {references.length > 0 && (
+          <div className="lg:col-span-1">
+            <ReferencesCard references={references} cited={knownDois} />
+          </div>
+        )}
+
         <div className="space-y-4">
           <Card>
             <CardHeader>
@@ -251,6 +257,80 @@ function SectionView({ section, pid, paperSlug, knownDois }: {
     </div>
   );
 }
+
+function ReferencesCard({ references, cited }: {
+  references: Reference[];
+  cited: ReadonlySet<string>;  // DOIs that appear in /references — same Set we use for badges
+}) {
+  // Sort: alphabetical by citation_key (matches BibTeX export order)
+  const sorted = [...references].sort((a, b) =>
+    (a.citation_key || "").localeCompare(b.citation_key || ""),
+  );
+  void cited; // currently every registered reference is "cited" by virtue of being registered
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <BookOpen className="h-4 w-4" /> References
+          <Badge variant="secondary" className="ml-auto text-[10px]">
+            {references.length}
+          </Badge>
+        </CardTitle>
+        <CardDescription>
+          Registered via{" "}
+          <code className="bg-muted px-1 py-0.5 text-[10px]">
+            mcp__co_scientist__add_reference
+          </code>{" "}
+          (manually or by DOI/PMID lookup).
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {sorted.map((r) => {
+          const authors = Array.isArray(r.authors)
+            ? r.authors.join(", ")
+            : r.authors || "";
+          const doiUrl = r.doi ? `https://doi.org/${r.doi}` : null;
+          return (
+            <div key={r.id} className="space-y-1 border-l-2 border-muted pl-3 text-sm">
+              <div className="flex items-baseline gap-2">
+                <code className="rounded bg-muted px-1.5 py-0.5 text-[10px]">
+                  {r.citation_key}
+                </code>
+                {r.year && (
+                  <span className="text-xs text-muted-foreground">{r.year}</span>
+                )}
+              </div>
+              {r.title && <div className="font-medium">{r.title}</div>}
+              {authors && (
+                <div className="text-xs text-muted-foreground">{authors}</div>
+              )}
+              {(r.journal || doiUrl) && (
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  {r.journal && (
+                    <span className="italic text-muted-foreground">{r.journal}</span>
+                  )}
+                  {doiUrl && (
+                    <a
+                      href={doiUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2 hover:no-underline"
+                    >
+                      doi:{r.doi}
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
+  );
+}
+
 
 function FigureCard({ pid, figure, knownDois }: {
   pid: string; figure: Figure; knownDois: ReadonlySet<string>;
