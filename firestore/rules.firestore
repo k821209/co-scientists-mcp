@@ -15,10 +15,17 @@ service cloud.firestore {
     // ───── /users/{uid} — profile, plan, usage ────────────────────────────
     match /users/{uid} {
       allow read:   if isOwner(uid) || isAdmin();
+      // v0: user can self-create their own profile doc on first sign-in,
+      // but only with plan_id='free' and disabled=false. Admin promotes to
+      // pro later (or in production: a Stripe webhook → Cloud Function).
+      allow create: if isAdmin()
+                    || (isOwner(uid)
+                        && request.resource.data.plan_id == 'free'
+                        && request.resource.data.disabled == false);
       allow update: if isAdmin()
                     || (isOwner(uid) && onlyChangesField(
                           ['display_name', 'notifications', 'last_login_at']));
-      allow create, delete: if isAdmin();
+      allow delete: if isAdmin();
     }
 
     // ───── /projects/{pid} — project doc + all subcollections ─────────────
