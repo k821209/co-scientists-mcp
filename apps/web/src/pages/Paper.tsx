@@ -5,7 +5,7 @@ import {
 } from "firebase/firestore";
 import {
   ArrowLeft, MessageSquare, CheckCircle2, XCircle, Download, Loader2,
-  ImageIcon, BookOpen, ExternalLink, Table2,
+  ImageIcon, BookOpen, ExternalLink, Table2, Activity, Beaker,
 } from "lucide-react";
 import { db } from "@/firebase";
 import { downloadProjectBlobAsText, getProjectStorage } from "@/projectAuth";
@@ -66,6 +66,28 @@ interface PaperTable {
   status?: string;
 }
 
+interface Analysis {
+  id: string;
+  name: string;
+  description?: string | null;
+  status?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+interface AnalysisRun {
+  id: string;
+  run_key: string;
+  command: string;
+  host?: string;
+  env_name?: string | null;
+  pid?: number | null;
+  started_at?: string;
+  finished_at?: string | null;
+  exit_code?: number | null;
+  log_path?: string | null;
+}
+
 export function Paper() {
   const { pid, slug } = useParams<{ pid: string; slug: string }>();
   const [paper, setPaper] = useState<Record<string, unknown> | null>(null);
@@ -74,6 +96,7 @@ export function Paper() {
   const [references, setReferences] = useState<Reference[]>([]);
   const [figures, setFigures] = useState<Figure[]>([]);
   const [tables, setTables] = useState<PaperTable[]>([]);
+  const [analyses, setAnalyses] = useState<Analysis[]>([]);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
@@ -101,7 +124,14 @@ export function Paper() {
     const unsubTabs = onSnapshot(query(tablesRef, orderBy("table_number")), (snap) =>
       setTables(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<PaperTable, "id">) }))),
     );
-    return () => { unsubPaper(); unsubSec(); unsubRev(); unsubRefs(); unsubFigs(); unsubTabs(); };
+    const analysesRef = collection(paperRef, "analyses");
+    const unsubAna = onSnapshot(query(analysesRef, orderBy("created_at", "desc")), (snap) =>
+      setAnalyses(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Analysis, "id">) }))),
+    );
+    return () => {
+      unsubPaper(); unsubSec(); unsubRev(); unsubRefs();
+      unsubFigs(); unsubTabs(); unsubAna();
+    };
   }, [pid, slug]);
 
   const knownDois = useMemo<ReadonlySet<string>>(
@@ -213,6 +243,12 @@ export function Paper() {
           </div>
         )}
 
+        {analyses.length > 0 && (
+          <div className="lg:col-span-1">
+            <AnalysesCard pid={pid} paperSlug={slug} analyses={analyses} />
+          </div>
+        )}
+
         {references.length > 0 && (
           <div className="lg:col-span-1">
             <ReferencesCard references={references} cited={knownDois} />
@@ -282,6 +318,101 @@ function SectionView({ section, pid, paperSlug, knownDois }: {
     </div>
   );
 }
+
+function AnalysesCard({ pid, paperSlug, analyses }: {
+  pid: string; paperSlug: string; analyses: Analysis[];
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Beaker className="h-4 w-4" /> Analyses
+          <Badge variant="secondary" className="ml-auto text-[10px]">
+            {analyses.length}
+          </Badge>
+        </CardTitle>
+        <CardDescription>
+          Named pipelines run from Claude Code via{" "}
+          <code className="bg-muted px-1 py-0.5 text-[10px]">/analysis-run</code>.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {analyses.map((a) => (
+          <AnalysisRow key={a.id} pid={pid} paperSlug={paperSlug} analysis={a} />
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+
+function AnalysisRow({ pid, paperSlug, analysis }: {
+  pid: string; paperSlug: string; analysis: Analysis;
+}) {
+  // Lazy-listen to the runs subcollection: get the latest run for status.
+  const [latest, setLatest] = useState<AnalysisRun | null>(null);
+  const [runCount, setRunCount] = useState(0);
+
+  useEffect(() => {
+    const runsRef = collection(
+      db, "projects", pid, "papers", paperSlug,
+      "analyses", analysis.id, "runs",
+    );
+    const unsub = onSnapshot(
+      query(runsRef, orderBy("started_at", "desc")),
+      (snap) => {
+        setRunCount(snap.size);
+        setLatest((snap.docs[0]?.data() as AnalysisRun) ?? null);
+      },
+      () => {/* swallow — empty subcollection is fine */},
+    );
+    return unsub;
+  }, [pid, paperSlug, analysis.id]);
+
+  const isRunning = latest && !latest.finished_at;
+  const success = latest?.exit_code === 0;
+
+  return (
+    <div className="space-y-1 border-l-2 border-muted pl-3 text-sm">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <code className="rounded bg-muted px-1.5 py-0.5 text-[10px]">
+          {analysis.name}
+        </code>
+        {analysis.status && (
+          <Badge variant="outline" className="text-[10px]">{analysis.status}</Badge>
+        )}
+        <span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
+          <Activity className="h-3 w-3" /> {runCount} run{runCount === 1 ? "" : "s"}
+        </span>
+      </div>
+      {analysis.description && (
+        <div className="text-xs text-muted-foreground">{analysis.description}</div>
+      )}
+      {latest && (
+        <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+          {isRunning ? (
+            <Badge variant="warning" className="text-[10px]">
+              <Loader2 className="mr-1 h-3 w-3 animate-spin" /> running
+            </Badge>
+          ) : success ? (
+            <Badge variant="success" className="text-[10px]">
+              <CheckCircle2 className="mr-1 h-3 w-3" /> exit 0
+            </Badge>
+          ) : (
+            <Badge variant="destructive" className="text-[10px]">
+              exit {latest.exit_code ?? "?"}
+            </Badge>
+          )}
+          {latest.host && <span>host: {latest.host}</span>}
+          {latest.started_at && (
+            <span>started {new Date(latest.started_at).toLocaleString()}</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 function ReferencesCard({ references, cited }: {
   references: Reference[];
