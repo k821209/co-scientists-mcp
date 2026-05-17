@@ -2,9 +2,9 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { addDoc, collection, doc, onSnapshot, orderBy, query, updateDoc, } from "firebase/firestore";
-import { getBytes, ref } from "firebase/storage";
-import { ArrowLeft, MessageSquare, CheckCircle2, XCircle } from "lucide-react";
-import { db, storage } from "@/firebase";
+import { ArrowLeft, MessageSquare, CheckCircle2, XCircle, Download, Loader2, } from "lucide-react";
+import { db } from "@/firebase";
+import { downloadProjectBlobAsText } from "@/projectAuth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -14,7 +14,8 @@ export function Paper() {
     const [paper, setPaper] = useState(null);
     const [sections, setSections] = useState([]);
     const [reviews, setReviews] = useState([]);
-    const [manuscript, setManuscript] = useState("");
+    const [downloading, setDownloading] = useState(false);
+    const [downloadError, setDownloadError] = useState(null);
     useEffect(() => {
         if (!pid || !slug)
             return;
@@ -26,23 +27,32 @@ export function Paper() {
         const unsubRev = onSnapshot(query(reviewsRef, orderBy("created_at", "desc")), (snap) => setReviews(snap.docs.map((d) => ({ id: d.id, ...d.data() }))));
         return () => { unsubPaper(); unsubSec(); unsubRev(); };
     }, [pid, slug]);
-    useEffect(() => {
-        if (!pid || !slug || !paper)
+    const downloadManuscript = async () => {
+        if (!pid || !slug)
             return;
-        (async () => {
-            try {
-                const bytes = await getBytes(ref(storage, `projects/${pid}/papers/${slug}/manuscript.md`));
-                setManuscript(new TextDecoder().decode(bytes));
-            }
-            catch {
-                setManuscript("");
-            }
-        })();
-    }, [pid, slug, paper]);
+        setDownloading(true);
+        setDownloadError(null);
+        try {
+            const text = await downloadProjectBlobAsText(pid, `projects/${pid}/papers/${slug}/manuscript.md`);
+            const blob = new Blob([text], { type: "text/markdown" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `${slug}.md`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+        catch (err) {
+            setDownloadError(err.message);
+        }
+        finally {
+            setDownloading(false);
+        }
+    };
     if (!pid || !slug)
         return null;
     const openComments = reviews.filter((r) => r.status === "open" && r.source === "user");
-    return (_jsxs("div", { className: "space-y-6", children: [_jsxs("div", { children: [_jsxs(Link, { to: `/projects/${pid}/papers`, className: "-ml-3 inline-flex h-9 items-center rounded-md px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground", children: [_jsx(ArrowLeft, { className: "mr-2 h-4 w-4" }), " Back to project"] }), _jsx("h1", { className: "mt-2 text-2xl font-bold tracking-tight", children: paper?.title ?? slug }), _jsxs("p", { className: "text-sm text-muted-foreground", children: [paper?.journal ?? "no journal", " \u00B7", " ", _jsx(Badge, { variant: "secondary", className: "text-[10px]", children: paper?.status ?? "draft" })] })] }), _jsxs("div", { className: "grid gap-6 lg:grid-cols-[1fr_320px]", children: [_jsxs(Card, { children: [_jsxs(CardHeader, { children: [_jsx(CardTitle, { children: "Manuscript" }), _jsxs(CardDescription, { children: [sections.length, " sections \u00B7", " ", sections.reduce((s, x) => s + (x.word_count ?? 0), 0), " words"] })] }), _jsxs(CardContent, { children: [sections.map((s) => (_jsx(SectionView, { section: s, pid: pid, paperSlug: slug }, s.id))), !sections.length && manuscript && (_jsx("pre", { className: "whitespace-pre-wrap text-sm", children: manuscript }))] })] }), _jsxs("div", { className: "space-y-4", children: [_jsxs(Card, { children: [_jsxs(CardHeader, { children: [_jsxs(CardTitle, { className: "flex items-center gap-2 text-base", children: [_jsx(MessageSquare, { className: "h-4 w-4" }), " Comments", openComments.length > 0 && (_jsxs(Badge, { variant: "warning", className: "ml-auto", children: [openComments.length, " open"] }))] }), _jsx(CardDescription, { children: "Comments here are picked up by Claude Code on its next session." })] }), _jsx(CardContent, { children: _jsx(NewCommentBox, { pid: pid, paperSlug: slug }) })] }), reviews.map((r) => (_jsx(ReviewView, { review: r, pid: pid, paperSlug: slug }, r.id)))] })] })] }));
+    return (_jsxs("div", { className: "space-y-6", children: [_jsxs("div", { children: [_jsxs(Link, { to: `/projects/${pid}/papers`, className: "-ml-3 inline-flex h-9 items-center rounded-md px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground", children: [_jsx(ArrowLeft, { className: "mr-2 h-4 w-4" }), " Back to project"] }), _jsx("h1", { className: "mt-2 text-2xl font-bold tracking-tight", children: paper?.title ?? slug }), _jsxs("p", { className: "text-sm text-muted-foreground", children: [paper?.journal ?? "no journal", " \u00B7", " ", _jsx(Badge, { variant: "secondary", className: "text-[10px]", children: paper?.status ?? "draft" })] })] }), _jsxs("div", { className: "grid gap-6 lg:grid-cols-[1fr_320px]", children: [_jsxs(Card, { children: [_jsxs(CardHeader, { className: "flex flex-row items-start justify-between space-y-0", children: [_jsxs("div", { children: [_jsx(CardTitle, { children: "Manuscript" }), _jsxs(CardDescription, { children: [sections.length, " sections \u00B7", " ", sections.reduce((s, x) => s + (x.word_count ?? 0), 0), " words"] })] }), _jsxs(Button, { size: "sm", variant: "outline", onClick: downloadManuscript, disabled: downloading, children: [downloading ? (_jsx(Loader2, { className: "mr-2 h-4 w-4 animate-spin" })) : (_jsx(Download, { className: "mr-2 h-4 w-4" })), downloading ? "Downloading…" : "Download .md"] })] }), _jsxs(CardContent, { children: [sections.map((s) => (_jsx(SectionView, { section: s, pid: pid, paperSlug: slug }, s.id))), !sections.length && (_jsxs("p", { className: "text-sm italic text-muted-foreground", children: ["No sections yet. Create one from Claude Code with", " ", _jsx("code", { className: "bg-muted px-1 py-0.5 text-xs", children: "/paper-writing" }), "."] })), downloadError && (_jsx("p", { className: "mt-2 text-xs text-destructive", children: downloadError }))] })] }), _jsxs("div", { className: "space-y-4", children: [_jsxs(Card, { children: [_jsxs(CardHeader, { children: [_jsxs(CardTitle, { className: "flex items-center gap-2 text-base", children: [_jsx(MessageSquare, { className: "h-4 w-4" }), " Comments", openComments.length > 0 && (_jsxs(Badge, { variant: "warning", className: "ml-auto", children: [openComments.length, " open"] }))] }), _jsx(CardDescription, { children: "Comments here are picked up by Claude Code on its next session." })] }), _jsx(CardContent, { children: _jsx(NewCommentBox, { pid: pid, paperSlug: slug }) })] }), reviews.map((r) => (_jsx(ReviewView, { review: r, pid: pid, paperSlug: slug }, r.id)))] })] })] }));
 }
 function SectionView({ section, pid, paperSlug }) {
     const [showComment, setShowComment] = useState(false);

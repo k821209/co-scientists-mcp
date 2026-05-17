@@ -3,9 +3,11 @@ import { Link, useParams } from "react-router-dom";
 import {
   addDoc, collection, doc, onSnapshot, orderBy, query, updateDoc,
 } from "firebase/firestore";
-import { getBytes, ref } from "firebase/storage";
-import { ArrowLeft, MessageSquare, CheckCircle2, XCircle } from "lucide-react";
-import { db, storage } from "@/firebase";
+import {
+  ArrowLeft, MessageSquare, CheckCircle2, XCircle, Download, Loader2,
+} from "lucide-react";
+import { db } from "@/firebase";
+import { downloadProjectBlobAsText } from "@/projectAuth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -38,7 +40,8 @@ export function Paper() {
   const [paper, setPaper] = useState<Record<string, unknown> | null>(null);
   const [sections, setSections] = useState<Section[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
-  const [manuscript, setManuscript] = useState<string>("");
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!pid || !slug) return;
@@ -55,19 +58,28 @@ export function Paper() {
     return () => { unsubPaper(); unsubSec(); unsubRev(); };
   }, [pid, slug]);
 
-  useEffect(() => {
-    if (!pid || !slug || !paper) return;
-    (async () => {
-      try {
-        const bytes = await getBytes(
-          ref(storage, `projects/${pid}/papers/${slug}/manuscript.md`),
-        );
-        setManuscript(new TextDecoder().decode(bytes));
-      } catch {
-        setManuscript("");
-      }
-    })();
-  }, [pid, slug, paper]);
+  const downloadManuscript = async () => {
+    if (!pid || !slug) return;
+    setDownloading(true);
+    setDownloadError(null);
+    try {
+      const text = await downloadProjectBlobAsText(
+        pid,
+        `projects/${pid}/papers/${slug}/manuscript.md`,
+      );
+      const blob = new Blob([text], { type: "text/markdown" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${slug}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setDownloadError((err as Error).message);
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   if (!pid || !slug) return null;
 
@@ -95,19 +107,35 @@ export function Paper() {
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
         <Card>
-          <CardHeader>
-            <CardTitle>Manuscript</CardTitle>
-            <CardDescription>
-              {sections.length} sections ·{" "}
-              {sections.reduce((s, x) => s + (x.word_count ?? 0), 0)} words
-            </CardDescription>
+          <CardHeader className="flex flex-row items-start justify-between space-y-0">
+            <div>
+              <CardTitle>Manuscript</CardTitle>
+              <CardDescription>
+                {sections.length} sections ·{" "}
+                {sections.reduce((s, x) => s + (x.word_count ?? 0), 0)} words
+              </CardDescription>
+            </div>
+            <Button size="sm" variant="outline" onClick={downloadManuscript} disabled={downloading}>
+              {downloading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="mr-2 h-4 w-4" />
+              )}
+              {downloading ? "Downloading…" : "Download .md"}
+            </Button>
           </CardHeader>
           <CardContent>
             {sections.map((s) => (
               <SectionView key={s.id} section={s} pid={pid} paperSlug={slug} />
             ))}
-            {!sections.length && manuscript && (
-              <pre className="whitespace-pre-wrap text-sm">{manuscript}</pre>
+            {!sections.length && (
+              <p className="text-sm italic text-muted-foreground">
+                No sections yet. Create one from Claude Code with{" "}
+                <code className="bg-muted px-1 py-0.5 text-xs">/paper-writing</code>.
+              </p>
+            )}
+            {downloadError && (
+              <p className="mt-2 text-xs text-destructive">{downloadError}</p>
             )}
           </CardContent>
         </Card>
