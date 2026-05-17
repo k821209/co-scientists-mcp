@@ -108,10 +108,14 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
-    // ───── /admin_audit_log/{id} — write-only-from-server, read-admin ─────
+    // ───── /admin_audit_log/{id} — admin-write, admin-read, append-only ───
     match /admin_audit_log/{id} {
-      allow read:  if isAdmin();
-      allow write: if false;  // service account only
+      allow read: if isAdmin();
+      // Admin can create entries; admin_uid must match request.auth.uid so
+      // admins can't forge entries under each other's names.
+      allow create: if isAdmin()
+                    && request.resource.data.admin_uid == request.auth.uid;
+      allow update, delete: if false;  // append-only
     }
   }
 }
