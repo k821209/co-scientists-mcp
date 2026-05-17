@@ -33,6 +33,36 @@ function buildMcpJson(apiKey: string): string {
   );
 }
 
+function buildSetupScript(
+  projectSlug: string,
+  mcpJson: string,
+  claudeMd: string,
+): string {
+  // Unique heredoc markers so the embedded content can never collide.
+  const m1 = "CO_SCIENTIST_MCP_END_" + Math.random().toString(36).slice(2, 10).toUpperCase();
+  const m2 = "CO_SCIENTIST_CLAUDE_END_" + Math.random().toString(36).slice(2, 10).toUpperCase();
+  return `#!/usr/bin/env bash
+# co-scientist setup — drops .mcp.json + CLAUDE.md into the current directory.
+# Usage:
+#   cd /path/to/your/project
+#   bash setup-${projectSlug}.sh
+set -euo pipefail
+
+cat > .mcp.json <<'${m1}'
+${mcpJson}
+${m1}
+
+cat > CLAUDE.md <<'${m2}'
+${claudeMd}
+${m2}
+
+echo "✓ Wrote .mcp.json + CLAUDE.md to $(pwd)"
+echo ""
+echo "Next: run 'claude' in this directory."
+`;
+}
+
+
 function buildClaudeMd(name: string, description: string | undefined, pid: string): string {
   return `# co-scientist project: ${name}
 
@@ -116,6 +146,12 @@ export function ProjectSetup() {
   const apiKey = project?.api_key || "";
   const mcp = apiKey ? buildMcpJson(apiKey) : "";
   const claudeMd = project ? buildClaudeMd(project.name, project.description, pid) : "";
+  const projectSlug = project?.name
+    ? project.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+    : pid;
+  const setupScript = (apiKey && project)
+    ? buildSetupScript(projectSlug, mcp, claudeMd)
+    : "";
 
   const rotateKey = async () => {
     if (!confirm("Rotate API key? Any existing .mcp.json with the old key will stop working.")) return;
@@ -196,30 +232,46 @@ pip install -e ~/co-scientists-mcp/apps/local-mcp`} />
             </p>
           </Step>
 
-          <Step n={2} title="Drop these two files into your project directory">
+          <Step n={2} title="Set up the project directory (one command)">
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
                 <p className="flex-1 text-sm text-muted-foreground">
-                  <code className="text-xs">.mcp.json</code> — wires up the MCP with your API key.
-                  The MCP auto-exchanges the key for a project-scoped Firebase token, so no
-                  service-account JSON is needed.
+                  One script that drops <code className="text-xs">.mcp.json</code> +{" "}
+                  <code className="text-xs">CLAUDE.md</code> into the current directory.
+                  The MCP auto-exchanges your API key for a project-scoped Firebase token —
+                  no service-account JSON anywhere.
                 </p>
-                <Button size="sm" variant="outline" disabled={!apiKey}
-                        onClick={() => downloadFile(".mcp.json", mcp, "application/json")}>
-                  <Download className="mr-2 h-4 w-4" /> Download .mcp.json
+                <Button size="sm" disabled={!apiKey || !project}
+                        onClick={() =>
+                          downloadFile(`setup-${projectSlug}.sh`, setupScript, "text/x-shellscript")
+                        }>
+                  <Download className="mr-2 h-4 w-4" /> Download setup script
                 </Button>
               </div>
-              {apiKey && <CodeBlock value={mcp} />}
+              <CodeBlock value={`cd /path/to/your/project
+bash ~/Downloads/setup-${projectSlug}.sh`} />
 
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="flex-1 text-sm text-muted-foreground">
-                  <code className="text-xs">CLAUDE.md</code> — project-aware instructions Claude Code auto-loads
-                </p>
-                <Button size="sm" variant="outline" disabled={!project}
-                        onClick={() => downloadFile("CLAUDE.md", claudeMd, "text/markdown")}>
-                  <Download className="mr-2 h-4 w-4" /> Download CLAUDE.md
-                </Button>
-              </div>
+              <details className="rounded-md border bg-muted/30 p-3 text-xs">
+                <summary className="cursor-pointer text-muted-foreground">
+                  Or download the two files individually (inspect before using)
+                </summary>
+                <div className="mt-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <code className="text-xs">.mcp.json</code>
+                    <Button size="sm" variant="outline" disabled={!apiKey}
+                            onClick={() => downloadFile(".mcp.json", mcp, "application/json")}>
+                      <Download className="mr-2 h-4 w-4" /> Download .mcp.json
+                    </Button>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <code className="text-xs">CLAUDE.md</code>
+                    <Button size="sm" variant="outline" disabled={!project}
+                            onClick={() => downloadFile("CLAUDE.md", claudeMd, "text/markdown")}>
+                      <Download className="mr-2 h-4 w-4" /> Download CLAUDE.md
+                    </Button>
+                  </div>
+                </div>
+              </details>
             </div>
           </Step>
 
