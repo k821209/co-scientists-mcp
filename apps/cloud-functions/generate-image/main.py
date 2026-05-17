@@ -129,7 +129,10 @@ def _call_openai(prompt: str, aspect_ratio: str, model: str | None) -> bytes:
 
     Uses urllib (no SDK) to keep the function's deploy package small.
     """
-    api_key = os.environ.get("OPENAI_API_KEY")
+    # Secret Manager values frequently arrive with a trailing newline
+    # (`gcloud secrets create --data-file` reads file as-is). Strip
+    # whitespace so the value can't poison the Authorization header.
+    api_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY not set in Secret Manager")
     size = _OPENAI_SIZE_MAP.get(aspect_ratio, "1024x1024")
@@ -166,7 +169,7 @@ def _call_openai(prompt: str, aspect_ratio: str, model: str | None) -> bytes:
 def _call_gemini(prompt: str, aspect_ratio: str, model: str | None) -> bytes:
     """Optional fallback: Google Gemini image API. Requires GEMINI_API_KEY."""
     import google.generativeai as genai  # type: ignore
-    key = os.environ.get("GEMINI_API_KEY")
+    key = (os.environ.get("GEMINI_API_KEY") or "").strip()
     if not key:
         raise RuntimeError("GEMINI_API_KEY not set in Secret Manager")
     genai.configure(api_key=key)
