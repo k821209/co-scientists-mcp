@@ -11,3 +11,6 @@ DEFAULT_FIREBASE_WEB_API_KEY = "AIzaSyCap5WxY6br-vo-D0l6mIS7uohPxuROz4E"
 DEFAULT_EXCHANGE_URL_TEMPLATE = (
     "https://us-central1-{project_id}.cloudfunctions.net/exchange_key"
 )
+DEFAULT_GENERATE_IMAGE_URL_TEMPLATE = (
+    "https://us-central1-{project_id}.cloudfunctions.net/generate_image"
+)

@@ -47,12 +47,14 @@ def _build_api_key_state() -> State:
         exchange_api_key,
     )
     from .backends.firestore import FirestoreBackend
+    from .image_gen import CloudFunctionImageGenerator, LocalOpenAIImageGenerator
 
     from .constants import (
         DEFAULT_EXCHANGE_URL_TEMPLATE,
         DEFAULT_FIREBASE_PROJECT_ID,
         DEFAULT_FIREBASE_STORAGE_BUCKET,
         DEFAULT_FIREBASE_WEB_API_KEY,
+        DEFAULT_GENERATE_IMAGE_URL_TEMPLATE,
     )
 
     api_key = os.environ["CO_SCIENTIST_API_KEY"]
@@ -89,7 +91,28 @@ def _build_api_key_state() -> State:
         bucket_name=bucket,
         user_token_provider=auth_client.get_id_token,
     )
-    return State(project_id=project_id, owner_uid=owner_uid, backend=backend)
+
+    # 5. Image generator — default route is the Cloud Function (gpt-image-2,
+    #    Pro+ gating server-side). Free-plan users get a clean 403 from the
+    #    function. Power users can override with OPENAI_API_KEY in their
+    #    env to skip the gate (still bills them — direct OpenAI call).
+    image_gen = None
+    if os.environ.get("OPENAI_API_KEY"):
+        image_gen = LocalOpenAIImageGenerator(api_key=os.environ["OPENAI_API_KEY"])
+    else:
+        gen_image_url = os.environ.get(
+            "CO_SCIENTIST_GENERATE_IMAGE_URL",
+            DEFAULT_GENERATE_IMAGE_URL_TEMPLATE.format(project_id=fb_project),
+        )
+        image_gen = CloudFunctionImageGenerator(
+            function_url=gen_image_url,
+            get_id_token=auth_client.get_id_token,
+        )
+
+    return State(
+        project_id=project_id, owner_uid=owner_uid, backend=backend,
+        image_gen=image_gen,
+    )
 
 
 def _build_service_account_state() -> State:
