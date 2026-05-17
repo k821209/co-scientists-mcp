@@ -542,12 +542,12 @@ def build_mcp(state: State) -> FastMCP:
         figure_number: int | None = None,
         asset_filename: str | None = None,
         aspect_ratio: str = "1:1",
-        model: str = "gpt-image-1",
+        model: str = "gpt-image-2",
         caption: str | None = None,
     ) -> dict[str, Any]:
         """Generate an image via the configured ImageGenerator (local or cloud-fn).
 
-        Default backend (hosted service) is OpenAI gpt-image-1. Requires a
+        Default backend (hosted service) is OpenAI gpt-image-2. Requires a
         Pro+ subscription — the /generate_image Cloud Function refuses with
         403 for free-plan users.
 

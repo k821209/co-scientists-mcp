@@ -3,7 +3,7 @@
 Three production backends:
 - **LocalGeminiImageGenerator** — free tier, Google Gemini; uses the user's
   own GEMINI_API_KEY via google-generativeai.
-- **LocalOpenAIImageGenerator** — free tier, OpenAI gpt-image-1; uses the
+- **LocalOpenAIImageGenerator** — free tier, OpenAI gpt-image-2; uses the
   user's own OPENAI_API_KEY via the OpenAI REST API (no SDK dep).
 - **CloudFunctionImageGenerator** — subscribed tier; HTTPS POSTs to the
   Firebase Cloud Function at /generate_image, which validates the user's
@@ -29,7 +29,7 @@ class ImageGenerator(Protocol):
         *,
         prompt: str,
         aspect_ratio: str = "1:1",
-        model: str = "gpt-image-1",
+        model: str = "gpt-image-2",
     ) -> bytes:
         """Generate an image. Returns the PNG (or other format) bytes."""
         ...
@@ -75,11 +75,12 @@ class LocalGeminiImageGenerator:
 class LocalOpenAIImageGenerator:
     """Free-tier OpenAI: caller-supplied OPENAI_API_KEY, direct REST call.
 
-    Uses the OpenAI Images API (gpt-image-1 / dall-e-3). Returns raw PNG bytes.
-    Implemented with stdlib `urllib` to avoid an SDK dependency.
+    Uses the OpenAI Images API (gpt-image-2; same /v1/images/generations
+    endpoint as gpt-image-1). Returns raw PNG bytes. Implemented with stdlib
+    `urllib` to avoid an SDK dependency.
     """
 
-    # gpt-image-1 supported sizes (as of 2026-Q2). Map common aspect ratios.
+    # gpt-image-2 supported sizes (same as gpt-image-1). Map common aspect ratios.
     SIZE_MAP = {
         "1:1": "1024x1024",
         "square": "1024x1024",
@@ -93,7 +94,7 @@ class LocalOpenAIImageGenerator:
 
     URL = "https://api.openai.com/v1/images/generations"
 
-    def __init__(self, *, api_key: str, default_model: str = "gpt-image-1") -> None:
+    def __init__(self, *, api_key: str, default_model: str = "gpt-image-2") -> None:
         if not api_key:
             raise ValueError("api_key is required for LocalOpenAIImageGenerator")
         self._api_key = api_key
@@ -104,7 +105,7 @@ class LocalOpenAIImageGenerator:
         *,
         prompt: str,
         aspect_ratio: str = "1:1",
-        model: str = "gpt-image-1",
+        model: str = "gpt-image-2",
     ) -> bytes:
         import base64
         import json as _json
@@ -112,7 +113,7 @@ class LocalOpenAIImageGenerator:
         import urllib.request
 
         size = self.SIZE_MAP.get(aspect_ratio, "1024x1024")
-        # gpt-image-1 always returns b64_json (no response_format param needed).
+        # gpt-image-2 always returns b64_json (no response_format param needed).
         body = _json.dumps({
             "model": model or self._default_model,
             "prompt": prompt,
@@ -227,7 +228,7 @@ class FakeImageGenerator:
         *,
         prompt: str,
         aspect_ratio: str = "1:1",
-        model: str = "gpt-image-1",
+        model: str = "gpt-image-2",
     ) -> bytes:
         if self._quota_exceeded:
             raise QuotaExceeded("test-quota-exceeded")

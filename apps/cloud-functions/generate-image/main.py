@@ -6,7 +6,7 @@ Flow:
   1. Validates the Firebase ID token (request.auth.uid).
   2. Looks up /users/{uid}.plan_id; if 'free' or 'disabled', returns 403.
   3. Looks up monthly usage at /usage/{uid}/monthly/{YYYYMM}; if at limit, 429.
-  4. Calls the configured PROVIDER (default: openai/gpt-image-1; fallback: gemini)
+  4. Calls the configured PROVIDER (default: openai/gpt-image-2; fallback: gemini)
      with the server's API key from Secret Manager.
   5. Uploads PNG bytes to Cloud Storage at users/{uid}/generated/{yyyymm}/{id}.png.
   6. Atomically increments the usage counter.
@@ -125,7 +125,7 @@ _OPENAI_SIZE_MAP = {
 
 
 def _call_openai(prompt: str, aspect_ratio: str, model: str | None) -> bytes:
-    """Real OpenAI gpt-image-1 call. Returns PNG bytes.
+    """Real OpenAI gpt-image-2 call. Returns PNG bytes.
 
     Uses urllib (no SDK) to keep the function's deploy package small.
     """
@@ -134,7 +134,7 @@ def _call_openai(prompt: str, aspect_ratio: str, model: str | None) -> bytes:
         raise RuntimeError("OPENAI_API_KEY not set in Secret Manager")
     size = _OPENAI_SIZE_MAP.get(aspect_ratio, "1024x1024")
     body = _json.dumps({
-        "model": model or "gpt-image-1",
+        "model": model or "gpt-image-2",
         "prompt": prompt,
         "size": size,
         "n": 1,
