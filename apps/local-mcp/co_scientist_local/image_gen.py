@@ -1,12 +1,14 @@
 """Image-generation executor abstraction.
 
-Two production backends:
-- **LocalGeminiImageGenerator** — free tier; uses the user's own
-  GEMINI_API_KEY via google-generativeai. No quota for us to enforce.
+Three production backends:
+- **LocalGeminiImageGenerator** — free tier, Google Gemini; uses the user's
+  own GEMINI_API_KEY via google-generativeai.
+- **LocalOpenAIImageGenerator** — free tier, OpenAI gpt-image-1; uses the
+  user's own OPENAI_API_KEY via the OpenAI REST API (no SDK dep).
 - **CloudFunctionImageGenerator** — subscribed tier; HTTPS POSTs to the
   Firebase Cloud Function at /generate_image, which validates the user's
-  Firebase ID token, checks plan + monthly quota in Firestore, calls
-  Gemini with the server's key, increments usage, returns PNG bytes.
+  Firebase ID token, checks plan + monthly quota in Firestore, calls the
+  configured provider with the server's key, returns PNG bytes.
 
 Architecture note: this is the ONLY server-side AI surface in the system.
 Text/LLM agent work stays in Claude Code on the user's machine. See
@@ -70,8 +72,88 @@ class LocalGeminiImageGenerator:
         raise RuntimeError("no image bytes in Gemini response")
 
 
+class LocalOpenAIImageGenerator:
+    """Free-tier OpenAI: caller-supplied OPENAI_API_KEY, direct REST call.
+
+    Uses the OpenAI Images API (gpt-image-1 / dall-e-3). Returns raw PNG bytes.
+    Implemented with stdlib `urllib` to avoid an SDK dependency.
+    """
+
+    # gpt-image-1 supported sizes (as of 2026-Q2). Map common aspect ratios.
+    SIZE_MAP = {
+        "1:1": "1024x1024",
+        "square": "1024x1024",
+        "16:9": "1536x1024",
+        "3:2": "1536x1024",
+        "landscape": "1536x1024",
+        "9:16": "1024x1536",
+        "2:3": "1024x1536",
+        "portrait": "1024x1536",
+    }
+
+    URL = "https://api.openai.com/v1/images/generations"
+
+    def __init__(self, *, api_key: str, default_model: str = "gpt-image-1") -> None:
+        if not api_key:
+            raise ValueError("api_key is required for LocalOpenAIImageGenerator")
+        self._api_key = api_key
+        self._default_model = default_model
+
+    def generate(
+        self,
+        *,
+        prompt: str,
+        aspect_ratio: str = "1:1",
+        model: str = "gpt-image-1",
+    ) -> bytes:
+        import base64
+        import json as _json
+        import urllib.error
+        import urllib.request
+
+        size = self.SIZE_MAP.get(aspect_ratio, "1024x1024")
+        # gpt-image-1 always returns b64_json (no response_format param needed).
+        body = _json.dumps({
+            "model": model or self._default_model,
+            "prompt": prompt,
+            "size": size,
+            "n": 1,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            self.URL,
+            data=body,
+            headers={
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                payload = _json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode("utf-8", errors="replace")[:500]
+            raise RuntimeError(f"OpenAI HTTP {e.code}: {err_body}") from e
+
+        item = (payload.get("data") or [{}])[0]
+        if "b64_json" in item and item["b64_json"]:
+            return base64.b64decode(item["b64_json"])
+        if "url" in item and item["url"]:
+            # Some models return URL instead of inline bytes — fetch it.
+            with urllib.request.urlopen(item["url"], timeout=120) as r:
+                return r.read()
+        raise RuntimeError(f"OpenAI response had no image data: {payload!r}")
+
+
 class CloudFunctionImageGenerator:
-    """Subscribed-tier: HTTPS POST to the Firebase Cloud Function."""
+    """Subscribed-tier (Pro+): HTTPS POST to the Firebase Cloud Function
+    /generate_image. The function picks the provider (openai default, gemini
+    optional) — we just pass prompt + aspect ratio.
+
+    Raises:
+        QuotaExceeded — server returned 429 (monthly quota hit)
+        PermissionError — server returned 403 (free plan or disabled account)
+        RuntimeError — other transport / provider errors
+    """
 
     def __init__(
         self,
@@ -87,25 +169,41 @@ class CloudFunctionImageGenerator:
         *,
         prompt: str,
         aspect_ratio: str = "1:1",
-        model: str = "imagen-3",
+        model: str | None = None,
     ) -> bytes:
-        import requests  # type: ignore
+        import json as _json
+        import urllib.error
+        import urllib.request
+
         token = self._get_id_token()
-        r = requests.post(
+        payload: dict = {"prompt": prompt, "aspect_ratio": aspect_ratio}
+        if model:
+            payload["model"] = model
+
+        req = urllib.request.Request(
             self._url,
-            json={"prompt": prompt, "aspect_ratio": aspect_ratio, "model": model},
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=90,
+            data=_json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
         )
-        if r.status_code == 429:
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                return resp.read()
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode("utf-8", errors="replace")[:500]
             try:
-                detail = r.json()
-                msg = detail.get("message") or detail.get("error") or "quota exceeded"
+                detail = _json.loads(err_body)
             except Exception:
-                msg = "quota exceeded"
-            raise QuotaExceeded(msg)
-        r.raise_for_status()
-        return r.content
+                detail = {"error": err_body}
+            if e.code == 429:
+                msg = detail.get("message") or detail.get("error") or "quota exceeded"
+                raise QuotaExceeded(msg) from e
+            if e.code == 403:
+                msg = detail.get("error") or "forbidden"
+                raise PermissionError(msg) from e
+            raise RuntimeError(f"Cloud Function HTTP {e.code}: {err_body}") from e
 
 
 class FakeImageGenerator:

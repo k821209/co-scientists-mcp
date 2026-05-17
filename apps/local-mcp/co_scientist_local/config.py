@@ -32,7 +32,7 @@ REQUIRED_FIELDS = (
     "storage_bucket",
 )
 
-VALID_IMAGE_GEN_MODES = {"local", "cloud", "disabled"}
+VALID_IMAGE_GEN_MODES = {"local", "openai", "cloud", "disabled"}
 
 
 def load_config(path: str | pathlib.Path | None = None) -> dict:
@@ -57,6 +57,8 @@ def validate_config(cfg: dict) -> list[str]:
         )
     if mode == "local" and not cfg.get("gemini_api_key"):
         errors.append("image_gen_mode='local' requires gemini_api_key")
+    if mode == "openai" and not cfg.get("openai_api_key"):
+        errors.append("image_gen_mode='openai' requires openai_api_key")
     if mode == "cloud":
         urls = cfg.get("function_urls") or {}
         if not urls.get("generate_image"):
