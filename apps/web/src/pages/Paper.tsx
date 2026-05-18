@@ -354,11 +354,12 @@ export function Paper() {
           </div>
         )}
 
-        {references.length > 0 && (
-          <div className="lg:col-span-1">
-            <ReferencesCard pid={pid} slug={slug} references={references} cited={knownDois} />
-          </div>
-        )}
+        <div className="lg:col-span-1">
+          <ReferencesCard
+            pid={pid} slug={slug} references={references}
+            sections={sections} cited={knownDois}
+          />
+        </div>
 
         {activity.length > 0 && (
           <div className="lg:col-span-1">
@@ -627,18 +628,32 @@ function AnalysisRow({ pid, paperSlug, analysis }: {
 }
 
 
-function ReferencesCard({ pid, slug, references, cited }: {
+function ReferencesCard({ pid, slug, references, sections, cited }: {
   pid: string;
   slug: string;
   references: Reference[];
-  cited: ReadonlySet<string>;  // DOIs that appear in /references — same Set we use for badges
+  sections: Section[];
+  cited: ReadonlySet<string>;
 }) {
   const [syncOpen, setSyncOpen] = useState(false);
-  // Sort: alphabetical by citation_key (matches BibTeX export order)
   const sorted = [...references].sort((a, b) =>
     (a.citation_key || "").localeCompare(b.citation_key || ""),
   );
-  void cited; // currently every registered reference is "cited" by virtue of being registered
+  // Find inline {doi:...} citations in section bodies that aren't yet
+  // registered as references — counts as "to verify".
+  const inlineDois = useMemo(() => {
+    const found = new Set<string>();
+    const re = /\{doi:([^}\s]+)\}/gi;
+    for (const sec of sections) {
+      const body = sec.body || "";
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(body)) !== null) found.add(m[1].toLowerCase());
+    }
+    // Subtract DOIs already registered as references
+    for (const d of cited) found.delete(d.toLowerCase());
+    return found;
+  }, [sections, cited]);
+  const toVerifyCount = references.length + inlineDois.size;
 
   return (
     <Card>
@@ -647,23 +662,42 @@ function ReferencesCard({ pid, slug, references, cited }: {
           <BookOpen className="h-4 w-4" /> References
           <Badge variant="secondary" className="text-[10px]">
             {references.length}
+            {inlineDois.size > 0 && (
+              <span className="ml-1 text-amber-700">+{inlineDois.size}</span>
+            )}
           </Badge>
           <Button
             size="sm"
             variant="outline"
             className="ml-auto h-7 gap-1 text-xs"
             onClick={() => setSyncOpen(true)}
+            disabled={toVerifyCount === 0}
             title="Verify every DOI against CrossRef"
           >
             <RefreshCw className="h-3 w-3" /> Sync DOIs
           </Button>
         </CardTitle>
         <CardDescription>
-          Registered via{" "}
-          <code className="bg-muted px-1 py-0.5 text-[10px]">
-            mcp__co_scientist__add_reference_by_doi
-          </code>
-          . Sync runs CrossRef checks to catch hallucinated citations.
+          {references.length === 0 && inlineDois.size === 0 && (
+            <>No DOIs detected. Add references via{" "}
+              <code className="bg-muted px-1 py-0.5 text-[10px]">
+                add_reference_by_doi
+              </code>{" "}
+              or embed{" "}
+              <code className="bg-muted px-1 py-0.5 text-[10px]">{"{doi:…}"}</code>{" "}
+              in section text.
+            </>
+          )}
+          {references.length > 0 && inlineDois.size === 0 && (
+            <>Registered references. Sync runs CrossRef checks to catch hallucinations.</>
+          )}
+          {inlineDois.size > 0 && (
+            <>{inlineDois.size} inline{" "}
+              <code className="bg-muted px-1 py-0.5 text-[10px]">{"{doi:…}"}</code>{" "}
+              citation{inlineDois.size === 1 ? "" : "s"} not yet registered.
+              Sync verifies them and offers to register each.
+            </>
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -713,6 +747,7 @@ function ReferencesCard({ pid, slug, references, cited }: {
           pid={pid}
           slug={slug}
           references={references}
+          inlineDois={[...inlineDois]}
           onClose={() => setSyncOpen(false)}
         />
       )}

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { doc, deleteDoc, updateDoc } from "firebase/firestore";
-import { X, CheckCircle2, AlertTriangle, HelpCircle, Trash2, RefreshCw } from "lucide-react";
+import { doc, deleteDoc, setDoc, updateDoc } from "firebase/firestore";
+import {
+  X, CheckCircle2, AlertTriangle, HelpCircle, Trash2, RefreshCw, BookPlus,
+} from "lucide-react";
 import { db } from "@/firebase";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,23 +22,37 @@ interface Props {
   pid: string;
   slug: string;
   references: Reference[];
+  inlineDois?: string[];   // unregistered DOIs found in section bodies
   onClose: () => void;
 }
 
+/** A row can come from a registered reference doc or from an inline DOI
+ *  that hasn't been registered yet. The action set differs. */
+type Source =
+  | { kind: "ref"; ref: Reference }
+  | { kind: "inline"; doi: string };
+
 interface RowResult {
-  ref: Reference;
+  source: Source;
   verdict: Verdict;
 }
 
 /** Modal: sequentially verify every reference's DOI against CrossRef,
  *  optionally fill in missing fields from CrossRef, and let the user
  *  delete hallucinated DOIs or accept CrossRef's title on mismatches. */
-export function SyncDoisDialog({ pid, slug, references, onClose }: Props) {
+export function SyncDoisDialog({ pid, slug, references, inlineDois, onClose }: Props) {
   const [results, setResults] = useState<RowResult[]>([]);
   const [doneCount, setDoneCount] = useState(0);
   const [running, setRunning] = useState(true);
   const [filling, setFilling] = useState(true);
   const aborter = useRef<AbortController | null>(null);
+
+  // Build the queue: registered references first, then unregistered inline DOIs.
+  const queue: Source[] = [
+    ...references.map((ref): Source => ({ kind: "ref", ref })),
+    ...(inlineDois ?? []).map((doi): Source => ({ kind: "inline", doi })),
+  ];
+  const total = queue.length;
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -45,18 +61,21 @@ export function SyncDoisDialog({ pid, slug, references, onClose }: Props) {
 
     (async () => {
       const out: RowResult[] = [];
-      for (const ref of references) {
+      for (const source of queue) {
         if (cancelled) break;
-        const verdict = await verifyOne(ref.doi, ref.title ?? "", ctrl.signal);
-        out.push({ ref, verdict });
+        const doi = source.kind === "ref" ? source.ref.doi : source.doi;
+        const storedTitle = source.kind === "ref" ? (source.ref.title ?? "") : "";
+        const verdict = await verifyOne(doi, storedTitle, ctrl.signal);
+        out.push({ source, verdict });
         if (cancelled) break;
         setResults([...out]);
         setDoneCount(out.length);
-        // Auto-fill missing fields when we have CrossRef metadata
-        if (filling && (verdict.kind === "resolved" || verdict.kind === "title_mismatch")) {
-          await maybeFillMissingFields(pid, slug, ref, verdict.meta);
+        if (
+          filling && source.kind === "ref" &&
+          (verdict.kind === "resolved" || verdict.kind === "title_mismatch")
+        ) {
+          await maybeFillMissingFields(pid, slug, source.ref, verdict.meta);
         }
-        // Gentle pacing to be a good CrossRef citizen
         await sleep(150);
       }
       if (!cancelled) setRunning(false);
@@ -75,7 +94,6 @@ export function SyncDoisDialog({ pid, slug, references, onClose }: Props) {
     onClose();
   };
 
-  const total = references.length;
   const counts = countByKind(results);
 
   return (
@@ -126,8 +144,8 @@ export function SyncDoisDialog({ pid, slug, references, onClose }: Props) {
             </div>
           )}
           <div className="space-y-3">
-            {results.map((r) => (
-              <ResultRow key={r.ref.id} pid={pid} slug={slug} row={r} />
+            {results.map((r, i) => (
+              <ResultRow key={rowKey(r, i)} pid={pid} slug={slug} row={r} />
             ))}
           </div>
         </div>
@@ -154,11 +172,17 @@ export function SyncDoisDialog({ pid, slug, references, onClose }: Props) {
 }
 
 function ResultRow({ pid, slug, row }: { pid: string; slug: string; row: RowResult }) {
-  const { ref, verdict } = row;
+  const { source, verdict } = row;
   const [acted, setActed] = useState<string | null>(null);
 
+  const isInline = source.kind === "inline";
+  const doi = source.kind === "ref" ? source.ref.doi : source.doi;
+  const storedTitle = source.kind === "ref" ? source.ref.title : undefined;
+  const citationKey = source.kind === "ref" ? source.ref.citation_key : null;
+
   const acceptCrossrefTitle = async (meta: CrossrefMeta) => {
-    await updateDoc(refDoc(pid, slug, ref.id), {
+    if (source.kind !== "ref") return;
+    await updateDoc(refDoc(pid, slug, source.ref.id), {
       title: meta.title,
       journal: meta.journal,
       year: meta.year,
@@ -169,37 +193,63 @@ function ResultRow({ pid, slug, row }: { pid: string; slug: string; row: RowResu
   };
 
   const removeReference = async () => {
-    if (!confirm(`Delete reference '${ref.citation_key}'?`)) return;
-    await deleteDoc(refDoc(pid, slug, ref.id));
+    if (source.kind !== "ref") return;
+    if (!confirm(`Delete reference '${source.ref.citation_key}'?`)) return;
+    await deleteDoc(refDoc(pid, slug, source.ref.id));
     setActed("Deleted");
+  };
+
+  const registerAsReference = async (meta: CrossrefMeta) => {
+    const key = await deriveAvailableKey(pid, slug, meta);
+    const now = new Date().toISOString();
+    await setDoc(refDoc(pid, slug, key), {
+      citation_key: key,
+      title: meta.title,
+      authors: meta.authors,
+      journal: meta.journal,
+      year: meta.year,
+      doi: meta.doi,
+      pmid: null,
+      bibtex: null,
+      cited_in: [],
+      created_at: now,
+      updated_at: now,
+    });
+    setActed(`Registered as '${key}'`);
   };
 
   return (
     <div className="rounded-md border bg-card p-3">
       <div className="mb-1 flex flex-wrap items-center gap-2">
-        <code className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{ref.citation_key}</code>
+        {citationKey ? (
+          <code className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{citationKey}</code>
+        ) : (
+          <Badge variant="outline" className="text-[10px] text-amber-700">inline</Badge>
+        )}
         <KindBadge kind={verdict.kind} />
-        {ref.doi && (
+        {doi && (
           <a
-            href={`https://doi.org/${ref.doi}`}
+            href={`https://doi.org/${doi}`}
             target="_blank"
             rel="noreferrer"
             className="text-[10px] text-primary underline underline-offset-2"
           >
-            doi:{ref.doi}
+            doi:{doi}
           </a>
         )}
       </div>
-      {ref.title && (
-        <div className="text-xs text-muted-foreground">stored: {ref.title}</div>
+      {storedTitle && (
+        <div className="text-xs text-muted-foreground">stored: {storedTitle}</div>
       )}
-      {verdict.kind === "title_mismatch" && (
+      {(verdict.kind === "resolved" || verdict.kind === "title_mismatch") && (
         <div className="mt-1 text-xs">
           <span className="text-muted-foreground">CrossRef: </span>
           <span className="font-medium">{verdict.meta.title}</span>
-          <span className="ml-2 text-[10px] text-muted-foreground">
-            ({verdict.sharedWords} shared word{verdict.sharedWords === 1 ? "" : "s"})
-          </span>
+          {verdict.kind === "title_mismatch" && (
+            <span className="ml-2 text-[10px] text-muted-foreground">
+              ({verdict.sharedWords} shared word{verdict.sharedWords === 1 ? "" : "s"})
+            </span>
+          )}
         </div>
       )}
       {verdict.kind === "error" && (
@@ -207,12 +257,17 @@ function ResultRow({ pid, slug, row }: { pid: string; slug: string; row: RowResu
       )}
       {!acted && (
         <div className="mt-2 flex flex-wrap gap-2">
-          {verdict.kind === "title_mismatch" && (
+          {isInline && verdict.kind === "resolved" && (
+            <Button size="sm" onClick={() => registerAsReference(verdict.meta)}>
+              <BookPlus className="mr-1 h-3 w-3" /> Register as reference
+            </Button>
+          )}
+          {!isInline && verdict.kind === "title_mismatch" && (
             <Button size="sm" variant="outline" onClick={() => acceptCrossrefTitle(verdict.meta)}>
               Use CrossRef title
             </Button>
           )}
-          {(verdict.kind === "unresolved" || verdict.kind === "title_mismatch") && (
+          {!isInline && (verdict.kind === "unresolved" || verdict.kind === "title_mismatch") && (
             <Button
               size="sm"
               variant="outline"
@@ -229,6 +284,33 @@ function ResultRow({ pid, slug, row }: { pid: string; slug: string; row: RowResu
       )}
     </div>
   );
+}
+
+function rowKey(r: RowResult, i: number): string {
+  return r.source.kind === "ref" ? `ref:${r.source.ref.id}` : `inline:${r.source.doi}:${i}`;
+}
+
+async function deriveAvailableKey(pid: string, slug: string, meta: CrossrefMeta): Promise<string> {
+  const base = deriveBase(meta);
+  // Check Firestore for collisions; append a-z if needed.
+  const { getDoc } = await import("firebase/firestore");
+  let candidate = base;
+  for (const suffix of ["", ..."abcdefghijklmnopqrstuvwxyz"]) {
+    candidate = base + suffix;
+    const snap = await getDoc(refDoc(pid, slug, candidate));
+    if (!snap.exists()) return candidate;
+  }
+  throw new Error(`citation_key ${base} exhausted (a–z all taken)`);
+}
+
+function deriveBase(meta: CrossrefMeta): string {
+  if (meta.authors.length > 0 && meta.year) {
+    const surname = (meta.authors[0].split(/\s+/).pop() ?? "").toLowerCase();
+    const ascii = surname.replace(/[^a-z]/g, "");
+    if (ascii) return `${ascii}${meta.year}`;
+  }
+  const tail = (meta.doi.split("/").pop() ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return tail || "ref";
 }
 
 function refDoc(pid: string, slug: string, citationKey: string) {
