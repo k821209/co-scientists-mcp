@@ -306,34 +306,92 @@ def enrich_reference_from_doi(state: State, slug: str, citation_key: str) -> dic
     return state.backend.get_doc(path)
 
 
-def validate_references(state: State, slug: str) -> dict:
-    """Run CrossRef against every reference in a paper. Categorizes results
-    into resolved / unresolved / title_mismatch / missing_doi / errors, AND
-    persists each verdict to /papers/{slug}/verification_findings/{doi_safe}
-    so a future session (or the dashboard) can read what was found.
+def _extract_doi_contexts(state: State, slug: str) -> dict[str, list[dict]]:
+    """For each {doi:X} marker in this paper's section bodies, capture the
+    surrounding sentence as the agent's "claim" about that DOI.
 
-    Title-mismatch heuristic: if the stored title and CrossRef title share
-    fewer than 3 substantive words, flag for review (CrossRef title is
-    authoritative). This catches "right DOI, wrong title" hallucinations.
+    Returns {doi_lower: [{"section": key, "sentence": "..."}]}.
+
+    Used by validate_references to compare the manuscript's *intent* (the
+    sentence the agent wrote around the citation) against the CrossRef
+    title — catches the case where the DOI is real but the agent cited
+    an unrelated paper (the most common hallucination once auto-fill has
+    overwritten stored_title with CrossRef's truth).
+    """
+    from . import sections as _sections
+    contexts: dict[str, list[dict]] = {}
+    secs = _sections.list_sections(state, slug)
+    pattern = re.compile(r"\{doi:([^}\s]+)\}", re.IGNORECASE)
+    for sec in secs:
+        body = sec.get("body") or ""
+        if not body:
+            continue
+        for m in pattern.finditer(body):
+            doi = m.group(1).lower()
+            sentence = _sentence_around(body, m.start(), m.end())
+            contexts.setdefault(doi, []).append({
+                "section": sec.get("key", ""),
+                "sentence": sentence,
+            })
+    return contexts
+
+
+def _sentence_around(body: str, start: int, end: int) -> str:
+    """Extract the sentence containing positions [start, end)."""
+    # Walk backwards to sentence start
+    s = start
+    while s > 0 and body[s - 1] not in ".!?\n":
+        s -= 1
+    # Walk forwards to sentence end
+    e = end
+    while e < len(body) and body[e] not in ".!?\n":
+        e += 1
+    return body[s:e].strip()
+
+
+def validate_references(state: State, slug: str) -> dict:
+    """Run CrossRef against every reference in a paper and check citation
+    context. Categorizes results and persists each verdict to
+    /papers/{slug}/verification_findings/{doi_safe}.
+
+    Three independent checks per DOI:
+
+      1. **DOI resolves** — CrossRef returns the work. Failure → `unresolved`
+         (almost certainly a hallucinated DOI).
+      2. **Stored-title match** — `stored_title` (the reference doc's title
+         field) shares ≥3 substantive words with CrossRef title. Mismatch →
+         `title_mismatch`. NOTE: this check is useless after the dashboard
+         "Sync DOIs" button or any auto-fill has overwritten stored_title
+         with the CrossRef title (then they always match).
+      3. **Context match** — for each {doi:X} marker in section text, the
+         surrounding sentence shares ≥2 substantive words with CrossRef
+         title. Mismatch → `context_mismatch`. This catches "real DOI,
+         wrong paper for the context" hallucinations that survive (2).
+
+    Returns dict with keys: total, resolved, unresolved, title_mismatch,
+    context_mismatch, missing_doi, errors. A single DOI can appear in
+    BOTH title_mismatch and context_mismatch (independent signals).
     """
     # Local import to avoid circular dep
     from . import verification as _verification
 
-    refs = list_references(state, slug)
+    contexts = _extract_doi_contexts(state, slug)
     resolved: list[dict] = []
     unresolved: list[dict] = []
     missing_doi: list[dict] = []
     title_mismatch: list[dict] = []
+    context_mismatch: list[dict] = []
     errors: list[dict] = []
     now = now_iso()
+    # Track inline DOIs we still need to check (subtract registered ones).
+    inline_only = set(contexts.keys())
     for r in refs:
         key = r.get("citation_key", "")
-        doi = (r.get("doi") or "").strip()
+        doi = (r.get("doi") or "").strip().lower()
         if not doi:
             missing_doi.append({"citation_key": key, "title": r.get("title")})
-            # No DOI to identify the finding by — skip persistence (would
-            # collide for every untitled reference).
             continue
+        inline_only.discard(doi)
         try:
             meta = _fetch_crossref(doi)
         except DoiNotFound:
@@ -348,44 +406,153 @@ def validate_references(state: State, slug: str) -> dict:
             )
             continue
         except Exception as e:
-            entry = {"citation_key": key, "doi": doi, "error": str(e)}
-            errors.append(entry)
+            errors.append({"citation_key": key, "doi": doi, "error": str(e)})
             _write_finding(
                 state, slug, doi=doi, kind="error", source="registered_ref",
                 ref_citation_key=key, message=str(e), now=now,
                 verification=_verification,
             )
             continue
-        stored_title = (r.get("title") or "").lower()
-        crossref_title = (meta.get("title") or "").lower()
-        shared = _shared_words(stored_title, crossref_title)
+
+        crossref_title = meta.get("title") or ""
+        stored_title = r.get("title") or ""
+        shared_title = _shared_words(stored_title.lower(), crossref_title.lower())
+        ctxs = contexts.get(doi, [])
+
+        # Title-level check (existing, useless after auto-fill but kept for
+        # the case where the agent set a title and nothing has overwritten it)
+        title_problem = (shared_title < 3 and stored_title.strip())
+
+        # Context-level check. Each ctx contributes a shared count; we take
+        # the BEST one — if any single mention of this DOI has a plausible
+        # context, don't flag. Skip contexts that are too sparse to compare
+        # (e.g. "(reviewed in {doi:X})" has no signal either way).
+        checkable_ctxs = [c for c in ctxs if _substantive_word_count(c["sentence"]) >= 3]
+        best_ctx_shared = -1
+        worst_ctx = None
+        for ctx in checkable_ctxs:
+            n = _shared_words(ctx["sentence"].lower(), crossref_title.lower())
+            if n > best_ctx_shared:
+                best_ctx_shared = n
+            if worst_ctx is None or n < _shared_words(worst_ctx["sentence"].lower(), crossref_title.lower()):
+                worst_ctx = ctx
+        context_problem = (checkable_ctxs and best_ctx_shared < 2)
+
         entry = {
             "citation_key": key, "doi": doi,
             "stored_title": r.get("title"),
-            "crossref_title": meta.get("title"),
-            "shared_title_words": shared,
+            "crossref_title": crossref_title,
+            "shared_title_words": shared_title,
+            "context_count": len(ctxs),
+            "best_context_shared_words": best_ctx_shared if ctxs else None,
+            "worst_context": worst_ctx,
         }
-        if shared < 3 and stored_title:
+
+        if title_problem:
             title_mismatch.append(entry)
             _write_finding(
                 state, slug, doi=doi, kind="title_mismatch", source="registered_ref",
                 ref_citation_key=key, stored_title=r.get("title"),
-                crossref_title=meta.get("title"), shared_words=shared, now=now,
+                crossref_title=crossref_title, shared_words=shared_title, now=now,
+                verification=_verification,
+            )
+        if context_problem:
+            context_mismatch.append(entry)
+            _write_finding(
+                state, slug, doi=doi, kind="context_mismatch", source="registered_ref",
+                ref_citation_key=key, stored_title=r.get("title"),
+                crossref_title=crossref_title,
+                shared_words=best_ctx_shared, now=now,
+                context_sentence=(worst_ctx or {}).get("sentence"),
+                context_section=(worst_ctx or {}).get("section"),
+                verification=_verification,
+            )
+        if not title_problem and not context_problem:
+            resolved.append(entry)
+            _write_finding(
+                state, slug, doi=doi, kind="resolved", source="registered_ref",
+                ref_citation_key=key, stored_title=r.get("title"),
+                crossref_title=crossref_title, shared_words=shared_title, now=now,
+                verification=_verification,
+            )
+
+    # Inline-only DOIs (in section text but not registered as references)
+    for doi in inline_only:
+        try:
+            meta = _fetch_crossref(doi)
+        except DoiNotFound:
+            unresolved.append({"citation_key": None, "doi": doi, "stored_title": None})
+            _write_finding(
+                state, slug, doi=doi, kind="unresolved", source="inline",
+                now=now, verification=_verification,
+            )
+            continue
+        except Exception as e:
+            errors.append({"citation_key": None, "doi": doi, "error": str(e)})
+            _write_finding(
+                state, slug, doi=doi, kind="error", source="inline",
+                message=str(e), now=now, verification=_verification,
+            )
+            continue
+        crossref_title = meta.get("title") or ""
+        ctxs = contexts[doi]
+        checkable = [c for c in ctxs if _substantive_word_count(c["sentence"]) >= 3]
+        if not checkable:
+            # Sparse contexts — record as resolved but flag for human review
+            resolved.append({
+                "citation_key": None, "doi": doi,
+                "stored_title": None, "crossref_title": crossref_title,
+                "shared_title_words": None,
+                "context_count": len(ctxs),
+                "best_context_shared_words": None,
+                "worst_context": None,
+                "note": "context too sparse to check",
+            })
+            _write_finding(
+                state, slug, doi=doi, kind="resolved", source="inline",
+                crossref_title=crossref_title, now=now,
+                verification=_verification,
+            )
+            continue
+        best = max(
+            _shared_words(c["sentence"].lower(), crossref_title.lower())
+            for c in checkable
+        )
+        worst = min(
+            checkable,
+            key=lambda c: _shared_words(c["sentence"].lower(), crossref_title.lower()),
+        )
+        entry = {
+            "citation_key": None, "doi": doi,
+            "stored_title": None, "crossref_title": crossref_title,
+            "shared_title_words": None,
+            "context_count": len(ctxs),
+            "best_context_shared_words": best,
+            "worst_context": worst,
+        }
+        if best < 2:
+            context_mismatch.append(entry)
+            _write_finding(
+                state, slug, doi=doi, kind="context_mismatch", source="inline",
+                crossref_title=crossref_title, shared_words=best, now=now,
+                context_sentence=worst["sentence"],
+                context_section=worst["section"],
                 verification=_verification,
             )
         else:
             resolved.append(entry)
             _write_finding(
-                state, slug, doi=doi, kind="resolved", source="registered_ref",
-                ref_citation_key=key, stored_title=r.get("title"),
-                crossref_title=meta.get("title"), shared_words=shared, now=now,
+                state, slug, doi=doi, kind="resolved", source="inline",
+                crossref_title=crossref_title, shared_words=best, now=now,
                 verification=_verification,
             )
+
     return {
-        "total": len(refs),
+        "total": len(refs) + len(inline_only),
         "resolved": resolved,
         "unresolved": unresolved,
-        "title_mismatch": title_mismatch,
+        "title_mismatch": title_mismatch,        # often empty after auto-fill
+        "context_mismatch": context_mismatch,    # the real hallucination catcher
         "missing_doi": missing_doi,
         "errors": errors,
     }
@@ -399,6 +566,8 @@ def _write_finding(
     crossref_title: str | None = None,
     shared_words: int | None = None,
     message: str | None = None,
+    context_sentence: str | None = None,
+    context_section: str | None = None,
     now: str,
     verification,
 ) -> None:
@@ -421,6 +590,10 @@ def _write_finding(
         payload["shared_words"] = shared_words
     if message is not None:
         payload["message"] = message
+    if context_sentence is not None:
+        payload["context_sentence"] = context_sentence
+    if context_section is not None:
+        payload["context_section"] = context_section
     state.backend.set_doc(
         verification._finding_doc_path(state, slug, doc_id),
         payload,
@@ -439,3 +612,12 @@ def _shared_words(a: str, b: str) -> int:
     def words(s: str) -> set[str]:
         return {w for w in re.findall(r"[a-z]+", s) if w not in _STOPWORDS and len(w) > 2}
     return len(words(a) & words(b))
+
+
+def _substantive_word_count(s: str) -> int:
+    """How many substantive (non-stopword, ≥3-char) ASCII words a string has.
+    Used as a 'is this context even checkable?' gate."""
+    return len({
+        w for w in re.findall(r"[a-z]+", s.lower())
+        if w not in _STOPWORDS and len(w) > 2
+    })

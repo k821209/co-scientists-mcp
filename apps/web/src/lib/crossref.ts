@@ -89,28 +89,96 @@ export function sharedTitleWords(a: string, b: string): number {
   return n;
 }
 
+export function substantiveWordCount(s: string): number {
+  return new Set(
+    (s.toLowerCase().match(/[a-z]+/g) ?? []).filter(
+      (w) => w.length > 2 && !STOPWORDS.has(w),
+    ),
+  ).size;
+}
+
+/** Extract the sentence around a {doi:X} marker in section text. */
+export function sentenceAround(body: string, start: number, end: number): string {
+  let s = start;
+  while (s > 0 && !".!?\n".includes(body[s - 1])) s--;
+  let e = end;
+  while (e < body.length && !".!?\n".includes(body[e])) e++;
+  return body.slice(s, e).trim();
+}
+
+/** Scan section bodies for {doi:X} markers, return {doi: [{section, sentence}]}. */
+export function extractDoiContexts(
+  sections: Array<{ key?: string; body?: string }>,
+): Map<string, Array<{ section: string; sentence: string }>> {
+  const contexts = new Map<string, Array<{ section: string; sentence: string }>>();
+  const pattern = /\{doi:([^}\s]+)\}/gi;
+  for (const sec of sections) {
+    const body = sec.body || "";
+    if (!body) continue;
+    let m: RegExpExecArray | null;
+    while ((m = pattern.exec(body)) !== null) {
+      const doi = m[1].toLowerCase();
+      const sentence = sentenceAround(body, m.index, m.index + m[0].length);
+      const arr = contexts.get(doi) ?? [];
+      arr.push({ section: sec.key ?? "", sentence });
+      contexts.set(doi, arr);
+    }
+  }
+  return contexts;
+}
+
 // ─── high-level verdict per reference ──────────────────────────────────────
+export interface DoiContext { section: string; sentence: string }
+
 export type Verdict =
-  | { kind: "resolved"; meta: CrossrefMeta; sharedWords: number }
-  | { kind: "unresolved"; doi: string }                       // hallucinated
+  | { kind: "resolved"; meta: CrossrefMeta; sharedWords: number; contextShared?: number }
+  | { kind: "unresolved"; doi: string }
   | { kind: "title_mismatch"; meta: CrossrefMeta; sharedWords: number; storedTitle: string }
+  | { kind: "context_mismatch"; meta: CrossrefMeta; sharedWords: number; worstContext: DoiContext }
   | { kind: "missing_doi" }
   | { kind: "error"; message: string };
 
 export async function verifyOne(
   doi: string | null | undefined,
   storedTitle: string,
+  contexts: DoiContext[],
   signal?: AbortSignal,
 ): Promise<Verdict> {
   const d = (doi ?? "").trim();
   if (!d) return { kind: "missing_doi" };
   try {
     const meta = await fetchCrossref(d, signal);
-    const shared = sharedTitleWords(storedTitle ?? "", meta.title);
-    if ((storedTitle ?? "").trim() && shared < 3) {
-      return { kind: "title_mismatch", meta, sharedWords: shared, storedTitle };
+    const titleShared = sharedTitleWords(storedTitle ?? "", meta.title);
+
+    // Context check — find the best-matching ctx, gate on substantive
+    // word count so "(reviewed in {doi:X})" doesn't false-positive.
+    const checkable = contexts.filter(
+      (c) => substantiveWordCount(c.sentence) >= 3,
+    );
+    let bestCtxShared = -1;
+    let worstCtx: DoiContext | null = null;
+    for (const c of checkable) {
+      const n = sharedTitleWords(c.sentence, meta.title);
+      if (n > bestCtxShared) bestCtxShared = n;
+      if (worstCtx === null ||
+          n < sharedTitleWords(worstCtx.sentence, meta.title)) {
+        worstCtx = c;
+      }
     }
-    return { kind: "resolved", meta, sharedWords: shared };
+
+    // Context mismatch is the LOUDEST signal — preferred verdict when it fires.
+    if (checkable.length > 0 && bestCtxShared < 2 && worstCtx) {
+      return {
+        kind: "context_mismatch", meta, sharedWords: bestCtxShared, worstContext: worstCtx,
+      };
+    }
+    if ((storedTitle ?? "").trim() && titleShared < 3) {
+      return { kind: "title_mismatch", meta, sharedWords: titleShared, storedTitle };
+    }
+    return {
+      kind: "resolved", meta, sharedWords: titleShared,
+      contextShared: bestCtxShared >= 0 ? bestCtxShared : undefined,
+    };
   } catch (e) {
     if (e instanceof DoiNotFound) return { kind: "unresolved", doi: d };
     return { kind: "error", message: (e as Error).message };

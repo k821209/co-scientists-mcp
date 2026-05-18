@@ -22,15 +22,43 @@ and use 150ms inter-request pacing.
 
 | Kind | Meaning | Action |
 | ---- | ------- | ------ |
-| `resolved`        | DOI exists, stored title shares ≥3 substantive words with CrossRef's title | None — citation is fine |
-| `unresolved`      | CrossRef returns 404                           | **HALLUCINATION** — delete or replace |
-| `title_mismatch`  | DOI exists but stored title doesn't match CrossRef's (likely wrong paper cited for the DOI) | Accept CrossRef title or delete |
-| `missing_doi`     | Reference has no DOI field                     | Add a DOI, then re-verify       |
-| `error`           | Transient (network, 5xx)                       | Retry later                     |
+| `resolved`        | DOI resolves, all checks pass                          | None — citation is fine |
+| `unresolved`      | CrossRef returns 404                                  | **HALLUCINATION** — delete or replace |
+| `title_mismatch`  | Stored title doesn't match CrossRef's. Mostly useful BEFORE the first sync; auto-fill makes them equal afterward. | Accept CrossRef title or delete |
+| `context_mismatch`| Surrounding sentence around `{doi:X}` in section text shares <2 substantive words with CrossRef title. **THE primary hallucination catcher.** Survives auto-fill. | Delete reference, or correct the DOI |
+| `missing_doi`     | Reference has no DOI field                             | Add a DOI, then re-verify       |
+| `error`           | Transient (network, 5xx)                               | Retry later                     |
 
-Title comparison: lowercases, strips stopwords, counts shared substantive
-words ≥3 char. ≥3 shared = match. The `_shared_words()` helper lives in
-both `tools/references.py` (Python) and `lib/crossref.ts` (TypeScript).
+### Why two mismatch categories
+
+`title_mismatch` is structurally weak. It compares the `title` field of
+the reference doc against CrossRef's title. As soon as the user runs
+"Sync DOIs" (or `enrich_reference_from_doi`), the `title` field is
+overwritten with CrossRef's truth — and stays equal forever after.
+
+`context_mismatch` is the real defense. It scans every `{doi:X}` marker
+in section bodies, extracts the surrounding sentence, and compares
+**that sentence** against the CrossRef title. The agent wrote the
+surrounding sentence based on what it BELIEVED the paper was about;
+auto-fill can't retroactively rewrite the manuscript text. If the agent
+hallucinated a citation (real DOI assigned to an unrelated paper), the
+surrounding sentence reveals the intent.
+
+Heuristic: ≥2 substantive words shared between context sentence and
+CrossRef title = OK. Below threshold = mismatch.
+
+### Caveats
+
+- **Korean / non-Latin text** — the shared-words check uses `[a-z]+`
+  regex, so it can't compare e.g. Korean manuscript context against an
+  English CrossRef title. Will always trigger `context_mismatch` (false
+  positive). Workaround: keep manuscript text in English.
+- **Sparse contexts** — sentences like "(reviewed in {doi:X})" have <3
+  substantive words and are skipped from the check (would always false-
+  positive). The DOI still counts as resolved if the DOI itself resolves.
+- **Cross-paper citation** — citing a foundational paper from a slightly
+  different domain ("Drawing on Mendel's work {doi:…}" with a CrossRef
+  title containing "pea hybrids") may share few words. Manual review.
 
 ## Persistence: `verification_findings/`
 
@@ -113,13 +141,15 @@ Guide v2026-05-18c instructs every session to call
 
 A `{doi:10.1234/example}` pattern in section text isn't a registered
 reference — there's no `references/{key}` doc — but it's still subject
-to hallucination. The dashboard scans section bodies for the pattern,
-subtracts already-registered DOIs, and queues the remainder for
-verification with `source: "inline"`.
+to hallucination AND is the source of the context check above.
 
-The MCP's `validate_references()` doesn't currently scan inline DOIs (it
-only iterates `references/` collection). Adding this is a one-line change
-in `references.py` if needed — for now the workflow is: agent inserts
-inline DOIs while writing, then later registers them via
-`add_reference_by_doi` (which automatically verifies) before the manuscript
-is considered done.
+Both entry points scan section bodies for the pattern:
+- **Dashboard**: subtracts already-registered DOIs, queues the remainder
+  with `source: "inline"`. Per-row "Register as reference" action.
+- **MCP `validate_references()`**: scans all section bodies, builds a
+  `doi → [{section, sentence}]` map, runs the context check for every
+  DOI it encounters (registered AND inline-only), persists the same
+  finding docs.
+
+The context map IS the source of truth for what the agent intended at
+write time — it's the only verification signal that survives auto-fill.

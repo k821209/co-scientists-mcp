@@ -10,7 +10,7 @@ only) and refers the agent here on every session start.
 """
 from __future__ import annotations
 
-GUIDE_VERSION = "2026-05-18c"
+GUIDE_VERSION = "2026-05-18d"
 
 
 def render_guide() -> str:
@@ -56,9 +56,20 @@ DOIs CrossRef can't find (404 → almost always a hallucinated citation).
 
 After writing or revising sections, run
 `mcp__co_scientist__validate_references(slug)` to bulk-verify every
-DOI against CrossRef. The verdict is persisted to
-`/papers/{{slug}}/verification_findings/` so a future session (or the
-user via the dashboard's "Sync DOIs" button) reads the same record.
+DOI against CrossRef. Three independent checks per DOI:
+
+1. **DOI resolves** — fails → `unresolved` (hallucinated DOI).
+2. **Stored-title match** — fails → `title_mismatch`. **Becomes useless
+   after auto-fill** (which overwrites stored_title with CrossRef's title),
+   so don't rely on this alone.
+3. **Context match** — for every `{{doi:X}}` marker in section bodies,
+   the surrounding sentence is compared against CrossRef title.
+   Fails → `context_mismatch` (real DOI but wrong paper for the
+   manuscript's claim — THE hallucination catcher).
+
+The verdict is persisted to `/papers/{{slug}}/verification_findings/`
+so a future session (or the user via the dashboard's "Sync DOIs"
+button) reads the same record.
 
 **On every session start, also call**
 `mcp__co_scientist__list_verification_findings(slug)` for each paper.

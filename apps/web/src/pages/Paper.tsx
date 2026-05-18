@@ -102,13 +102,15 @@ interface ActivityEntry {
 interface Finding {
   id: string;
   doi: string;
-  kind: "resolved" | "unresolved" | "title_mismatch" | "missing_doi" | "error";
+  kind: "resolved" | "unresolved" | "title_mismatch" | "context_mismatch" | "missing_doi" | "error";
   source: "registered_ref" | "inline";
   ref_citation_key?: string;
   stored_title?: string;
   crossref_title?: string;
   shared_words?: number;
   message?: string;
+  context_sentence?: string;
+  context_section?: string;
   detected_at?: string;
   acknowledged?: boolean;
 }
@@ -784,6 +786,7 @@ function ReferencesCard({ pid, slug, references, sections, cited, findings }: {
           slug={slug}
           references={references}
           inlineDois={[...inlineDois]}
+          sections={sections}
           onClose={() => setSyncOpen(false)}
         />
       )}
