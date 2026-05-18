@@ -17,8 +17,9 @@ interface Props {
 interface SelectionInfo {
   text: string;
   sectionKey: string;
-  x: number;  // viewport-relative anchor (mouse release point)
-  y: number;
+  x: number;  // viewport-relative anchor X (drag-start point)
+  y: number;  // viewport-relative selection top (or bottom if flipBelow)
+  flipBelow: boolean;
 }
 
 /** Listens for text selection inside section bodies. Pops up a small
@@ -33,8 +34,15 @@ export function SelectionBubble({
   const [submitting, setSubmitting] = useState(false);
   const composingRef = useRef(composing);
   composingRef.current = composing;
+  // Captures where the drag started, so we can anchor the bubble there
+  // even when the user drags downward and mouseup is far from where their
+  // attention was when they pressed down.
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
+    function onMouseDown(e: MouseEvent) {
+      dragStartRef.current = { x: e.clientX, y: e.clientY };
+    }
     function onMouseUp(e: MouseEvent) {
       // Don't interfere if click is inside our own UI.
       const target = e.target as HTMLElement | null;
@@ -58,20 +66,24 @@ export function SelectionBubble({
         return;
       }
       const sectionKey = (sectionEl as HTMLElement).dataset.sectionKey || "";
-      // Anchor to the mouse release point (most predictable). Fall back
-      // to selection's last client rect for touch / keyboard selection
-      // where event coords aren't available.
-      let x = e.clientX;
-      let y = e.clientY;
-      if (!x && !y) {
-        const rects = selection.getRangeAt(0).getClientRects();
-        const last = rects[rects.length - 1];
-        if (last) {
-          x = last.right;
-          y = last.top;
-        }
-      }
-      setSel({ text, sectionKey, x, y });
+      // Anchor strategy:
+      //   - X: horizontal start of the drag (where the user's eye was
+      //     when they began the selection). Falls back to the first
+      //     selection rect's left if dragStart is unavailable.
+      //   - Y: top of the selection's FIRST client rect — the visual top
+      //     of the selected text — so the bubble appears above the
+      //     selection regardless of drag direction.
+      const rects = selection.getRangeAt(0).getClientRects();
+      const firstRect = rects[0];
+      const lastRect = rects[rects.length - 1];
+      const start = dragStartRef.current;
+      let x = start?.x ?? firstRect?.left ?? e.clientX;
+      let y = firstRect?.top ?? e.clientY;
+      // If selection's top is too close to the viewport top, flip the
+      // bubble to BELOW the selection's bottom edge.
+      const flipBelow = y < 60;
+      if (flipBelow && lastRect) y = lastRect.bottom;
+      setSel({ text, sectionKey, x, y, flipBelow });
     }
 
     function onScroll() {
@@ -80,9 +92,11 @@ export function SelectionBubble({
       if (!composingRef.current) setSel(null);
     }
 
+    document.addEventListener("mousedown", onMouseDown);
     document.addEventListener("mouseup", onMouseUp);
     document.addEventListener("scroll", onScroll, true);
     return () => {
+      document.removeEventListener("mousedown", onMouseDown);
       document.removeEventListener("mouseup", onMouseUp);
       document.removeEventListener("scroll", onScroll, true);
     };
@@ -95,10 +109,14 @@ export function SelectionBubble({
     setSel(null);
   };
 
-  // Position the bubble above-left of the mouse release point, clamped
-  // to viewport. Width-aware so it doesn't clip off-screen on mobile.
+  // sel.y is selection's visual top (or bottom if flipBelow).
+  // sel.x is the drag-start X — bubble centers on that horizontally.
   const bubbleApproxWidth = composing ? 360 : 220;
-  const top = Math.max(8, sel.y - 46);
+  const bubbleApproxHeight = composing ? 200 : 36;
+  const gap = 8;
+  const top = sel.flipBelow
+    ? Math.min(window.innerHeight - bubbleApproxHeight - 8, sel.y + gap)
+    : Math.max(8, sel.y - bubbleApproxHeight - gap);
   const left = Math.max(
     8,
     Math.min(sel.x - bubbleApproxWidth / 2, window.innerWidth - bubbleApproxWidth - 8),
