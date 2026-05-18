@@ -128,20 +128,23 @@ export function extractDoiContexts(
 }
 
 // ─── high-level verdict per reference ──────────────────────────────────────
+// Browser sync deliberately checks ONLY DOI existence (cheap, fast). Context
+// verification is left to Claude Code via the validate_references MCP tool —
+// the agent has the manuscript context loaded and can do a deeper check.
+// The two checks are stored as independent flags on the finding doc so the
+// dashboard can render two ribbons per reference: DOI ✓ and Context ✓.
 export interface DoiContext { section: string; sentence: string }
 
 export type Verdict =
-  | { kind: "resolved"; meta: CrossrefMeta; sharedWords: number; contextShared?: number }
-  | { kind: "unresolved"; doi: string }
+  | { kind: "resolved"; meta: CrossrefMeta; sharedWords: number }   // DOI verified
+  | { kind: "unresolved"; doi: string }                              // DOI 404
   | { kind: "title_mismatch"; meta: CrossrefMeta; sharedWords: number; storedTitle: string }
-  | { kind: "context_mismatch"; meta: CrossrefMeta; sharedWords: number; worstContext: DoiContext }
   | { kind: "missing_doi" }
   | { kind: "error"; message: string };
 
 export async function verifyOne(
   doi: string | null | undefined,
   storedTitle: string,
-  contexts: DoiContext[],
   signal?: AbortSignal,
 ): Promise<Verdict> {
   const d = (doi ?? "").trim();
@@ -149,36 +152,10 @@ export async function verifyOne(
   try {
     const meta = await fetchCrossref(d, signal);
     const titleShared = sharedTitleWords(storedTitle ?? "", meta.title);
-
-    // Context check — find the best-matching ctx, gate on substantive
-    // word count so "(reviewed in {doi:X})" doesn't false-positive.
-    const checkable = contexts.filter(
-      (c) => substantiveWordCount(c.sentence) >= 3,
-    );
-    let bestCtxShared = -1;
-    let worstCtx: DoiContext | null = null;
-    for (const c of checkable) {
-      const n = sharedTitleWords(c.sentence, meta.title);
-      if (n > bestCtxShared) bestCtxShared = n;
-      if (worstCtx === null ||
-          n < sharedTitleWords(worstCtx.sentence, meta.title)) {
-        worstCtx = c;
-      }
-    }
-
-    // Context mismatch is the LOUDEST signal — preferred verdict when it fires.
-    if (checkable.length > 0 && bestCtxShared < 2 && worstCtx) {
-      return {
-        kind: "context_mismatch", meta, sharedWords: bestCtxShared, worstContext: worstCtx,
-      };
-    }
     if ((storedTitle ?? "").trim() && titleShared < 3) {
       return { kind: "title_mismatch", meta, sharedWords: titleShared, storedTitle };
     }
-    return {
-      kind: "resolved", meta, sharedWords: titleShared,
-      contextShared: bestCtxShared >= 0 ? bestCtxShared : undefined,
-    };
+    return { kind: "resolved", meta, sharedWords: titleShared };
   } catch (e) {
     if (e instanceof DoiNotFound) return { kind: "unresolved", doi: d };
     return { kind: "error", message: (e as Error).message };

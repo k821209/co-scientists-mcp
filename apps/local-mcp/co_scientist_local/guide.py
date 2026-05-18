@@ -10,7 +10,7 @@ only) and refers the agent here on every session start.
 """
 from __future__ import annotations
 
-GUIDE_VERSION = "2026-05-18d"
+GUIDE_VERSION = "2026-05-18e"
 
 
 def render_guide() -> str:
@@ -54,22 +54,31 @@ Inline DOI: `{{doi:10.1234/example}}`. References auto-managed via
 authors, journal, year from CrossRef so you never invent them. Refuses
 DOIs CrossRef can't find (404 → almost always a hallucinated citation).
 
-After writing or revising sections, run
-`mcp__co_scientist__validate_references(slug)` to bulk-verify every
-DOI against CrossRef. Three independent checks per DOI:
+Two-axis verification model:
 
-1. **DOI resolves** — fails → `unresolved` (hallucinated DOI).
-2. **Stored-title match** — fails → `title_mismatch`. **Becomes useless
-   after auto-fill** (which overwrites stored_title with CrossRef's title),
-   so don't rely on this alone.
-3. **Context match** — for every `{{doi:X}}` marker in section bodies,
-   the surrounding sentence is compared against CrossRef title.
-   Fails → `context_mismatch` (real DOI but wrong paper for the
-   manuscript's claim — THE hallucination catcher).
+  - **DOI axis** (set by the dashboard's "Sync DOIs" button OR by
+    `validate_references`): does CrossRef know this DOI? Cheap, fast.
+  - **Context axis** (set ONLY by `validate_references`): does the
+    surrounding sentence around `{{doi:X}}` in section text match the
+    cited paper's CrossRef title? Catches real-DOI-wrong-paper
+    hallucinations that survive any title auto-fill.
 
-The verdict is persisted to `/papers/{{slug}}/verification_findings/`
-so a future session (or the user via the dashboard's "Sync DOIs"
-button) reads the same record.
+A reference is trusted only when BOTH axes are verified. The dashboard
+shows two ribbons per reference (`✓ DOI` and `✓ Context`); both green
+= safe to keep.
+
+Workflow:
+
+1. User clicks "Sync DOIs" in dashboard → DOI ribbons settle (✓ or ✗).
+2. Agent runs `mcp__co_scientist__validate_references(slug)` →
+   context ribbons settle.
+3. Anything with a ✗ ribbon gets fixed (delete bad ref / replace with
+   real DOI via `add_reference_by_doi`).
+4. `mcp__co_scientist__acknowledge_finding(slug, doi, note="...")` to
+   mark each handled.
+
+Per-DOI finding doc keys: `doi_verified` (bool|null), `doi_checked_by`
+('sync'|'agent'), `context_verified` (bool|null), `context_checked_by`.
 
 **On every session start, also call**
 `mcp__co_scientist__list_verification_findings(slug)` for each paper.

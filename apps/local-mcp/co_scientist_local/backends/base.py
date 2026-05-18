@@ -32,6 +32,12 @@ class Backend(Protocol):
         """Create-or-replace the doc at `path` with `data`."""
         ...
 
+    def set_doc_merge(self, path: str, data: dict) -> None:
+        """Create-or-merge: existing fields not present in `data` are kept."""
+        cur = self.get_doc(path) or {}
+        cur.update(data)
+        self.set_doc(path, cur)
+
     def update_doc(self, path: str, fields: dict) -> None:
         """Merge `fields` into the existing doc at `path`. Raises NotFound."""
         ...

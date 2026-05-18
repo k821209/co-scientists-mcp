@@ -198,6 +198,9 @@ class FirestoreBackend(Backend):
     def set_doc(self, path: str, data: dict) -> None:
         self._db.document(path).set(data)
 
+    def set_doc_merge(self, path: str, data: dict) -> None:
+        self._db.document(path).set(data, merge=True)
+
     def update_doc(self, path: str, fields: dict) -> None:
         from google.api_core import exceptions as gax_exc
         try:

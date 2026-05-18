@@ -383,8 +383,85 @@ def validate_references(state: State, slug: str) -> dict:
     context_mismatch: list[dict] = []
     errors: list[dict] = []
     now = now_iso()
-    # Track inline DOIs we still need to check (subtract registered ones).
     inline_only = set(contexts.keys())
+
+    def _resolve(doi, *, registered, key=None, stored_title=None):
+        """Verify one DOI (existence + context). Mutates the buckets above.
+        Writes a SINGLE finding doc with both verification axes."""
+        nonlocal resolved, unresolved, missing_doi, title_mismatch, context_mismatch, errors
+        source = "registered_ref" if registered else "inline"
+        try:
+            meta = _fetch_crossref(doi)
+        except DoiNotFound:
+            unresolved.append({"citation_key": key, "doi": doi, "stored_title": stored_title})
+            _write_finding(
+                state, slug, doi=doi, kind="unresolved", source=source,
+                ref_citation_key=key, stored_title=stored_title,
+                doi_verified=False, now=now, verification=_verification,
+            )
+            return
+        except Exception as e:
+            errors.append({"citation_key": key, "doi": doi, "error": str(e)})
+            _write_finding(
+                state, slug, doi=doi, kind="error", source=source,
+                ref_citation_key=key, message=str(e),
+                now=now, verification=_verification,
+            )
+            return
+
+        crossref_title = meta.get("title") or ""
+        # Title check (only meaningful for registered refs where agent set a title)
+        shared_title = _shared_words((stored_title or "").lower(), crossref_title.lower())
+        title_problem = registered and bool(stored_title and stored_title.strip()) and shared_title < 3
+        # Context check
+        ctxs = contexts.get(doi, [])
+        checkable = [c for c in ctxs if _substantive_word_count(c["sentence"]) >= 3]
+        if checkable:
+            best = max(
+                _shared_words(c["sentence"].lower(), crossref_title.lower())
+                for c in checkable
+            )
+            worst = min(
+                checkable,
+                key=lambda c: _shared_words(c["sentence"].lower(), crossref_title.lower()),
+            )
+            context_verified = best >= 2
+        else:
+            best = None
+            worst = None
+            context_verified = None  # can't check — leave for human review
+
+        entry = {
+            "citation_key": key, "doi": doi,
+            "stored_title": stored_title,
+            "crossref_title": crossref_title,
+            "shared_title_words": shared_title if registered else None,
+            "context_count": len(ctxs),
+            "best_context_shared_words": best,
+            "worst_context": worst,
+            "doi_verified": True,
+            "context_verified": context_verified,
+        }
+        # Bucket according to the dominant problem (context > title > resolved)
+        if context_verified is False:
+            context_mismatch.append(entry)
+            kind = "context_mismatch"
+        elif title_problem:
+            title_mismatch.append(entry)
+            kind = "title_mismatch"
+        else:
+            resolved.append(entry)
+            kind = "resolved"
+        _write_finding(
+            state, slug, doi=doi, kind=kind, source=source,
+            ref_citation_key=key, stored_title=stored_title,
+            crossref_title=crossref_title, shared_words=best if best is not None else shared_title,
+            context_sentence=(worst or {}).get("sentence") if worst else None,
+            context_section=(worst or {}).get("section") if worst else None,
+            doi_verified=True, context_verified=context_verified,
+            now=now, verification=_verification,
+        )
+
     for r in refs:
         key = r.get("citation_key", "")
         doi = (r.get("doi") or "").strip().lower()
@@ -392,166 +469,16 @@ def validate_references(state: State, slug: str) -> dict:
             missing_doi.append({"citation_key": key, "title": r.get("title")})
             continue
         inline_only.discard(doi)
-        try:
-            meta = _fetch_crossref(doi)
-        except DoiNotFound:
-            entry = {
-                "citation_key": key, "doi": doi, "stored_title": r.get("title"),
-            }
-            unresolved.append(entry)
-            _write_finding(
-                state, slug, doi=doi, kind="unresolved", source="registered_ref",
-                ref_citation_key=key, stored_title=r.get("title"), now=now,
-                verification=_verification,
-            )
-            continue
-        except Exception as e:
-            errors.append({"citation_key": key, "doi": doi, "error": str(e)})
-            _write_finding(
-                state, slug, doi=doi, kind="error", source="registered_ref",
-                ref_citation_key=key, message=str(e), now=now,
-                verification=_verification,
-            )
-            continue
+        _resolve(doi, registered=True, key=key, stored_title=r.get("title"))
 
-        crossref_title = meta.get("title") or ""
-        stored_title = r.get("title") or ""
-        shared_title = _shared_words(stored_title.lower(), crossref_title.lower())
-        ctxs = contexts.get(doi, [])
-
-        # Title-level check (existing, useless after auto-fill but kept for
-        # the case where the agent set a title and nothing has overwritten it)
-        title_problem = (shared_title < 3 and stored_title.strip())
-
-        # Context-level check. Each ctx contributes a shared count; we take
-        # the BEST one — if any single mention of this DOI has a plausible
-        # context, don't flag. Skip contexts that are too sparse to compare
-        # (e.g. "(reviewed in {doi:X})" has no signal either way).
-        checkable_ctxs = [c for c in ctxs if _substantive_word_count(c["sentence"]) >= 3]
-        best_ctx_shared = -1
-        worst_ctx = None
-        for ctx in checkable_ctxs:
-            n = _shared_words(ctx["sentence"].lower(), crossref_title.lower())
-            if n > best_ctx_shared:
-                best_ctx_shared = n
-            if worst_ctx is None or n < _shared_words(worst_ctx["sentence"].lower(), crossref_title.lower()):
-                worst_ctx = ctx
-        context_problem = (checkable_ctxs and best_ctx_shared < 2)
-
-        entry = {
-            "citation_key": key, "doi": doi,
-            "stored_title": r.get("title"),
-            "crossref_title": crossref_title,
-            "shared_title_words": shared_title,
-            "context_count": len(ctxs),
-            "best_context_shared_words": best_ctx_shared if ctxs else None,
-            "worst_context": worst_ctx,
-        }
-
-        if title_problem:
-            title_mismatch.append(entry)
-            _write_finding(
-                state, slug, doi=doi, kind="title_mismatch", source="registered_ref",
-                ref_citation_key=key, stored_title=r.get("title"),
-                crossref_title=crossref_title, shared_words=shared_title, now=now,
-                verification=_verification,
-            )
-        if context_problem:
-            context_mismatch.append(entry)
-            _write_finding(
-                state, slug, doi=doi, kind="context_mismatch", source="registered_ref",
-                ref_citation_key=key, stored_title=r.get("title"),
-                crossref_title=crossref_title,
-                shared_words=best_ctx_shared, now=now,
-                context_sentence=(worst_ctx or {}).get("sentence"),
-                context_section=(worst_ctx or {}).get("section"),
-                verification=_verification,
-            )
-        if not title_problem and not context_problem:
-            resolved.append(entry)
-            _write_finding(
-                state, slug, doi=doi, kind="resolved", source="registered_ref",
-                ref_citation_key=key, stored_title=r.get("title"),
-                crossref_title=crossref_title, shared_words=shared_title, now=now,
-                verification=_verification,
-            )
-
-    # Inline-only DOIs (in section text but not registered as references)
     for doi in inline_only:
-        try:
-            meta = _fetch_crossref(doi)
-        except DoiNotFound:
-            unresolved.append({"citation_key": None, "doi": doi, "stored_title": None})
-            _write_finding(
-                state, slug, doi=doi, kind="unresolved", source="inline",
-                now=now, verification=_verification,
-            )
-            continue
-        except Exception as e:
-            errors.append({"citation_key": None, "doi": doi, "error": str(e)})
-            _write_finding(
-                state, slug, doi=doi, kind="error", source="inline",
-                message=str(e), now=now, verification=_verification,
-            )
-            continue
-        crossref_title = meta.get("title") or ""
-        ctxs = contexts[doi]
-        checkable = [c for c in ctxs if _substantive_word_count(c["sentence"]) >= 3]
-        if not checkable:
-            # Sparse contexts — record as resolved but flag for human review
-            resolved.append({
-                "citation_key": None, "doi": doi,
-                "stored_title": None, "crossref_title": crossref_title,
-                "shared_title_words": None,
-                "context_count": len(ctxs),
-                "best_context_shared_words": None,
-                "worst_context": None,
-                "note": "context too sparse to check",
-            })
-            _write_finding(
-                state, slug, doi=doi, kind="resolved", source="inline",
-                crossref_title=crossref_title, now=now,
-                verification=_verification,
-            )
-            continue
-        best = max(
-            _shared_words(c["sentence"].lower(), crossref_title.lower())
-            for c in checkable
-        )
-        worst = min(
-            checkable,
-            key=lambda c: _shared_words(c["sentence"].lower(), crossref_title.lower()),
-        )
-        entry = {
-            "citation_key": None, "doi": doi,
-            "stored_title": None, "crossref_title": crossref_title,
-            "shared_title_words": None,
-            "context_count": len(ctxs),
-            "best_context_shared_words": best,
-            "worst_context": worst,
-        }
-        if best < 2:
-            context_mismatch.append(entry)
-            _write_finding(
-                state, slug, doi=doi, kind="context_mismatch", source="inline",
-                crossref_title=crossref_title, shared_words=best, now=now,
-                context_sentence=worst["sentence"],
-                context_section=worst["section"],
-                verification=_verification,
-            )
-        else:
-            resolved.append(entry)
-            _write_finding(
-                state, slug, doi=doi, kind="resolved", source="inline",
-                crossref_title=crossref_title, shared_words=best, now=now,
-                verification=_verification,
-            )
+        _resolve(doi, registered=False)
 
     return {
         "total": len(refs) + len(inline_only),
         "resolved": resolved,
         "unresolved": unresolved,
-        "title_mismatch": title_mismatch,        # often empty after auto-fill
+        "title_mismatch": title_mismatch,        # legacy axis — auto-fill kills it
         "context_mismatch": context_mismatch,    # the real hallucination catcher
         "missing_doi": missing_doi,
         "errors": errors,
@@ -568,10 +495,17 @@ def _write_finding(
     message: str | None = None,
     context_sentence: str | None = None,
     context_section: str | None = None,
+    doi_verified: bool | None = None,
+    context_verified: bool | None = None,
     now: str,
     verification,
 ) -> None:
-    """Persist one verification verdict as a Firestore doc."""
+    """Persist one verification verdict as a Firestore doc.
+
+    Two independent axes (`doi_verified`, `context_verified`) get set in the
+    same doc but tagged with who set them and when. set_doc uses merge=True
+    so the browser's DOI-only sync and the MCP's context check coexist.
+    """
     doc_id = verification._doi_safe_id(doi)
     payload = {
         "doi": doi.lower(),
@@ -594,7 +528,15 @@ def _write_finding(
         payload["context_sentence"] = context_sentence
     if context_section is not None:
         payload["context_section"] = context_section
-    state.backend.set_doc(
+    if doi_verified is not None:
+        payload["doi_verified"] = doi_verified
+        payload["doi_checked_at"] = now
+        payload["doi_checked_by"] = "agent"
+    if context_verified is not None:
+        payload["context_verified"] = context_verified
+        payload["context_checked_at"] = now
+        payload["context_checked_by"] = "agent"
+    state.backend.set_doc_merge(
         verification._finding_doc_path(state, slug, doc_id),
         payload,
     )

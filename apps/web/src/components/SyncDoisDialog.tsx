@@ -7,8 +7,8 @@ import { db } from "@/firebase";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  verifyOne, extractDoiContexts,
-  type Verdict, type CrossrefMeta, type DoiContext,
+  verifyOne,
+  type Verdict, type CrossrefMeta,
 } from "@/lib/crossref";
 
 interface Reference {
@@ -26,7 +26,6 @@ interface Props {
   slug: string;
   references: Reference[];
   inlineDois?: string[];   // unregistered DOIs found in section bodies
-  sections?: Array<{ key?: string; body?: string }>;  // for context extraction
   onClose: () => void;
 }
 
@@ -45,9 +44,8 @@ interface RowResult {
  *  optionally fill in missing fields from CrossRef, and let the user
  *  delete hallucinated DOIs or accept CrossRef's title on mismatches. */
 export function SyncDoisDialog({
-  pid, slug, references, inlineDois, sections = [], onClose,
+  pid, slug, references, inlineDois, onClose,
 }: Props) {
-  const contexts = extractDoiContexts(sections);
   const [results, setResults] = useState<RowResult[]>([]);
   const [doneCount, setDoneCount] = useState(0);
   const [running, setRunning] = useState(true);
@@ -72,8 +70,7 @@ export function SyncDoisDialog({
         if (cancelled) break;
         const doi = source.kind === "ref" ? source.ref.doi : source.doi;
         const storedTitle = source.kind === "ref" ? (source.ref.title ?? "") : "";
-        const ctxs: DoiContext[] = (doi && contexts.get(doi.toLowerCase())) || [];
-        const verdict = await verifyOne(doi, storedTitle, ctxs, ctrl.signal);
+        const verdict = await verifyOne(doi, storedTitle, ctrl.signal);
         out.push({ source, verdict });
         if (cancelled) break;
         setResults([...out]);
@@ -142,7 +139,6 @@ export function SyncDoisDialog({
         <div className="flex flex-wrap gap-2 border-b px-4 py-2 text-xs">
           <SummaryPill kind="resolved" count={counts.resolved} />
           <SummaryPill kind="unresolved" count={counts.unresolved} />
-          <SummaryPill kind="context_mismatch" count={counts.context_mismatch} />
           <SummaryPill kind="title_mismatch" count={counts.title_mismatch} />
           <SummaryPill kind="missing_doi" count={counts.missing_doi} />
           {counts.error > 0 && <SummaryPill kind="error" count={counts.error} />}
@@ -266,29 +262,15 @@ function ResultRow({ pid, slug, row }: { pid: string; slug: string; row: RowResu
       {storedTitle && (
         <div className="text-xs text-muted-foreground">stored: {storedTitle}</div>
       )}
-      {(verdict.kind === "resolved" ||
-        verdict.kind === "title_mismatch" ||
-        verdict.kind === "context_mismatch") && (
+      {(verdict.kind === "resolved" || verdict.kind === "title_mismatch") && (
         <div className="mt-1 text-xs">
           <span className="text-muted-foreground">CrossRef: </span>
           <span className="font-medium">{verdict.meta.title}</span>
-          {verdict.kind !== "resolved" && (
+          {verdict.kind === "title_mismatch" && (
             <span className="ml-2 text-[10px] text-muted-foreground">
               ({verdict.sharedWords} shared word{verdict.sharedWords === 1 ? "" : "s"})
             </span>
           )}
-        </div>
-      )}
-      {verdict.kind === "context_mismatch" && (
-        <div className="mt-2 rounded border-l-2 border-amber-400 bg-amber-50 p-2 text-[11px] leading-snug text-amber-900 dark:bg-amber-900/20 dark:text-amber-200">
-          <div className="text-[10px] uppercase tracking-wide text-amber-700">
-            Manuscript context ({verdict.worstContext.section})
-          </div>
-          <div className="italic">"{verdict.worstContext.sentence}"</div>
-          <div className="mt-1 text-[10px]">
-            The context above and the CrossRef title share fewer than 2
-            substantive words — likely a real DOI cited for the wrong paper.
-          </div>
         </div>
       )}
       {verdict.kind === "error" && (
@@ -307,9 +289,7 @@ function ResultRow({ pid, slug, row }: { pid: string; slug: string; row: RowResu
             </Button>
           )}
           {!isInline && (
-            verdict.kind === "unresolved" ||
-            verdict.kind === "title_mismatch" ||
-            verdict.kind === "context_mismatch"
+            verdict.kind === "unresolved" || verdict.kind === "title_mismatch"
           ) && (
             <Button
               size="sm"
@@ -373,10 +353,21 @@ async function writeFinding(
 ): Promise<void> {
   const doi = source.kind === "ref" ? source.ref.doi : source.doi;
   if (!doi) return;  // nothing to key on
+  // Browser sync only owns the DOI-existence axis. Don't touch
+  // context_verified — that's the agent's domain.
+  let doi_verified: boolean | null = null;
+  if (verdict.kind === "resolved" || verdict.kind === "title_mismatch") {
+    doi_verified = true;   // CrossRef returned the work
+  } else if (verdict.kind === "unresolved") {
+    doi_verified = false;  // CrossRef 404
+  }
   const payload: Record<string, unknown> = {
     doi: doi.toLowerCase(),
     kind: verdict.kind,
     source: source.kind === "ref" ? "registered_ref" : "inline",
+    doi_verified,
+    doi_checked_at: new Date().toISOString(),
+    doi_checked_by: "sync",
     detected_at: new Date().toISOString(),
     acknowledged: false,
   };
@@ -384,21 +375,13 @@ async function writeFinding(
     payload.ref_citation_key = source.ref.citation_key;
     if (source.ref.title) payload.stored_title = source.ref.title;
   }
-  if (
-    verdict.kind === "resolved" ||
-    verdict.kind === "title_mismatch" ||
-    verdict.kind === "context_mismatch"
-  ) {
+  if (verdict.kind === "resolved" || verdict.kind === "title_mismatch") {
     payload.crossref_title = verdict.meta.title;
     payload.shared_words = verdict.sharedWords;
     if (verdict.kind === "title_mismatch") payload.stored_title = verdict.storedTitle;
-    if (verdict.kind === "context_mismatch") {
-      payload.context_sentence = verdict.worstContext.sentence;
-      payload.context_section = verdict.worstContext.section;
-    }
   }
   if (verdict.kind === "error") payload.message = verdict.message;
-  await setDoc(findingDoc(pid, slug, doi), payload);
+  await setDoc(findingDoc(pid, slug, doi), payload, { merge: true });
 }
 
 async function maybeFillMissingFields(
@@ -421,7 +404,7 @@ async function maybeFillMissingFields(
 function countByKind(rows: RowResult[]) {
   const counts = {
     resolved: 0, unresolved: 0, title_mismatch: 0,
-    context_mismatch: 0, missing_doi: 0, error: 0,
+    missing_doi: 0, error: 0,
   };
   for (const r of rows) counts[r.verdict.kind]++;
   return counts;
@@ -431,7 +414,6 @@ function SummaryPill({ kind, count }: { kind: keyof ReturnType<typeof countByKin
   const styles: Record<typeof kind, string> = {
     resolved: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
     unresolved: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300",
-    context_mismatch: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300",
     title_mismatch: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300",
     missing_doi: "bg-muted text-muted-foreground",
     error: "bg-orange-100 text-orange-800",
@@ -450,17 +432,15 @@ function KindBadge({ kind, bare }: { kind: Verdict["kind"]; bare?: boolean }) {
     : kind === "title_mismatch" ? AlertTriangle
     : HelpCircle;
   const label =
-    kind === "resolved" ? "verified"
+    kind === "resolved" ? "DOI verified"
     : kind === "unresolved" ? "hallucinated"
     : kind === "title_mismatch" ? "title mismatch"
-    : kind === "context_mismatch" ? "wrong paper"
     : kind === "missing_doi" ? "no DOI"
     : "error";
   const color =
     kind === "resolved" ? "text-green-700"
     : kind === "unresolved" ? "text-red-700"
     : kind === "title_mismatch" ? "text-amber-700"
-    : kind === "context_mismatch" ? "text-red-700"
     : "text-muted-foreground";
   if (bare) return <Icon className={`h-3 w-3 ${color}`} />;
   return (

@@ -1,7 +1,16 @@
 # DOI verification (hallucination check)
 
-Two entry points, one Firestore audit log. Either client (agent in Claude
-Code, or human in the dashboard) can run a check; both see the same record.
+Two independent verification axes per citation, set by two different
+clients, stored on the same Firestore finding doc:
+
+| Axis | Set by | What it checks | Cost |
+| ---- | ------ | -------------- | ---- |
+| `doi_verified`     | Browser **Sync DOIs** button, or `validate_references` | Does CrossRef know this DOI? | Cheap (one HTTP) |
+| `context_verified` | MCP `validate_references` only                       | Does the manuscript sentence around `{doi:X}` match the paper? | Cheap but needs section text loaded |
+
+A reference is **trusted only when both are `true`**. The dashboard
+shows two ribbons per reference (`✓ DOI` / `✓ Context`); a `?` ribbon
+means that axis hasn't been checked yet.
 
 ## Why
 

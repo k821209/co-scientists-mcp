@@ -111,6 +111,12 @@ interface Finding {
   message?: string;
   context_sentence?: string;
   context_section?: string;
+  doi_verified?: boolean | null;
+  doi_checked_at?: string;
+  doi_checked_by?: "sync" | "agent";
+  context_verified?: boolean | null;
+  context_checked_at?: string;
+  context_checked_by?: "sync" | "agent";
   detected_at?: string;
   acknowledged?: boolean;
 }
@@ -652,6 +658,57 @@ function AnalysisRow({ pid, paperSlug, analysis }: {
 }
 
 
+function VerificationRibbons({ finding }: { finding?: Finding }) {
+  const doi = finding?.doi_verified;
+  const ctx = finding?.context_verified;
+  return (
+    <div className="flex items-center gap-1">
+      <Ribbon
+        label="DOI"
+        state={doi === true ? "ok" : doi === false ? "bad" : "unknown"}
+        title={
+          doi === true ? "CrossRef found this DOI"
+          : doi === false ? "CrossRef returned 404 — hallucinated DOI"
+          : "DOI not yet verified — click Sync DOIs"
+        }
+      />
+      <Ribbon
+        label="Context"
+        state={ctx === true ? "ok" : ctx === false ? "bad" : "unknown"}
+        title={
+          ctx === true ? "Manuscript context matches the cited paper"
+          : ctx === false ? "Manuscript context doesn't match the cited paper (likely a real DOI on the wrong paper)"
+          : "Context not yet verified — run validate_references() in Claude Code"
+        }
+      />
+    </div>
+  );
+}
+
+function Ribbon({ label, state, title }: {
+  label: string;
+  state: "ok" | "bad" | "unknown";
+  title: string;
+}) {
+  const styles =
+    state === "ok"
+      ? "border-green-300 bg-green-50 text-green-700"
+    : state === "bad"
+      ? "border-red-300 bg-red-50 text-red-700"
+      : "border-muted text-muted-foreground";
+  const mark = state === "ok" ? "✓" : state === "bad" ? "✗" : "?";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0 text-[9px] font-medium ${styles}`}
+      title={title}
+    >
+      <span>{mark}</span>
+      <span>{label}</span>
+    </span>
+  );
+}
+
+
 function ReferencesCard({ pid, slug, references, sections, cited, findings }: {
   pid: string;
   slug: string;
@@ -664,6 +721,11 @@ function ReferencesCard({ pid, slug, references, sections, cited, findings }: {
     () => findings.filter((f) => !f.acknowledged && f.kind !== "resolved"),
     [findings],
   );
+  const findingByDoi = useMemo(() => {
+    const m = new Map<string, Finding>();
+    for (const f of findings) if (f.doi) m.set(f.doi.toLowerCase(), f);
+    return m;
+  }, [findings]);
   const [syncOpen, setSyncOpen] = useState(false);
   const sorted = [...references].sort((a, b) =>
     (a.citation_key || "").localeCompare(b.citation_key || ""),
@@ -716,26 +778,14 @@ function ReferencesCard({ pid, slug, references, sections, cited, findings }: {
           </Button>
         </CardTitle>
         <CardDescription>
-          {references.length === 0 && inlineDois.size === 0 && (
-            <>No DOIs detected. Add references via{" "}
-              <code className="bg-muted px-1 py-0.5 text-[10px]">
-                add_reference_by_doi
-              </code>{" "}
-              or embed{" "}
-              <code className="bg-muted px-1 py-0.5 text-[10px]">{"{doi:…}"}</code>{" "}
-              in section text.
-            </>
-          )}
-          {references.length > 0 && inlineDois.size === 0 && (
-            <>Registered references. Sync runs CrossRef checks to catch hallucinations.</>
-          )}
-          {inlineDois.size > 0 && (
-            <>{inlineDois.size} inline{" "}
-              <code className="bg-muted px-1 py-0.5 text-[10px]">{"{doi:…}"}</code>{" "}
-              citation{inlineDois.size === 1 ? "" : "s"} not yet registered.
-              Sync verifies them and offers to register each.
-            </>
-          )}
+          Two verifications per citation:{" "}
+          <span className="font-medium">DOI</span> (Sync DOIs button —
+          CrossRef existence) and{" "}
+          <span className="font-medium">Context</span> (
+          <code className="bg-muted px-1 py-0.5 text-[10px]">
+            validate_references
+          </code>{" "}
+          in Claude Code — manuscript semantics). Both green = trusted.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -744,15 +794,17 @@ function ReferencesCard({ pid, slug, references, sections, cited, findings }: {
             ? r.authors.join(", ")
             : r.authors || "";
           const doiUrl = r.doi ? `https://doi.org/${r.doi}` : null;
+          const finding = r.doi ? findingByDoi.get(r.doi.toLowerCase()) : undefined;
           return (
             <div key={r.id} className="space-y-1 border-l-2 border-muted pl-3 text-sm">
-              <div className="flex items-baseline gap-2">
+              <div className="flex flex-wrap items-baseline gap-2">
                 <code className="rounded bg-muted px-1.5 py-0.5 text-[10px]">
                   {r.citation_key}
                 </code>
                 {r.year && (
                   <span className="text-xs text-muted-foreground">{r.year}</span>
                 )}
+                <VerificationRibbons finding={finding} />
               </div>
               {r.title && <div className="font-medium">{r.title}</div>}
               {authors && (
@@ -786,7 +838,6 @@ function ReferencesCard({ pid, slug, references, sections, cited, findings }: {
           slug={slug}
           references={references}
           inlineDois={[...inlineDois]}
-          sections={sections}
           onClose={() => setSyncOpen(false)}
         />
       )}
