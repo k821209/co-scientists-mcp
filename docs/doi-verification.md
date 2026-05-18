@@ -100,19 +100,37 @@ Schema:
 
 ## Workflow A — agent self-validates
 
-```
-# After writing/revising a paper
-validate_references(slug)
-   ├─ runs CrossRef on every registered reference
-   ├─ writes a finding doc per ref (resolved + problems)
-   └─ returns {resolved, unresolved, title_mismatch, missing_doi, errors}
+`validate_references` does NOT decide context fit (word-overlap is too
+weak a proxy). It hands the agent a **facts pack** per DOI and the agent
+judges:
 
-# Agent fixes each problem
-for each unresolved DOI:
-    delete_reference(slug, citation_key) OR
-    add_reference_by_doi(slug, real_doi)   # refuses fake DOIs
-    acknowledge_finding(slug, doi, note="replaced with real citation")
 ```
+validate_references(slug)
+   ├─ unresolved[]   — CrossRef 404 (fake DOI). Server-decidable.
+   ├─ missing_doi[]  — ref has no DOI to check.
+   ├─ errors[]       — transient lookup failures.
+   └─ results[]      — facts pack per resolvable DOI:
+                          - crossref: {title, abstract, subjects, authors,
+                                       year, journal, type, url}
+                          - manuscript_contexts: [{section, sentence,
+                              context_before, context_after, stacked_with}]
+                          - signals: {title_overlap_words,
+                              best_context_overlap_words, ...}
+
+# Agent then judges each result, calling:
+acknowledge_finding(slug, doi, verdict="approved"|"rejected", note="...")
+# 'approved' → context_verified=true → ribbon turns green
+# 'rejected' → context_verified=false → fix or delete
+
+# For unresolved DOIs (server already decided):
+delete_reference(slug, citation_key) OR add_reference_by_doi(slug, real_doi)
+acknowledge_finding(slug, doi, note="hallucinated, removed")
+```
+
+The point: word-overlap fires false positives on stacked citations
+("In humans {doi:A}, maize {doi:B}, rice {doi:C}") and on cross-domain
+foundational citations. The agent has the manuscript's writing intent
+loaded and can judge in context.
 
 ## Workflow B — human in the dashboard
 

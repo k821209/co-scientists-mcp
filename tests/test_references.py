@@ -95,10 +95,10 @@ def test_get_missing_reference_raises(state):
         references.get_reference(state, slug, "ghost")
 
 
-def test_validate_references_runs_without_network(state, monkeypatch):
-    """Regression: validate_references shouldn't blow up on the basic happy
-    path. The previous bug was a NameError on `refs` because the refactor
-    dropped `refs = list_references(...)`."""
+def test_validate_references_emits_facts_pack(state, monkeypatch):
+    """Server's job is to gather facts, not judge context. The result
+    should include CrossRef metadata + manuscript contexts so the agent
+    can make the call."""
     slug = _setup(state)
     references.add_reference(
         state, slug, citation_key="smith2024",
@@ -109,51 +109,113 @@ def test_validate_references_runs_without_network(state, monkeypatch):
         state, slug, citation_key="nodoi",
         title="Untitled work without DOI",
     )
-    # Stub the CrossRef call so the test doesn't need network.
+
     def _fake_fetch(doi, *, timeout=15):
         if doi == "10.1234/example":
             return {
                 "doi": doi, "title": "Plant evolution review",
-                "authors": ["J Smith"], "journal": "Cell", "year": 2024,
-                "url": None, "type": "journal-article",
+                "abstract": "We review plant evolution.",
+                "subjects": ["Plant Science"],
+                "authors": ["J Smith"], "journal": "Cell",
+                "year": 2024, "url": None, "type": "journal-article",
             }
         raise references.DoiNotFound(doi)
     monkeypatch.setattr(references, "_fetch_crossref", _fake_fetch)
 
     result = references.validate_references(state, slug)
     assert result["total"] == 2
-    assert len(result["resolved"]) == 1
+    assert len(result["results"]) == 1
     assert len(result["missing_doi"]) == 1
     assert result["unresolved"] == []
+    # Facts pack content
+    entry = result["results"][0]
+    assert entry["doi_verified"] is True
+    assert entry["crossref"]["title"] == "Plant evolution review"
+    assert "Plant Science" in entry["crossref"]["subjects"]
+    assert entry["crossref"]["abstract"]
 
 
-def test_validate_references_flags_context_mismatch(state, monkeypatch):
-    """The hallucination catcher: real DOI cited for an unrelated paper."""
+def test_validate_references_no_context_verdict(state, monkeypatch):
+    """Even when shared-words is 0, the server doesn't say it's wrong —
+    the agent decides. Server still records the signal."""
     slug = _setup(state)
     references.add_reference(
         state, slug, citation_key="bogus2024",
         title="Somatic mutation rates scale with lifespan across mammals",
         doi="10.1038/s41586-022-04618-z",
     )
-    # Stuff a section that mis-cites the DOI for "plant pangenome"
     from co_scientist_local.tools import sections
     sections.update_section(
         state, slug, "introduction",
-        body="T2T plant pangenome assemblies are now routine {doi:10.1038/s41586-022-04618-z} owing to long-read sequencing.",
+        body="T2T plant pangenome assemblies are now routine {doi:10.1038/s41586-022-04618-z}.",
     )
 
     def _fake_fetch(doi, *, timeout=15):
         return {
             "doi": doi,
             "title": "Somatic mutation rates scale with lifespan across mammals",
+            "abstract": "", "subjects": [],
             "authors": ["G Kucsko"], "journal": "Nature",
             "year": 2022, "url": None, "type": "journal-article",
         }
     monkeypatch.setattr(references, "_fetch_crossref", _fake_fetch)
 
     result = references.validate_references(state, slug)
-    assert len(result["context_mismatch"]) == 1, result
-    entry = result["context_mismatch"][0]
-    assert entry["doi"] == "10.1038/s41586-022-04618-z"
-    assert entry["context_verified"] is False
-    assert entry["best_context_shared_words"] == 0  # "plant pangenome" vs "mammals"
+    # NO context_mismatch bucket — it's gone. Agent decides via the signal.
+    assert "context_mismatch" not in result
+    assert len(result["results"]) == 1
+    entry = result["results"][0]
+    assert entry["signals"]["best_context_overlap_words"] == 0
+    assert entry["doi_verified"] is True
+    # Context decision is NOT made by server
+    # (no context_verified key on the result entry — that's agent territory)
+
+
+def test_extract_doi_contexts_stacked_citation(state):
+    """Stacked citations get stacked_with peers so the agent knows the
+    DOI was part of a multi-citation chunk."""
+    slug = _setup(state)
+    from co_scientist_local.tools import sections
+    sections.update_section(
+        state, slug, "introduction",
+        body="Pangenome studies in humans {doi:10.1/a}, maize {doi:10.1/b}, and rice {doi:10.1/c} revealed variation.",
+    )
+    contexts = references._extract_doi_contexts(state, slug)
+    assert set(contexts.keys()) == {"10.1/a", "10.1/b", "10.1/c"}
+    # Each DOI knows about its siblings
+    assert set(contexts["10.1/a"][0]["stacked_with"]) == {"10.1/b", "10.1/c"}
+    assert set(contexts["10.1/b"][0]["stacked_with"]) == {"10.1/a", "10.1/c"}
+
+
+def test_acknowledge_finding_records_agent_verdict(state, monkeypatch):
+    """The agent's verdict (approved/rejected) is recorded on the finding,
+    setting context_verified accordingly."""
+    slug = _setup(state)
+    references.add_reference(
+        state, slug, citation_key="x", title="X", doi="10.1/x",
+    )
+
+    def _fake_fetch(doi, *, timeout=15):
+        return {
+            "doi": doi, "title": "X", "abstract": "", "subjects": [],
+            "authors": [], "journal": None, "year": None,
+            "url": None, "type": "journal-article",
+        }
+    monkeypatch.setattr(references, "_fetch_crossref", _fake_fetch)
+
+    references.validate_references(state, slug)
+    from co_scientist_local.tools import verification as _v
+    doc = _v.acknowledge_finding(
+        state, slug, "10.1/x", verdict="approved", note="checked abstract"
+    )
+    assert doc["context_verified"] is True
+    assert doc["agent_verdict"] == "approved"
+    assert doc["acknowledged_note"] == "checked abstract"
+
+    # Re-call with rejected on a fresh finding
+    references.add_reference(
+        state, slug, citation_key="y", title="Y", doi="10.1/y",
+    )
+    references.validate_references(state, slug)
+    doc2 = _v.acknowledge_finding(state, slug, "10.1/y", verdict="rejected")
+    assert doc2["context_verified"] is False

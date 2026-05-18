@@ -71,22 +71,39 @@ def acknowledge_finding(
     slug: str,
     doi: str,
     *,
+    verdict: str | None = None,
     actor: str = "agent",
     note: str | None = None,
 ) -> dict:
-    """Mark a finding as handled. Use after the agent has fixed the citation
-    (deleted hallucinated ref, replaced with real one, etc.) so the next
-    list_verification_findings() doesn't keep surfacing it.
+    """Record the agent's (or user's) judgment on one finding.
+
+    `verdict` is the context-check decision the SERVER refuses to make:
+
+      - "approved"  — agent confirms the cited paper fits the manuscript
+                      context. Sets context_verified=True.
+      - "rejected"  — agent confirms the citation is wrong (hallucinated
+                      paper assignment). Sets context_verified=False.
+      - None        — no verdict change; just mark acknowledged.
+
+    Either way, the finding is marked acknowledged so it stops surfacing
+    in `list_verification_findings()` defaults.
     """
     _ensure_paper(state, slug)
     doc_path = _finding_doc_path(state, slug, _doi_safe_id(doi))
     if state.backend.get_doc(doc_path) is None:
         raise NotFound(f"finding for doi {doi!r} not found")
-    fields = {
+    fields: dict = {
         "acknowledged": True,
         "acknowledged_at": now_iso(),
         "acknowledged_by": actor,
     }
+    if verdict is not None:
+        if verdict not in ("approved", "rejected"):
+            raise ValueError("verdict must be 'approved', 'rejected', or None")
+        fields["context_verified"] = (verdict == "approved")
+        fields["context_checked_at"] = now_iso()
+        fields["context_checked_by"] = actor
+        fields["agent_verdict"] = verdict
     if note is not None:
         fields["acknowledged_note"] = note
     state.backend.update_doc(doc_path, fields)

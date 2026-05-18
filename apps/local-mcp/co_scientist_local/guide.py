@@ -10,7 +10,7 @@ only) and refers the agent here on every session start.
 """
 from __future__ import annotations
 
-GUIDE_VERSION = "2026-05-18e"
+GUIDE_VERSION = "2026-05-18f"
 
 
 def render_guide() -> str:
@@ -54,31 +54,42 @@ Inline DOI: `{{doi:10.1234/example}}`. References auto-managed via
 authors, journal, year from CrossRef so you never invent them. Refuses
 DOIs CrossRef can't find (404 → almost always a hallucinated citation).
 
-Two-axis verification model:
+Two-axis verification model — and the MCP only owns one of them:
 
-  - **DOI axis** (set by the dashboard's "Sync DOIs" button OR by
-    `validate_references`): does CrossRef know this DOI? Cheap, fast.
-  - **Context axis** (set ONLY by `validate_references`): does the
-    surrounding sentence around `{{doi:X}}` in section text match the
-    cited paper's CrossRef title? Catches real-DOI-wrong-paper
-    hallucinations that survive any title auto-fill.
+  - **DOI axis** (server-decidable): does CrossRef know this DOI?
+    Browser Sync button and `validate_references` both write this.
+    Deterministic — no LLM needed.
+  - **Context axis** (YOU decide, not the server): does the cited
+    paper's content actually fit the manuscript's claim around its
+    `{{doi:X}}` marker? Word-overlap is too weak a proxy; only you
+    have the manuscript intent loaded.
 
-A reference is trusted only when BOTH axes are verified. The dashboard
-shows two ribbons per reference (`✓ DOI` and `✓ Context`); both green
-= safe to keep.
+Workflow YOU follow per session:
 
-Workflow:
+1. Call `mcp__co_scientist__validate_references(slug)`. It returns a
+   facts pack:
+     - `unresolved[]` — CrossRef 404s. Almost always fake DOIs.
+     - `missing_doi[]` — references with no DOI to check.
+     - `results[]` — one entry per resolved DOI with:
+         * `crossref`: title, abstract, subjects, authors, year, journal
+         * `manuscript_contexts`: every `{{doi:X}}` occurrence with
+           full sentence + ±240 char context + `stacked_with` peers
+         * `signals`: raw overlap counts (HINTS, not verdicts)
+2. For each `results[]` entry, READ the crossref abstract/title and
+   compare against `manuscript_contexts`. Decide if the citation fits.
+3. Record your decision:
+     `acknowledge_finding(slug, doi, verdict="approved"|"rejected",
+        note="<why>")`
+   - approved → context_verified=true → dashboard ribbon turns green
+   - rejected → context_verified=false → fix the citation (delete or
+     replace via `add_reference_by_doi`) before next session
 
-1. User clicks "Sync DOIs" in dashboard → DOI ribbons settle (✓ or ✗).
-2. Agent runs `mcp__co_scientist__validate_references(slug)` →
-   context ribbons settle.
-3. Anything with a ✗ ribbon gets fixed (delete bad ref / replace with
-   real DOI via `add_reference_by_doi`).
-4. `mcp__co_scientist__acknowledge_finding(slug, doi, note="...")` to
-   mark each handled.
+For unresolved DOIs, just delete the reference (or replace via
+`add_reference_by_doi(slug, real_doi)`) and `acknowledge_finding(slug,
+doi, note="hallucinated, removed")`.
 
-Per-DOI finding doc keys: `doi_verified` (bool|null), `doi_checked_by`
-('sync'|'agent'), `context_verified` (bool|null), `context_checked_by`.
+The dashboard shows two ribbons per reference (`✓ DOI` / `✓ Context`).
+`?` Context means you haven't judged it yet. Both green = trusted.
 
 **On every session start, also call**
 `mcp__co_scientist__list_verification_findings(slug)` for each paper.

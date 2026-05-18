@@ -74,7 +74,8 @@ def _fetch_crossref(doi: str, *, timeout: int = 15) -> dict:
 
 
 def _normalize_crossref(msg: dict, doi: str) -> dict:
-    """Flatten CrossRef's response into the fields add_reference expects."""
+    """Flatten CrossRef's response. Includes abstract + subjects so the
+    agent can judge citation context without an extra round-trip."""
     title_list = msg.get("title") or []
     title = title_list[0] if title_list else ""
     container = msg.get("container-title") or []
@@ -88,15 +89,21 @@ def _normalize_crossref(msg: dict, doi: str) -> dict:
         full = (given + " " + family).strip() or a.get("name") or ""
         if full:
             authors.append(full)
+    abstract = msg.get("abstract") or ""
+    # CrossRef abstracts arrive as JATS XML — strip tags so the agent sees plain text.
+    if abstract:
+        abstract = re.sub(r"<[^>]+>", " ", abstract)
+        abstract = re.sub(r"\s+", " ", abstract).strip()
     return {
         "doi": (msg.get("DOI") or doi).lower(),
         "title": title,
+        "abstract": abstract,
+        "subjects": list(msg.get("subject") or []),
         "authors": authors,
         "journal": journal,
         "year": year,
         "url": msg.get("URL"),
         "type": msg.get("type"),
-        "crossref_raw": msg,
     }
 
 
@@ -321,17 +328,24 @@ def enrich_reference_from_doi(state: State, slug: str, citation_key: str) -> dic
     return state.backend.get_doc(path)
 
 
+_CONTEXT_WINDOW = 240  # chars before/after marker — enough to convey intent
+
+
 def _extract_doi_contexts(state: State, slug: str) -> dict[str, list[dict]]:
-    """For each {doi:X} marker in this paper's section bodies, capture the
-    surrounding sentence as the agent's "claim" about that DOI.
+    """For each {doi:X} marker in this paper's section bodies, capture
+    enough surrounding text for the AGENT to judge citation correctness.
 
-    Returns {doi_lower: [{"section": key, "sentence": "..."}]}.
+    Returns {doi_lower: [{
+        "section": "<section_key>",
+        "sentence": "<full surrounding sentence>",
+        "context_before": "<up to 240 chars before the marker>",
+        "context_after":  "<up to 240 chars after the marker>",
+        "stacked_with": ["<other doi>", ...],  # DOIs in the same citation chunk
+    }]}.
 
-    Used by validate_references to compare the manuscript's *intent* (the
-    sentence the agent wrote around the citation) against the CrossRef
-    title — catches the case where the DOI is real but the agent cited
-    an unrelated paper (the most common hallucination once auto-fill has
-    overwritten stored_title with CrossRef's truth).
+    The MCP doesn't decide whether the context fits the cited paper —
+    that's the LLM agent's job. We just hand over the raw text the agent
+    needs to read.
     """
     from . import sections as _sections
     contexts: dict[str, list[dict]] = {}
@@ -341,70 +355,110 @@ def _extract_doi_contexts(state: State, slug: str) -> dict[str, list[dict]]:
         body = sec.get("body") or ""
         if not body:
             continue
-        for m in pattern.finditer(body):
+        matches = list(pattern.finditer(body))
+        for i, m in enumerate(matches):
             doi = m.group(1).lower()
             sentence = _sentence_around(body, m.start(), m.end())
+            before = body[max(0, m.start() - _CONTEXT_WINDOW):m.start()]
+            after = body[m.end():m.end() + _CONTEXT_WINDOW]
+            stacked = _adjacent_dois(matches, i, body)
             contexts.setdefault(doi, []).append({
                 "section": sec.get("key", ""),
                 "sentence": sentence,
+                "context_before": before,
+                "context_after": after,
+                "stacked_with": stacked,
             })
     return contexts
 
 
 def _sentence_around(body: str, start: int, end: int) -> str:
     """Extract the sentence containing positions [start, end)."""
-    # Walk backwards to sentence start
     s = start
     while s > 0 and body[s - 1] not in ".!?\n":
         s -= 1
-    # Walk forwards to sentence end
     e = end
     while e < len(body) and body[e] not in ".!?\n":
         e += 1
     return body[s:e].strip()
 
 
-def validate_references(state: State, slug: str) -> dict:
-    """Run CrossRef against every reference in a paper and check citation
-    context. Categorizes results and persists each verdict to
-    /papers/{slug}/verification_findings/{doi_safe}.
+_STACK_MAX_GAP = 80  # chars between adjacent stacked markers
 
-    Three independent checks per DOI:
 
-      1. **DOI resolves** — CrossRef returns the work. Failure → `unresolved`
-         (almost certainly a hallucinated DOI).
-      2. **Stored-title match** — `stored_title` (the reference doc's title
-         field) shares ≥3 substantive words with CrossRef title. Mismatch →
-         `title_mismatch`. NOTE: this check is useless after the dashboard
-         "Sync DOIs" button or any auto-fill has overwritten stored_title
-         with the CrossRef title (then they always match).
-      3. **Context match** — for each {doi:X} marker in section text, the
-         surrounding sentence shares ≥2 substantive words with CrossRef
-         title. Mismatch → `context_mismatch`. This catches "real DOI,
-         wrong paper for the context" hallucinations that survive (2).
-
-    Returns dict with keys: total, resolved, unresolved, title_mismatch,
-    context_mismatch, missing_doi, errors. A single DOI can appear in
-    BOTH title_mismatch and context_mismatch (independent signals).
+def _adjacent_dois(matches: list[re.Match], i: int, body: str) -> list[str]:
+    """Return DOIs of {doi:X} markers in the same 'stacked citation' as
+    matches[i]. Two markers are stacked if no sentence-ending punctuation
+    (.!?) sits between them AND the gap is short (≤80 chars). Captures
+    'In humans {doi:A}, maize {doi:B}, and rice {doi:C}' as one chunk.
     """
-    # Local import to avoid circular dep
+    out: list[str] = []
+    self_doi = matches[i].group(1).lower()
+
+    def _gap_is_stacked(a_end: int, b_start: int) -> bool:
+        gap = body[a_end:b_start]
+        if len(gap) > _STACK_MAX_GAP:
+            return False
+        return not any(c in ".!?" for c in gap)
+
+    # Walk backward
+    j = i - 1
+    while j >= 0 and _gap_is_stacked(matches[j].end(), matches[j + 1].start()):
+        out.append(matches[j].group(1).lower())
+        j -= 1
+    # Walk forward
+    j = i + 1
+    while j < len(matches) and _gap_is_stacked(matches[j - 1].end(), matches[j].start()):
+        out.append(matches[j].group(1).lower())
+        j += 1
+    return [d for d in out if d != self_doi]
+
+
+def validate_references(state: State, slug: str) -> dict:
+    """Gather everything the AGENT needs to judge whether each citation
+    is correct. The MCP itself does NOT decide context fit — word-overlap
+    is a bad proxy for "does this DOI belong to the claim". The agent has
+    the manuscript + writing intent loaded; let it judge.
+
+    Server emits only deterministic categories:
+      - `missing_doi`  — reference doc with no DOI field at all
+      - `unresolved`   — CrossRef returns 404 (almost surely hallucinated)
+      - `errors`       — transient lookup failure
+
+    Plus a `results` list, one entry per DOI (registered or inline-only),
+    containing the full facts pack the agent needs:
+
+      {
+        "doi", "citation_key" (or None for inline-only),
+        "doi_verified": True,
+        "crossref": {title, abstract, subjects[], authors[], year, journal, type, url},
+        "manuscript_contexts": [
+          {section, sentence, context_before, context_after, stacked_with[]}, ...
+        ],
+        "signals": {                # raw numbers — agent decides what to do
+          "stored_title": str|None,
+          "title_overlap_words": int|None,        # stored vs crossref
+          "best_context_overlap_words": int|None, # any inline ctx vs crossref title
+          "context_count": int,
+        }
+      }
+
+    The agent should call `acknowledge_finding(slug, doi, note="...")`
+    on each DOI it has judged so the dashboard's ribbons update.
+    """
     from . import verification as _verification
 
     contexts = _extract_doi_contexts(state, slug)
     refs = list_references(state, slug)
-    resolved: list[dict] = []
+    results: list[dict] = []
     unresolved: list[dict] = []
     missing_doi: list[dict] = []
-    title_mismatch: list[dict] = []
-    context_mismatch: list[dict] = []
     errors: list[dict] = []
     now = now_iso()
     inline_only = set(contexts.keys())
 
-    def _resolve(doi, *, registered, key=None, stored_title=None):
-        """Verify one DOI (existence + context). Mutates the buckets above.
-        Writes a SINGLE finding doc with both verification axes."""
-        nonlocal resolved, unresolved, missing_doi, title_mismatch, context_mismatch, errors
+    def _resolve(doi: str, *, registered: bool, key: str | None = None,
+                 stored_title: str | None = None) -> None:
         source = "registered_ref" if registered else "inline"
         try:
             meta = _fetch_crossref(doi)
@@ -426,55 +480,41 @@ def validate_references(state: State, slug: str) -> dict:
             return
 
         crossref_title = meta.get("title") or ""
-        # Title check (only meaningful for registered refs where agent set a title)
-        shared_title = _shared_words((stored_title or "").lower(), crossref_title.lower())
-        title_problem = registered and bool(stored_title and stored_title.strip()) and shared_title < 3
-        # Context check
+        shared_title = (
+            _shared_words((stored_title or "").lower(), crossref_title.lower())
+            if (registered and stored_title and stored_title.strip())
+            else None
+        )
         ctxs = contexts.get(doi, [])
-        checkable = [c for c in ctxs if _substantive_word_count(c["sentence"]) >= 3]
-        if checkable:
-            best = max(
-                _shared_words(c["sentence"].lower(), crossref_title.lower())
-                for c in checkable
-            )
-            worst = min(
-                checkable,
-                key=lambda c: _shared_words(c["sentence"].lower(), crossref_title.lower()),
-            )
-            context_verified = best >= 2
-        else:
-            best = None
-            worst = None
-            context_verified = None  # can't check — leave for human review
+        ctx_overlaps = [
+            _shared_words(c["sentence"].lower(), crossref_title.lower())
+            for c in ctxs
+        ]
+        best_ctx = max(ctx_overlaps) if ctx_overlaps else None
 
         entry = {
-            "citation_key": key, "doi": doi,
-            "stored_title": stored_title,
-            "crossref_title": crossref_title,
-            "shared_title_words": shared_title if registered else None,
-            "context_count": len(ctxs),
-            "best_context_shared_words": best,
-            "worst_context": worst,
+            "doi": doi,
+            "citation_key": key,
             "doi_verified": True,
-            "context_verified": context_verified,
+            "crossref": {
+                k: v for k, v in meta.items() if k != "crossref_raw"
+            },
+            "manuscript_contexts": ctxs,
+            "signals": {
+                "stored_title": stored_title,
+                "title_overlap_words": shared_title,
+                "best_context_overlap_words": best_ctx,
+                "context_count": len(ctxs),
+            },
         }
-        # Bucket according to the dominant problem (context > title > resolved)
-        if context_verified is False:
-            context_mismatch.append(entry)
-            kind = "context_mismatch"
-        elif title_problem:
-            title_mismatch.append(entry)
-            kind = "title_mismatch"
-        else:
-            resolved.append(entry)
-            kind = "resolved"
+        results.append(entry)
         _write_finding(
-            state, slug, doi=doi, kind=kind, source=source,
+            state, slug, doi=doi, kind="doi_verified", source=source,
             ref_citation_key=key, stored_title=stored_title,
-            crossref_title=crossref_title, shared_words=best if best is not None else shared_title,
-            context_sentence=(worst or {}).get("sentence") if worst else None,
-            context_section=(worst or {}).get("section") if worst else None,
-            doi_verified=True, context_verified=context_verified,
+            crossref_title=crossref_title,
+            shared_words=best_ctx if best_ctx is not None else shared_title,
+            doi_verified=True,  # server-decidable
+            # context_verified is left UNSET — agent's call, set via acknowledge_finding
             now=now, verification=_verification,
         )
 
@@ -492,12 +532,12 @@ def validate_references(state: State, slug: str) -> dict:
 
     return {
         "total": len(refs) + len(inline_only),
-        "resolved": resolved,
-        "unresolved": unresolved,
-        "title_mismatch": title_mismatch,        # legacy axis — auto-fill kills it
-        "context_mismatch": context_mismatch,    # the real hallucination catcher
-        "missing_doi": missing_doi,
+        # deterministic categories the server owns:
+        "unresolved": unresolved,   # CrossRef 404 — fake DOI
+        "missing_doi": missing_doi, # ref has no DOI
         "errors": errors,
+        # facts pack — agent reads this and decides per-DOI:
+        "results": results,
     }
 
 

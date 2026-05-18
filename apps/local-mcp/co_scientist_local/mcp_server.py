@@ -351,15 +351,30 @@ def build_mcp(state: State) -> FastMCP:
 
     @mcp.tool()
     def validate_references(slug: str) -> dict[str, Any]:
-        """Run CrossRef against every reference in a paper. Returns:
-          - resolved: DOIs CrossRef confirms (with matching title)
-          - unresolved: DOIs CrossRef cannot find (HALLUCINATION SUSPECTS)
-          - title_mismatch: DOI resolves but stored title doesn't match
-            CrossRef's (WRONG-PAPER-FOR-DOI SUSPECTS)
-          - missing_doi: references with no DOI field
+        """Gather facts the AGENT needs to judge every citation.
+
+        The MCP does NOT decide whether a citation's context fits the
+        cited paper — that's your job as the LLM. Word-overlap is too
+        unreliable for that judgment. Server emits only deterministic
+        categories:
+
+          - unresolved: CrossRef returned 404 (almost certainly fake DOI)
+          - missing_doi: reference has no DOI to check
           - errors: transient lookup failures
 
-        Run this after writing/revising to surface fake citations.
+        Plus `results[]` — one entry per resolvable DOI, each carrying:
+
+          - crossref: full metadata (title, abstract, subjects, authors,
+            year, journal, type, url)
+          - manuscript_contexts: every {doi:X} occurrence in section
+            bodies with surrounding sentence + 240-char before/after +
+            stacked_with (sibling DOIs in the same citation chunk)
+          - signals: raw overlap counts. Use as a hint, not a verdict.
+
+        For each result, read crossref.title + (crossref.abstract or
+        subjects) and compare to manuscript_contexts. Decide. Call
+        `acknowledge_finding(slug, doi, verdict='approved'|'rejected',
+        note='...')` to record your call.
         """
         return _references.validate_references(state, slug)
 
@@ -390,14 +405,27 @@ def build_mcp(state: State) -> FastMCP:
     def acknowledge_finding(
         slug: str,
         doi: str,
+        verdict: str | None = None,
         note: str | None = None,
     ) -> dict[str, Any]:
-        """Mark a verification finding as handled (e.g. agent deleted the
-        hallucinated ref or replaced it with a real citation). Use after
-        actually fixing the citation so it doesn't keep showing up.
+        """Record the agent's judgment on one finding.
+
+        `verdict`:
+          - "approved" — cited paper fits the manuscript context.
+            Sets context_verified=True so the dashboard's ribbon flips
+            green. Use AFTER you've actually read the CrossRef title/
+            abstract and the surrounding manuscript prose, not just
+            because the DOI resolves.
+          - "rejected" — citation is wrong (real DOI on the wrong paper).
+            Sets context_verified=False. Pair with deleting the bad ref
+            or replacing it via add_reference_by_doi.
+          - None — no context decision; just dismiss from the active list.
+
+        Always include a brief `note` explaining the reasoning. It lands
+        on the finding doc as `acknowledged_note`.
         """
         return _verification.acknowledge_finding(
-            state, slug, doi, actor="agent", note=note,
+            state, slug, doi, verdict=verdict, actor="agent", note=note,
         )
 
     @mcp.tool()
