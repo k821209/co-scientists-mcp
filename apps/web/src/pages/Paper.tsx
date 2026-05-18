@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Markdown } from "@/components/Markdown";
 import { SyncDoisDialog } from "@/components/SyncDoisDialog";
 import { SelectionBubble } from "@/components/SelectionBubble";
+import { CommentHoverPopover } from "@/components/CommentHoverPopover";
 import { cn } from "@/lib/utils";
 
 interface Section {
@@ -239,11 +240,12 @@ export function Paper() {
 
   if (!pid || !slug) return null;
 
-  const openComments = reviews.filter((r) => r.status === "open" && r.source === "user");
-
   return (
     <div className="space-y-6">
       {pid && slug && <SelectionBubble pid={pid} paperSlug={slug} />}
+      {pid && slug && (
+        <CommentHoverPopover pid={pid} paperSlug={slug} reviews={reviews} />
+      )}
       <div>
         <Link
           to={`/projects/${pid}/papers`}
@@ -403,30 +405,49 @@ export function Paper() {
           </div>
         )}
 
-        <div className="space-y-4" id="comments-anchor">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <MessageSquare className="h-4 w-4" /> Comments
-                {openComments.length > 0 && (
-                  <Badge variant="warning" className="ml-auto">
-                    {openComments.length} open
-                  </Badge>
+        {(() => {
+          const unanchored = reviews.filter((r) => !r.anchor_text);
+          const anchoredOpen = reviews.filter(
+            (r) => r.anchor_text && r.status === "open",
+          ).length;
+          if (unanchored.length === 0 && anchoredOpen === 0) return null;
+          return (
+            <div className="space-y-4" id="comments-anchor">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <MessageSquare className="h-4 w-4" /> Comments
+                    {anchoredOpen > 0 && (
+                      <Badge variant="outline" className="text-[10px]">
+                        {anchoredOpen} on highlights
+                      </Badge>
+                    )}
+                  </CardTitle>
+                  <CardDescription>
+                    Highlighted passages have hover-to-view comments. The
+                    list below holds general (unanchored) comments only.
+                    Both are picked up by Claude Code.
+                  </CardDescription>
+                </CardHeader>
+                {unanchored.length === 0 && (
+                  <CardContent>
+                    <p className="text-xs italic text-muted-foreground">
+                      No general comments. Drag-select any passage above to
+                      add a highlighted comment.
+                    </p>
+                  </CardContent>
                 )}
-              </CardTitle>
-              <CardDescription>
-                Comments here are picked up by Claude Code on its next session.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <NewCommentBox pid={pid} paperSlug={slug} />
-            </CardContent>
-          </Card>
+              </Card>
 
-          {reviews.map((r) => (
-            <ReviewView key={r.id} review={r} pid={pid} paperSlug={slug} knownDois={knownDois} />
-          ))}
-        </div>
+              {unanchored.map((r) => (
+                <ReviewView
+                  key={r.id} review={r} pid={pid} paperSlug={slug}
+                  knownDois={knownDois}
+                />
+              ))}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
@@ -488,18 +509,7 @@ function useAnchorHighlights(
           mark.dataset.reviewId = r.id;
           mark.style.cssText =
             "background:#fde68a;color:inherit;border-radius:2px;padding:0 1px;cursor:pointer;";
-          mark.title = (r.comment || "").slice(0, 200);
-          mark.addEventListener("click", () => {
-            const target = document.getElementById(`review-${r.id}`);
-            if (target) {
-              target.scrollIntoView({ behavior: "smooth", block: "center" });
-              target.classList.add("ring-2", "ring-amber-400");
-              setTimeout(
-                () => target.classList.remove("ring-2", "ring-amber-400"),
-                1500,
-              );
-            }
-          });
+          // Hover and click are delegated to CommentHoverPopover.
           range.surroundContents(mark);
           wrappers.push(mark);
         } catch {
