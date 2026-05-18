@@ -659,8 +659,7 @@ function AnalysisRow({ pid, paperSlug, analysis }: {
 
 
 function VerificationRibbons({ finding }: { finding?: Finding }) {
-  const doi = finding?.doi_verified;
-  const ctx = finding?.context_verified;
+  const { doi, ctx } = deriveAxes(finding);
   return (
     <div className="flex items-center gap-1">
       <Ribbon
@@ -683,6 +682,35 @@ function VerificationRibbons({ finding }: { finding?: Finding }) {
       />
     </div>
   );
+}
+
+/** Read explicit doi_verified/context_verified flags if set, else derive
+ *  from the legacy `kind` field. Old findings (pre two-axis model) only
+ *  have `kind`; new findings have explicit booleans. */
+function deriveAxes(f?: Finding): {
+  doi: boolean | null; ctx: boolean | null;
+} {
+  if (!f) return { doi: null, ctx: null };
+  const explicit_doi = f.doi_verified;
+  const explicit_ctx = f.context_verified;
+  const has_explicit = explicit_doi !== undefined || explicit_ctx !== undefined;
+  if (has_explicit) {
+    return {
+      doi: explicit_doi === undefined ? null : explicit_doi,
+      ctx: explicit_ctx === undefined ? null : explicit_ctx,
+    };
+  }
+  // Legacy fallback — infer from kind. Conservative: don't claim a
+  // context check that may have been done by an obsolete browser sync.
+  switch (f.kind) {
+    case "resolved":         return { doi: true,  ctx: null };
+    case "unresolved":       return { doi: false, ctx: null };
+    case "title_mismatch":   return { doi: true,  ctx: null };
+    case "context_mismatch": return { doi: true,  ctx: false };
+    case "missing_doi":      return { doi: null,  ctx: null };
+    case "error":            return { doi: null,  ctx: null };
+    default:                 return { doi: null,  ctx: null };
+  }
 }
 
 function Ribbon({ label, state, title }: {
