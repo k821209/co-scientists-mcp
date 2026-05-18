@@ -33,6 +33,9 @@ _CROSSREF_UA = "co-scientist-local/0.1 (mailto:dev@co-scientist.example)"
 
 class DoiNotFound(Exception):
     """Raised when CrossRef cannot resolve a DOI (likely hallucinated)."""
+    def __init__(self, doi: str) -> None:
+        self.doi = doi
+        super().__init__(f"CrossRef returned 404 for {doi!r} — likely a hallucinated DOI")
 
 
 def _fetch_crossref(doi: str, *, timeout: int = 15) -> dict:
@@ -53,7 +56,19 @@ def _fetch_crossref(doi: str, *, timeout: int = 15) -> dict:
     except urllib.error.HTTPError as e:
         if e.code == 404:
             raise DoiNotFound(doi) from None
-        raise RuntimeError(f"CrossRef HTTP {e.code} for {doi!r}") from e
+        body = ""
+        try:
+            body = e.read().decode("utf-8", errors="replace")[:200]
+        except Exception:
+            pass
+        raise RuntimeError(
+            f"CrossRef HTTP {e.code} {e.reason or ''} for {doi!r}"
+            + (f" — {body}" if body else "")
+        ) from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"CrossRef network error for {doi!r}: {e.reason}") from e
+    except TimeoutError as e:
+        raise RuntimeError(f"CrossRef timeout ({timeout}s) for {doi!r}") from e
     msg = payload.get("message", {})
     return _normalize_crossref(msg, doi)
 
@@ -376,6 +391,7 @@ def validate_references(state: State, slug: str) -> dict:
     from . import verification as _verification
 
     contexts = _extract_doi_contexts(state, slug)
+    refs = list_references(state, slug)
     resolved: list[dict] = []
     unresolved: list[dict] = []
     missing_doi: list[dict] = []
