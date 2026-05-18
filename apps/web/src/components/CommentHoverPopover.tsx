@@ -4,6 +4,7 @@ import { CheckCircle2, XCircle, X } from "lucide-react";
 import { db } from "@/firebase";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { findReviewAtPoint, isPointOnAnchor } from "@/lib/anchorHighlightRegistry";
 
 interface Review {
   id: string;
@@ -34,27 +35,37 @@ export function CommentHoverPopover({ pid, paperSlug, reviews }: Props) {
   useEffect(() => {
     function onClick(e: MouseEvent) {
       const target = e.target as HTMLElement;
-      const mark = target.closest("mark.cs-anchor-mark") as HTMLElement | null;
-      if (mark) {
-        const reviewId = mark.dataset.reviewId;
-        const review = reviews.find((r) => r.id === reviewId);
-        if (review) {
-          setActive({ review, rect: mark.getBoundingClientRect() });
-        }
-        return;
-      }
       // Ignore clicks inside the popover itself
       if (target.closest("[data-comment-popover]")) return;
+      // CSS Custom Highlights aren't DOM elements — use point-in-rect.
+      const hit = findReviewAtPoint(e.clientX, e.clientY);
+      if (hit) {
+        const review = reviews.find((r) => r.id === hit.reviewId);
+        if (review) setActive({ review, rect: hit.rect });
+        return;
+      }
       setActive(null);
+    }
+    let lastCursor = "";
+    function onMouseMove(e: MouseEvent) {
+      // Lightweight cursor hint — only writes when state changes.
+      const want = isPointOnAnchor(e.clientX, e.clientY) ? "pointer" : "";
+      if (want !== lastCursor) {
+        document.body.style.cursor = want;
+        lastCursor = want;
+      }
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setActive(null);
     }
     document.addEventListener("click", onClick);
+    document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("click", onClick);
+      document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("keydown", onKey);
+      document.body.style.cursor = "";
     };
   }, [reviews]);
 

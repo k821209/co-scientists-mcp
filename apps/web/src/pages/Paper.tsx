@@ -18,6 +18,7 @@ import { Markdown } from "@/components/Markdown";
 import { SyncDoisDialog } from "@/components/SyncDoisDialog";
 import { SelectionBubble } from "@/components/SelectionBubble";
 import { CommentHoverPopover } from "@/components/CommentHoverPopover";
+import { setAnchorRanges, clearAnchorRanges } from "@/lib/anchorHighlightRegistry";
 import { cn } from "@/lib/utils";
 
 interface Section {
@@ -453,13 +454,16 @@ export function Paper() {
   );
 }
 
-/** After a section's markdown renders, walk its text nodes and wrap any
- *  exact-match anchor_text from open user comments in a yellow <mark>.
- *  Click the mark → smooth-scroll + flash the corresponding comment.
+/** Apply yellow highlights to every anchor_text occurrence in a section.
  *
- *  Limitation: anchor_text must fit inside a single text node. If the
- *  user selected across bold/italic/link boundaries the highlight won't
- *  render (the comment still works, just no inline mark).
+ *  Uses the CSS Custom Highlight API (no DOM mutation) — Range objects
+ *  feed into a named Highlight that ::highlight(comment-anchor) styles.
+ *  This avoids the React reconciliation conflicts that imperative
+ *  `<mark>` wrapping caused (flicker on every refresh, highlights
+ *  randomly disappearing across re-renders).
+ *
+ *  Click detection: see CommentHoverPopover, which uses point-in-rect
+ *  against the range rects instead of DOM event delegation.
  */
 function useAnchorHighlights(
   containerRef: RefObject<HTMLDivElement | null>,
@@ -470,6 +474,11 @@ function useAnchorHighlights(
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+    const supported =
+      typeof Highlight !== "undefined" &&
+      !!(CSS as unknown as { highlights?: Map<string, Highlight> }).highlights;
+    if (!supported) return;
+
     const relevant = reviews.filter(
       (r) =>
         r.status === "open" &&
@@ -479,44 +488,31 @@ function useAnchorHighlights(
         (r.section === sectionKey ||
           r.manuscript_ref === `section:${sectionKey}`),
     );
-    if (relevant.length === 0) return;
 
-    const wrappers: HTMLElement[] = [];
+    const ownerKeys: string[] = [];
     for (const r of relevant) {
-      const created = wrapAnchorInContainer(el, r.anchor_text!, r.id);
-      wrappers.push(...created);
+      const key = `${sectionKey}::${r.id}`;
+      const ranges = findAnchorRanges(el, r.anchor_text!);
+      setAnchorRanges(key, ranges, r.id);
+      ownerKeys.push(key);
     }
 
     return () => {
-      for (const w of wrappers) {
-        const parent = w.parentNode;
-        if (!parent) continue;
-        while (w.firstChild) parent.insertBefore(w.firstChild, w);
-        parent.removeChild(w);
-        parent.normalize();
-      }
+      for (const k of ownerKeys) clearAnchorRanges(k);
     };
   }, [containerRef, reviews, sectionKey, body]);
 }
 
 /** Find `anchor` text inside `container` (including across text-node
- *  boundaries from inline markdown like links/bold) and wrap each
- *  occurrence in a yellow <mark>. Handles whitespace tolerance.
- *  Returns the list of newly-created mark elements. */
-function wrapAnchorInContainer(
-  container: HTMLElement,
-  anchor: string,
-  reviewId: string,
-): HTMLElement[] {
-  // Build a concatenated text view of all text nodes (excluding already-marked).
-  // Track offsets so we can map a hit back to (node, offset).
+ *  boundaries from inline markdown like links/bold) and return Range
+ *  objects spanning each occurrence. Whitespace-tolerant. */
+function findAnchorRanges(container: HTMLElement, anchor: string): Range[] {
   type Part = { node: Text; start: number; end: number };
   const parts: Part[] = [];
   let concat = "";
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
   while (walker.nextNode()) {
     const node = walker.currentNode as Text;
-    if (node.parentElement?.closest("mark.cs-anchor-mark")) continue;
     const t = node.textContent || "";
     if (!t) continue;
     parts.push({ node, start: concat.length, end: concat.length + t.length });
@@ -524,37 +520,20 @@ function wrapAnchorInContainer(
   }
   if (parts.length === 0) return [];
 
-  // Try exact match first; fall back to whitespace-tolerant match.
   const positions = findOccurrences(concat, anchor);
-  // process from last to first so earlier indices stay valid
-  positions.reverse();
-  const made: HTMLElement[] = [];
+  const ranges: Range[] = [];
   for (const [hitStart, hitEnd] of positions) {
     const startPart = parts.find((p) => hitStart >= p.start && hitStart < p.end);
     const endPart = parts.find((p) => hitEnd > p.start && hitEnd <= p.end);
     if (!startPart || !endPart) continue;
-    const range = document.createRange();
-    range.setStart(startPart.node, hitStart - startPart.start);
-    range.setEnd(endPart.node, hitEnd - endPart.start);
-    const mark = document.createElement("mark");
-    mark.className = "cs-anchor-mark";
-    mark.dataset.reviewId = reviewId;
-    mark.style.cssText =
-      "background:#fde68a;color:inherit;border-radius:2px;padding:0 1px;cursor:pointer;";
-    if (startPart === endPart) {
-      // Single node — surroundContents works
-      try { range.surroundContents(mark); made.push(mark); } catch { /* swallow */ }
-    } else {
-      // Cross-node — extract + insert
-      try {
-        const frag = range.extractContents();
-        mark.appendChild(frag);
-        range.insertNode(mark);
-        made.push(mark);
-      } catch { /* swallow */ }
-    }
+    try {
+      const range = document.createRange();
+      range.setStart(startPart.node, hitStart - startPart.start);
+      range.setEnd(endPart.node, hitEnd - endPart.start);
+      ranges.push(range);
+    } catch { /* invalid offsets, skip */ }
   }
-  return made;
+  return ranges;
 }
 
 /** Find all start..end offsets where `anchor` occurs in `text`.
