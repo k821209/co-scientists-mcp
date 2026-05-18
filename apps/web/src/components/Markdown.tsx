@@ -17,13 +17,14 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import rehypeRaw from "rehype-raw";
 import "katex/dist/katex.min.css";
 
 import { cn } from "@/lib/utils";
 import { remarkDoi } from "@/lib/remarkDoi";
 import { remarkFigureRefs } from "@/lib/remarkFigureRefs";
 import { remarkTableRefs } from "@/lib/remarkTableRefs";
-import { remarkAnchorMarks, type AnchorTarget } from "@/lib/remarkAnchorMarks";
+import type { AnchorTarget } from "@/lib/remarkAnchorMarks";
 
 interface MarkdownProps {
   children: string;
@@ -43,18 +44,45 @@ function extractDoiFromHref(href: string | undefined): string | null {
   return m ? m[1] : null;
 }
 
+function injectAnchorMarks(body: string, anchors: AnchorTarget[]): string {
+  if (!anchors || anchors.length === 0) return body;
+  // Longest first so 'plant pangenome' doesn't get pre-empted by 'plant'.
+  const sorted = [...anchors]
+    .filter((a) => a.text && a.text.length >= 3)
+    .sort((a, b) => b.text.length - a.text.length);
+  let out = body;
+  const consumedRanges: Array<[number, number]> = [];
+  for (const a of sorted) {
+    const re = new RegExp(
+      a.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+      "g",
+    );
+    out = out.replace(re, (match, offset: number) => {
+      // Avoid re-wrapping inside an already-injected <mark>
+      for (const [s, e] of consumedRanges) {
+        if (offset >= s && offset < e) return match;
+      }
+      const wrapped = `<mark class="cs-anchor-mark" data-review-id="${
+        a.reviewId.replace(/"/g, "")
+      }">${match}</mark>`;
+      consumedRanges.push([offset, offset + wrapped.length]);
+      return wrapped;
+    });
+  }
+  return out;
+}
+
 export function Markdown({ children, className, knownDois, anchors }: MarkdownProps) {
-  const anchorPlugins = anchors && anchors.length > 0
-    ? [[remarkAnchorMarks, anchors] as [typeof remarkAnchorMarks, AnchorTarget[]]]
-    : [];
+  const source = anchors && anchors.length > 0
+    ? injectAnchorMarks(children, anchors)
+    : children;
   return (
     <div className={cn("prose-co-scientist", className)}>
       <ReactMarkdown
         remarkPlugins={[
           remarkGfm, remarkMath, remarkDoi, remarkFigureRefs, remarkTableRefs,
-          ...anchorPlugins,
         ]}
-        rehypePlugins={[rehypeKatex]}
+        rehypePlugins={[rehypeRaw, rehypeKatex]}
         components={{
           mark: ({ children, ...props }) => (
             <mark
@@ -178,7 +206,7 @@ export function Markdown({ children, className, knownDois, anchors }: MarkdownPr
           em: ({ children }) => <em className="italic">{children}</em>,
         }}
       >
-        {children}
+        {source}
       </ReactMarkdown>
     </div>
   );
