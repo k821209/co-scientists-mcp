@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { doc, updateDoc } from "firebase/firestore";
 import { CheckCircle2, XCircle, X } from "lucide-react";
 import { db } from "@/firebase";
@@ -24,72 +24,39 @@ interface Props {
   reviews: Review[];
 }
 
-/** Global hover popover for inline anchored comments.
- *  Delegates mouseover events on <mark.cs-anchor-mark> elements anywhere
- *  in the document. Position: fixed below the mark. Mouse-into-popover
- *  keeps it open; small delay on leave so tracking from mark→popover
- *  doesn't flicker. Click outside dismisses. */
+/** Global click-to-open popover for inline anchored comments.
+ *  Click <mark.cs-anchor-mark> → popover opens below the mark.
+ *  Click another mark → moves to that one. Click outside → closes.
+ *  No hover trigger (intentional — less twitchy on dense paragraphs). */
 export function CommentHoverPopover({ pid, paperSlug, reviews }: Props) {
   const [active, setActive] = useState<{ review: Review; rect: DOMRect } | null>(null);
-  const [pinned, setPinned] = useState(false);
-  const closeTimer = useRef<number | null>(null);
-
-  const scheduleClose = () => {
-    if (pinned) return;
-    if (closeTimer.current) clearTimeout(closeTimer.current);
-    closeTimer.current = window.setTimeout(() => setActive(null), 180);
-  };
-  const cancelClose = () => {
-    if (closeTimer.current) {
-      clearTimeout(closeTimer.current);
-      closeTimer.current = null;
-    }
-  };
 
   useEffect(() => {
-    function onMouseOver(e: MouseEvent) {
-      const target = e.target as HTMLElement;
-      const mark = target.closest("mark.cs-anchor-mark") as HTMLElement | null;
-      if (!mark) return;
-      const reviewId = mark.dataset.reviewId;
-      const review = reviews.find((r) => r.id === reviewId);
-      if (!review) return;
-      cancelClose();
-      setActive({ review, rect: mark.getBoundingClientRect() });
-    }
-    function onMouseOut(e: MouseEvent) {
-      const target = e.target as HTMLElement;
-      if (target.closest("mark.cs-anchor-mark")) scheduleClose();
-    }
     function onClick(e: MouseEvent) {
       const target = e.target as HTMLElement;
       const mark = target.closest("mark.cs-anchor-mark") as HTMLElement | null;
       if (mark) {
-        // Click on a mark → pin the popover. Clicking another mark moves it.
         const reviewId = mark.dataset.reviewId;
         const review = reviews.find((r) => r.id === reviewId);
         if (review) {
-          cancelClose();
           setActive({ review, rect: mark.getBoundingClientRect() });
-          setPinned(true);
         }
         return;
       }
+      // Ignore clicks inside the popover itself
       if (target.closest("[data-comment-popover]")) return;
-      // Click outside → unpin + close
-      setPinned(false);
       setActive(null);
     }
-    document.addEventListener("mouseover", onMouseOver);
-    document.addEventListener("mouseout", onMouseOut);
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setActive(null);
+    }
     document.addEventListener("click", onClick);
+    document.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("mouseover", onMouseOver);
-      document.removeEventListener("mouseout", onMouseOut);
       document.removeEventListener("click", onClick);
+      document.removeEventListener("keydown", onKey);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reviews, pinned]);
+  }, [reviews]);
 
   if (!active) return null;
 
@@ -113,7 +80,6 @@ export function CommentHoverPopover({ pid, paperSlug, reviews }: Props) {
       doc(db, "projects", pid, "papers", paperSlug, "reviews", review.id),
       { status: "resolved", resolved_at: new Date().toISOString() },
     );
-    setPinned(false);
     setActive(null);
   };
   const withdraw = async () => {
@@ -121,7 +87,6 @@ export function CommentHoverPopover({ pid, paperSlug, reviews }: Props) {
       doc(db, "projects", pid, "papers", paperSlug, "reviews", review.id),
       { status: "rejected", resolved_at: new Date().toISOString() },
     );
-    setPinned(false);
     setActive(null);
   };
 
@@ -130,8 +95,6 @@ export function CommentHoverPopover({ pid, paperSlug, reviews }: Props) {
       data-comment-popover
       className="fixed z-40 rounded-lg border bg-white p-3 shadow-xl ring-1 ring-black/5 dark:bg-zinc-900 dark:ring-white/10"
       style={{ top, left, width }}
-      onMouseEnter={cancelClose}
-      onMouseLeave={scheduleClose}
     >
       <div className="flex items-center gap-2">
         <Badge
@@ -158,7 +121,7 @@ export function CommentHoverPopover({ pid, paperSlug, reviews }: Props) {
           size="icon"
           variant="ghost"
           className="ml-auto h-5 w-5"
-          onClick={() => { setPinned(false); setActive(null); }}
+          onClick={() => setActive(null)}
           aria-label="Close"
         >
           <X className="h-3 w-3" />
