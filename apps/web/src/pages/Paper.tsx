@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Markdown } from "@/components/Markdown";
 import { SyncDoisDialog } from "@/components/SyncDoisDialog";
+import { SelectionBubble } from "@/components/SelectionBubble";
 import { cn } from "@/lib/utils";
 
 interface Section {
@@ -36,6 +37,8 @@ interface Review {
   status: string;
   severity?: string;
   response?: string | null;
+  anchor_text?: string | null;
+  manuscript_ref?: string | null;
   created_at?: string;
   resolved_at?: string | null;
 }
@@ -240,6 +243,7 @@ export function Paper() {
 
   return (
     <div className="space-y-6">
+      {pid && slug && <SelectionBubble pid={pid} paperSlug={slug} />}
       <div>
         <Link
           to={`/projects/${pid}/papers`}
@@ -323,7 +327,9 @@ export function Paper() {
                 />
               ))
             ) : (
-              <Markdown className="text-sm" knownDois={knownDois}>{compiled}</Markdown>
+              <div data-section-key="__compiled__">
+                <Markdown className="text-sm" knownDois={knownDois}>{compiled}</Markdown>
+              </div>
             )}
             {downloadError && (
               <p className="mt-2 text-xs text-destructive">{downloadError}</p>
@@ -448,7 +454,9 @@ function SectionView({ section, pid, paperSlug, knownDois }: {
         </div>
       </div>
       {section.body ? (
-        <Markdown className="text-sm" knownDois={knownDois}>{section.body}</Markdown>
+        <div data-section-key={section.key}>
+          <Markdown className="text-sm" knownDois={knownDois}>{section.body}</Markdown>
+        </div>
       ) : (
         <p className="text-sm italic text-muted-foreground">empty</p>
       )}
@@ -1067,6 +1075,13 @@ function ReviewView({ review, pid, paperSlug, knownDois }: {
             <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-emerald-500" />
           ) : null}
         </div>
+        {review.anchor_text && (
+          <blockquote className="rounded border-l-2 border-primary/60 bg-muted/40 px-2 py-1 text-xs italic text-muted-foreground">
+            “{review.anchor_text.length > 280
+              ? review.anchor_text.slice(0, 280) + "…"
+              : review.anchor_text}”
+          </blockquote>
+        )}
         <Markdown className="text-sm" knownDois={knownDois}>{review.comment}</Markdown>
         {review.response && (
           <div className="rounded-md bg-muted p-2 text-xs">
