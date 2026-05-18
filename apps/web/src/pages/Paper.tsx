@@ -475,6 +475,7 @@ function useAnchorHighlights(
         r.status === "open" &&
         r.source === "user" &&
         !!r.anchor_text &&
+        r.anchor_text.length >= 3 &&
         (r.section === sectionKey ||
           r.manuscript_ref === `section:${sectionKey}`),
     );
@@ -482,40 +483,8 @@ function useAnchorHighlights(
 
     const wrappers: HTMLElement[] = [];
     for (const r of relevant) {
-      const anchor = r.anchor_text!;
-      if (anchor.length < 3) continue;
-      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-      const matches: Array<{ node: Text; start: number }> = [];
-      while (walker.nextNode()) {
-        const node = walker.currentNode as Text;
-        // Skip text nodes already inside one of our marks
-        if ((node.parentElement?.closest("mark.cs-anchor-mark"))) continue;
-        const text = node.textContent || "";
-        let idx = text.indexOf(anchor);
-        while (idx !== -1) {
-          matches.push({ node, start: idx });
-          idx = text.indexOf(anchor, idx + anchor.length);
-        }
-      }
-      // Reverse so wrapping later matches first doesn't shift earlier indices
-      matches.reverse();
-      for (const m of matches) {
-        try {
-          const range = document.createRange();
-          range.setStart(m.node, m.start);
-          range.setEnd(m.node, m.start + anchor.length);
-          const mark = document.createElement("mark");
-          mark.className = "cs-anchor-mark";
-          mark.dataset.reviewId = r.id;
-          mark.style.cssText =
-            "background:#fde68a;color:inherit;border-radius:2px;padding:0 1px;cursor:pointer;";
-          // Hover and click are delegated to CommentHoverPopover.
-          range.surroundContents(mark);
-          wrappers.push(mark);
-        } catch {
-          // surroundContents fails if range spans element boundaries — skip
-        }
-      }
+      const created = wrapAnchorInContainer(el, r.anchor_text!, r.id);
+      wrappers.push(...created);
     }
 
     return () => {
@@ -527,8 +496,91 @@ function useAnchorHighlights(
         parent.normalize();
       }
     };
-    // Re-run when reviews change, section body changes, or sectionKey changes
   }, [containerRef, reviews, sectionKey, body]);
+}
+
+/** Find `anchor` text inside `container` (including across text-node
+ *  boundaries from inline markdown like links/bold) and wrap each
+ *  occurrence in a yellow <mark>. Handles whitespace tolerance.
+ *  Returns the list of newly-created mark elements. */
+function wrapAnchorInContainer(
+  container: HTMLElement,
+  anchor: string,
+  reviewId: string,
+): HTMLElement[] {
+  // Build a concatenated text view of all text nodes (excluding already-marked).
+  // Track offsets so we can map a hit back to (node, offset).
+  type Part = { node: Text; start: number; end: number };
+  const parts: Part[] = [];
+  let concat = "";
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text;
+    if (node.parentElement?.closest("mark.cs-anchor-mark")) continue;
+    const t = node.textContent || "";
+    if (!t) continue;
+    parts.push({ node, start: concat.length, end: concat.length + t.length });
+    concat += t;
+  }
+  if (parts.length === 0) return [];
+
+  // Try exact match first; fall back to whitespace-tolerant match.
+  const positions = findOccurrences(concat, anchor);
+  // process from last to first so earlier indices stay valid
+  positions.reverse();
+  const made: HTMLElement[] = [];
+  for (const [hitStart, hitEnd] of positions) {
+    const startPart = parts.find((p) => hitStart >= p.start && hitStart < p.end);
+    const endPart = parts.find((p) => hitEnd > p.start && hitEnd <= p.end);
+    if (!startPart || !endPart) continue;
+    const range = document.createRange();
+    range.setStart(startPart.node, hitStart - startPart.start);
+    range.setEnd(endPart.node, hitEnd - endPart.start);
+    const mark = document.createElement("mark");
+    mark.className = "cs-anchor-mark";
+    mark.dataset.reviewId = reviewId;
+    mark.style.cssText =
+      "background:#fde68a;color:inherit;border-radius:2px;padding:0 1px;cursor:pointer;";
+    if (startPart === endPart) {
+      // Single node — surroundContents works
+      try { range.surroundContents(mark); made.push(mark); } catch { /* swallow */ }
+    } else {
+      // Cross-node — extract + insert
+      try {
+        const frag = range.extractContents();
+        mark.appendChild(frag);
+        range.insertNode(mark);
+        made.push(mark);
+      } catch { /* swallow */ }
+    }
+  }
+  return made;
+}
+
+/** Find all start..end offsets where `anchor` occurs in `text`.
+ *  Strategy: exact match first. If none, fall back to whitespace-tolerant
+ *  match (any whitespace run in anchor matches any whitespace run in text). */
+function findOccurrences(text: string, anchor: string): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  let idx = text.indexOf(anchor);
+  while (idx !== -1) {
+    out.push([idx, idx + anchor.length]);
+    idx = text.indexOf(anchor, idx + anchor.length);
+  }
+  if (out.length > 0) return out;
+
+  // Whitespace-tolerant fallback: build a regex where every whitespace
+  // run in the anchor matches any whitespace run in the text.
+  const escaped = anchor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = escaped.replace(/\s+/g, "\\s+");
+  try {
+    const re = new RegExp(pattern, "g");
+    for (let m: RegExpExecArray | null; (m = re.exec(text)); ) {
+      out.push([m.index, m.index + m[0].length]);
+      if (m[0].length === 0) re.lastIndex++;
+    }
+  } catch { /* invalid regex (unlikely after escape) */ }
+  return out;
 }
 
 
