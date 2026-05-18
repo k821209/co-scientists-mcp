@@ -46,29 +46,49 @@ function extractDoiFromHref(href: string | undefined): string | null {
 
 function injectAnchorMarks(body: string, anchors: AnchorTarget[]): string {
   if (!anchors || anchors.length === 0) return body;
-  // Longest first so 'plant pangenome' doesn't get pre-empted by 'plant'.
+  // selection.toString() captures the RENDERED text (no markdown markers).
+  // The markdown source may have **bold**, _italic_, `code`, ~~strike~~
+  // tokens between or around the words. Build a regex that escapes the
+  // anchor text but allows markdown markers + whitespace to appear at
+  // word boundaries.
   const sorted = [...anchors]
     .filter((a) => a.text && a.text.length >= 3)
     .sort((a, b) => b.text.length - a.text.length);
-  let out = body;
-  const consumedRanges: Array<[number, number]> = [];
+
+  type Match = { start: number; end: number; reviewId: string };
+  const matches: Match[] = [];
   for (const a of sorted) {
-    const re = new RegExp(
-      a.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-      "g",
-    );
-    out = out.replace(re, (match, offset: number) => {
-      // Avoid re-wrapping inside an already-injected <mark>
-      for (const [s, e] of consumedRanges) {
-        if (offset >= s && offset < e) return match;
-      }
-      const wrapped = `<mark class="cs-anchor-mark" data-review-id="${
-        a.reviewId.replace(/"/g, "")
-      }">${match}</mark>`;
-      consumedRanges.push([offset, offset + wrapped.length]);
-      return wrapped;
-    });
+    const escaped = a.text
+      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      .replace(/\s+/g, "[\\s*_~`]+");
+    let re: RegExp;
+    try {
+      re = new RegExp(escaped, "g");
+    } catch { continue; }
+    for (let m: RegExpExecArray | null; (m = re.exec(body)); ) {
+      matches.push({ start: m.index, end: m.index + m[0].length, reviewId: a.reviewId });
+      if (m[0].length === 0) re.lastIndex++;
+    }
   }
+  // Resolve overlaps: prefer the earliest start, then the longest match.
+  matches.sort((x, y) => x.start - y.start || y.end - x.end);
+  const accepted: Match[] = [];
+  for (const m of matches) {
+    const last = accepted[accepted.length - 1];
+    if (last && m.start < last.end) continue;
+    accepted.push(m);
+  }
+  // Splice <mark> wrappers into the source.
+  let out = "";
+  let pos = 0;
+  for (const m of accepted) {
+    out += body.slice(pos, m.start);
+    const inner = body.slice(m.start, m.end);
+    const safeId = m.reviewId.replace(/"/g, "");
+    out += `<mark class="cs-anchor-mark" data-review-id="${safeId}">${inner}</mark>`;
+    pos = m.end;
+  }
+  out += body.slice(pos);
   return out;
 }
 
