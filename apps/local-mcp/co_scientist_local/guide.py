@@ -10,7 +10,7 @@ only) and refers the agent here on every session start.
 """
 from __future__ import annotations
 
-GUIDE_VERSION = "2026-05-18"
+GUIDE_VERSION = "2026-05-18b"
 
 
 def render_guide() -> str:
@@ -47,10 +47,22 @@ On every session start:
 papers · sections · reviews · figures · tables · references · analyses · runs
 servers (HPC) · exports · image gen · whoami · project_guide
 
-## Citation format
+## Citation format + hallucination check
 
 Inline DOI: `{{doi:10.1234/example}}`. References auto-managed via
-`mcp__co_scientist__add_reference_by_doi`, assembled into BibTeX on export.
+`mcp__co_scientist__add_reference_by_doi(slug, doi)` — fetches title,
+authors, journal, year from CrossRef so you never invent them. Refuses
+DOIs CrossRef can't find (404 → almost always a hallucinated citation).
+
+After writing or revising sections, run
+`mcp__co_scientist__validate_references(slug)` to bulk-verify every
+DOI against CrossRef. The result splits into `resolved`, `unresolved`
+(hallucinated DOIs), `title_mismatch` (real DOI but you cited the wrong
+paper for it), `missing_doi`, and `errors`. Surface any `unresolved` /
+`title_mismatch` to the user before considering the manuscript done.
+
+For single-citation spot checks: `verify_doi(doi)` returns metadata
+without writing anything.
 
 ## Math mode (Pandoc)
 

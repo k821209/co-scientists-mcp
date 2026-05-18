@@ -313,6 +313,55 @@ def build_mcp(state: State) -> FastMCP:
     def delete_reference(slug: str, citation_key: str) -> dict[str, Any]:
         return {"deleted": _references.delete_reference(state, slug, citation_key)}
 
+    # ─── DOI verification (CrossRef-backed) ──────────────────────────────────
+    @mcp.tool()
+    def verify_doi(doi: str) -> dict[str, Any]:
+        """Resolve a DOI against CrossRef. Returns title/authors/journal/year
+        if real, raises if CrossRef returns 404 (likely hallucinated DOI).
+
+        Use BEFORE inserting a citation into a manuscript. No Firestore write.
+        """
+        return _references.verify_doi(state, doi)
+
+    @mcp.tool()
+    def add_reference_by_doi(
+        slug: str,
+        doi: str,
+        citation_key: str | None = None,
+        cited_in: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Fetch CrossRef metadata for `doi` and store as a reference.
+
+        Auto-derives citation_key like 'smith2024' from first-author surname
+        + year if not provided. Refuses to store DOIs CrossRef returns 404
+        for — that's the primary hallucination guard.
+        """
+        return _references.add_reference_by_doi(
+            state, slug, doi=doi, citation_key=citation_key, cited_in=cited_in,
+        )
+
+    @mcp.tool()
+    def enrich_reference_from_doi(slug: str, citation_key: str) -> dict[str, Any]:
+        """For an existing reference with only a DOI, fill in missing
+        title/authors/journal/year from CrossRef. Won't overwrite existing
+        non-empty fields.
+        """
+        return _references.enrich_reference_from_doi(state, slug, citation_key)
+
+    @mcp.tool()
+    def validate_references(slug: str) -> dict[str, Any]:
+        """Run CrossRef against every reference in a paper. Returns:
+          - resolved: DOIs CrossRef confirms (with matching title)
+          - unresolved: DOIs CrossRef cannot find (HALLUCINATION SUSPECTS)
+          - title_mismatch: DOI resolves but stored title doesn't match
+            CrossRef's (WRONG-PAPER-FOR-DOI SUSPECTS)
+          - missing_doi: references with no DOI field
+          - errors: transient lookup failures
+
+        Run this after writing/revising to surface fake citations.
+        """
+        return _references.validate_references(state, slug)
+
     # ─── analyses ────────────────────────────────────────────────────────────
     @mcp.tool()
     def create_analysis(
