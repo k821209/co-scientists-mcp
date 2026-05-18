@@ -60,17 +60,33 @@ export function CommentHoverPopover({ pid, paperSlug, reviews }: Props) {
 
   if (!active) return null;
 
-  const width = 360;
-  const gap = 6;
-  // Prefer BELOW the mark; flip above if would clip viewport bottom.
-  const wouldClipBelow = active.rect.bottom + 220 > window.innerHeight;
-  const top = wouldClipBelow
-    ? Math.max(8, active.rect.top - 220 - gap)
-    : active.rect.bottom + gap;
+  const width = 320;
+  const popHeight = 240;
+  const gap = 10;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const m = active.rect;
+
+  // Iron-clad rule: NEVER overlap the mark itself.
+  // 1. Prefer below if it fits without clipping the viewport bottom.
+  // 2. Else above if it fits without clipping the viewport top.
+  // 3. Else flow to the side that has more room and let it scroll
+  //    internally (max-h on the inner content).
+  const roomBelow = vh - m.bottom - 16;
+  const roomAbove = m.top - 16;
+  const placeBelow = roomBelow >= popHeight || roomBelow >= roomAbove;
+  const top = placeBelow
+    ? m.bottom + gap
+    : Math.max(16, m.top - popHeight - gap);
+  // Clamp horizontally with width awareness; bias toward viewport center
+  // if the mark is wide.
   const left = Math.max(
     8,
-    Math.min(active.rect.left, window.innerWidth - width - 8),
+    Math.min(m.left, vw - width - 8),
   );
+  // The popover gets a max-height equal to the available room, so it
+  // never gets pushed back over the mark by viewport-bottom clipping.
+  const maxHeight = Math.max(140, placeBelow ? roomBelow - gap : roomAbove - gap);
 
   const review = active.review;
   const isResolved = review.status !== "open";
@@ -93,9 +109,10 @@ export function CommentHoverPopover({ pid, paperSlug, reviews }: Props) {
   return (
     <div
       data-comment-popover
-      className="fixed z-40 rounded-lg border bg-white p-3 shadow-xl ring-1 ring-black/5 dark:bg-zinc-900 dark:ring-white/10"
-      style={{ top, left, width }}
+      className="fixed z-40 overflow-hidden rounded-lg border bg-white shadow-xl ring-1 ring-black/5 dark:bg-zinc-900 dark:ring-white/10"
+      style={{ top, left, width, maxHeight }}
     >
+     <div className="flex h-full flex-col overflow-y-auto p-3">
       <div className="flex items-center gap-2">
         <Badge
           variant={review.source === "ai" ? "secondary" : "outline"}
@@ -146,6 +163,7 @@ export function CommentHoverPopover({ pid, paperSlug, reviews }: Props) {
           </Button>
         </div>
       )}
+     </div>
     </div>
   );
 }
