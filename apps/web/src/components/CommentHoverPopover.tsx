@@ -4,7 +4,6 @@ import { CheckCircle2, XCircle, X } from "lucide-react";
 import { db } from "@/firebase";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { findReviewAtPoint, isPointOnAnchor } from "@/lib/anchorHighlightRegistry";
 
 interface Review {
   id: string;
@@ -35,37 +34,25 @@ export function CommentHoverPopover({ pid, paperSlug, reviews }: Props) {
   useEffect(() => {
     function onClick(e: MouseEvent) {
       const target = e.target as HTMLElement;
-      // Ignore clicks inside the popover itself
-      if (target.closest("[data-comment-popover]")) return;
-      // CSS Custom Highlights aren't DOM elements — use point-in-rect.
-      const hit = findReviewAtPoint(e.clientX, e.clientY);
-      if (hit) {
-        const review = reviews.find((r) => r.id === hit.reviewId);
-        if (review) setActive({ review, rect: hit.rect });
+      const mark = target.closest("mark.cs-anchor-mark") as HTMLElement | null;
+      if (mark) {
+        const reviewId = mark.dataset.reviewId;
+        const review = reviews.find((r) => r.id === reviewId);
+        if (review) setActive({ review, rect: mark.getBoundingClientRect() });
         return;
       }
+      // Ignore clicks inside the popover itself
+      if (target.closest("[data-comment-popover]")) return;
       setActive(null);
-    }
-    let lastCursor = "";
-    function onMouseMove(e: MouseEvent) {
-      // Lightweight cursor hint — only writes when state changes.
-      const want = isPointOnAnchor(e.clientX, e.clientY) ? "pointer" : "";
-      if (want !== lastCursor) {
-        document.body.style.cursor = want;
-        lastCursor = want;
-      }
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setActive(null);
     }
     document.addEventListener("click", onClick);
-    document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("click", onClick);
-      document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("keydown", onKey);
-      document.body.style.cursor = "";
     };
   }, [reviews]);
 
@@ -78,26 +65,40 @@ export function CommentHoverPopover({ pid, paperSlug, reviews }: Props) {
   const vh = window.innerHeight;
   const m = active.rect;
 
-  // Iron-clad rule: NEVER overlap the mark itself.
-  // 1. Prefer below if it fits without clipping the viewport bottom.
-  // 2. Else above if it fits without clipping the viewport top.
-  // 3. Else flow to the side that has more room and let it scroll
-  //    internally (max-h on the inner content).
+  // Position priority (don't cover the highlighted text):
+  //   1. To the RIGHT of the mark if width fits
+  //   2. To the LEFT if width fits
+  //   3. BELOW the mark line if room
+  //   4. ABOVE the mark line as last resort
+  // Vertical is clamped so the popover never exceeds the viewport.
+  const roomRight = vw - m.right - 16;
+  const roomLeft = m.left - 16;
   const roomBelow = vh - m.bottom - 16;
   const roomAbove = m.top - 16;
-  const placeBelow = roomBelow >= popHeight || roomBelow >= roomAbove;
-  const top = placeBelow
-    ? m.bottom + gap
-    : Math.max(16, m.top - popHeight - gap);
-  // Clamp horizontally with width awareness; bias toward viewport center
-  // if the mark is wide.
-  const left = Math.max(
-    8,
-    Math.min(m.left, vw - width - 8),
-  );
-  // The popover gets a max-height equal to the available room, so it
-  // never gets pushed back over the mark by viewport-bottom clipping.
-  const maxHeight = Math.max(140, placeBelow ? roomBelow - gap : roomAbove - gap);
+
+  let top: number;
+  let left: number;
+  let maxHeight: number;
+
+  if (roomRight >= width) {
+    left = m.right + gap;
+    top = Math.max(8, Math.min(m.top - 4, vh - popHeight - 8));
+    maxHeight = Math.max(140, vh - top - 8);
+  } else if (roomLeft >= width) {
+    left = m.left - width - gap;
+    top = Math.max(8, Math.min(m.top - 4, vh - popHeight - 8));
+    maxHeight = Math.max(140, vh - top - 8);
+  } else if (roomBelow >= roomAbove) {
+    top = m.bottom + gap;
+    left = Math.max(8, Math.min(m.left, vw - width - 8));
+    maxHeight = Math.max(140, roomBelow - gap);
+  } else {
+    // place above
+    const desiredHeight = Math.min(popHeight, roomAbove - gap);
+    top = Math.max(8, m.top - desiredHeight - gap);
+    left = Math.max(8, Math.min(m.left, vw - width - 8));
+    maxHeight = Math.max(140, roomAbove - gap);
+  }
 
   const review = active.review;
   const isResolved = review.status !== "open";

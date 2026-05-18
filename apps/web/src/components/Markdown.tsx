@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 import { remarkDoi } from "@/lib/remarkDoi";
 import { remarkFigureRefs } from "@/lib/remarkFigureRefs";
 import { remarkTableRefs } from "@/lib/remarkTableRefs";
+import { remarkAnchorMarks, type AnchorTarget } from "@/lib/remarkAnchorMarks";
 
 interface MarkdownProps {
   children: string;
@@ -30,6 +31,10 @@ interface MarkdownProps {
   /** DOIs that ARE registered in the paper's references collection — used
    *  to badge `{doi:…}` citations ✓ when present, ⚠ when missing. */
   knownDois?: ReadonlySet<string>;
+  /** When provided, wraps every occurrence of `text` in <mark> with
+   *  data-review-id=reviewId. Used to render comment anchor highlights
+   *  as React-managed DOM so they survive re-renders. */
+  anchors?: AnchorTarget[];
 }
 
 function extractDoiFromHref(href: string | undefined): string | null {
@@ -38,13 +43,27 @@ function extractDoiFromHref(href: string | undefined): string | null {
   return m ? m[1] : null;
 }
 
-export function Markdown({ children, className, knownDois }: MarkdownProps) {
+export function Markdown({ children, className, knownDois, anchors }: MarkdownProps) {
+  const anchorPlugins = anchors && anchors.length > 0
+    ? [[remarkAnchorMarks, anchors] as [typeof remarkAnchorMarks, AnchorTarget[]]]
+    : [];
   return (
     <div className={cn("prose-co-scientist", className)}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath, remarkDoi, remarkFigureRefs, remarkTableRefs]}
+        remarkPlugins={[
+          remarkGfm, remarkMath, remarkDoi, remarkFigureRefs, remarkTableRefs,
+          ...anchorPlugins,
+        ]}
         rehypePlugins={[rehypeKatex]}
         components={{
+          mark: ({ children, ...props }) => (
+            <mark
+              {...(props as React.HTMLAttributes<HTMLElement>)}
+              className="cs-anchor-mark cursor-pointer rounded-sm bg-amber-200 px-0.5 dark:bg-amber-300/40"
+            >
+              {children}
+            </mark>
+          ),
           // Use Tailwind classes rather than @tailwindcss/typography to keep
           // bundle small. Tweak per-element styling here.
           h1: ({ children }) => <h2 className="mt-4 mb-2 text-xl font-semibold">{children}</h2>,

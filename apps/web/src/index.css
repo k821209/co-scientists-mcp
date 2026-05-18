@@ -50,11 +50,4 @@
   body { @apply bg-background text-foreground; }
 }
 
-/* Anchored comment highlights — CSS Custom Highlight API.
-   The highlight registry uses keys like cs-anchor::<section>::<reviewId>;
-   we style all of them with the same yellow. */
-::highlight(comment-anchor) {
-  background-color: #fde68a;
-  color: inherit;
-}
 

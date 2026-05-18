@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type RefObject } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   addDoc, collection, doc, onSnapshot, orderBy, query, updateDoc,
@@ -18,7 +18,7 @@ import { Markdown } from "@/components/Markdown";
 import { SyncDoisDialog } from "@/components/SyncDoisDialog";
 import { SelectionBubble } from "@/components/SelectionBubble";
 import { CommentHoverPopover } from "@/components/CommentHoverPopover";
-import { setAnchorRanges, clearAnchorRanges } from "@/lib/anchorHighlightRegistry";
+import type { AnchorTarget } from "@/lib/remarkAnchorMarks";
 import { cn } from "@/lib/utils";
 
 interface Section {
@@ -454,32 +454,11 @@ export function Paper() {
   );
 }
 
-/** Apply yellow highlights to every anchor_text occurrence in a section.
- *
- *  Uses the CSS Custom Highlight API (no DOM mutation) — Range objects
- *  feed into a named Highlight that ::highlight(comment-anchor) styles.
- *  This avoids the React reconciliation conflicts that imperative
- *  `<mark>` wrapping caused (flicker on every refresh, highlights
- *  randomly disappearing across re-renders).
- *
- *  Click detection: see CommentHoverPopover, which uses point-in-rect
- *  against the range rects instead of DOM event delegation.
- */
-function useAnchorHighlights(
-  containerRef: RefObject<HTMLDivElement | null>,
-  reviews: Review[],
-  sectionKey: string,
-  body: string | undefined,
-) {
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const supported =
-      typeof Highlight !== "undefined" &&
-      !!(CSS as unknown as { highlights?: Map<string, Highlight> }).highlights;
-    if (!supported) return;
-
-    const relevant = reviews.filter(
+/** Pick out the open user comments for a given section and return them as
+ *  AnchorTarget[] for the Markdown component's remarkAnchorMarks plugin. */
+function anchorsForSection(reviews: Review[], sectionKey: string): AnchorTarget[] {
+  return reviews
+    .filter(
       (r) =>
         r.status === "open" &&
         r.source === "user" &&
@@ -487,79 +466,8 @@ function useAnchorHighlights(
         r.anchor_text.length >= 3 &&
         (r.section === sectionKey ||
           r.manuscript_ref === `section:${sectionKey}`),
-    );
-
-    const ownerKeys: string[] = [];
-    for (const r of relevant) {
-      const key = `${sectionKey}::${r.id}`;
-      const ranges = findAnchorRanges(el, r.anchor_text!);
-      setAnchorRanges(key, ranges, r.id);
-      ownerKeys.push(key);
-    }
-
-    return () => {
-      for (const k of ownerKeys) clearAnchorRanges(k);
-    };
-  }, [containerRef, reviews, sectionKey, body]);
-}
-
-/** Find `anchor` text inside `container` (including across text-node
- *  boundaries from inline markdown like links/bold) and return Range
- *  objects spanning each occurrence. Whitespace-tolerant. */
-function findAnchorRanges(container: HTMLElement, anchor: string): Range[] {
-  type Part = { node: Text; start: number; end: number };
-  const parts: Part[] = [];
-  let concat = "";
-  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-  while (walker.nextNode()) {
-    const node = walker.currentNode as Text;
-    const t = node.textContent || "";
-    if (!t) continue;
-    parts.push({ node, start: concat.length, end: concat.length + t.length });
-    concat += t;
-  }
-  if (parts.length === 0) return [];
-
-  const positions = findOccurrences(concat, anchor);
-  const ranges: Range[] = [];
-  for (const [hitStart, hitEnd] of positions) {
-    const startPart = parts.find((p) => hitStart >= p.start && hitStart < p.end);
-    const endPart = parts.find((p) => hitEnd > p.start && hitEnd <= p.end);
-    if (!startPart || !endPart) continue;
-    try {
-      const range = document.createRange();
-      range.setStart(startPart.node, hitStart - startPart.start);
-      range.setEnd(endPart.node, hitEnd - endPart.start);
-      ranges.push(range);
-    } catch { /* invalid offsets, skip */ }
-  }
-  return ranges;
-}
-
-/** Find all start..end offsets where `anchor` occurs in `text`.
- *  Strategy: exact match first. If none, fall back to whitespace-tolerant
- *  match (any whitespace run in anchor matches any whitespace run in text). */
-function findOccurrences(text: string, anchor: string): Array<[number, number]> {
-  const out: Array<[number, number]> = [];
-  let idx = text.indexOf(anchor);
-  while (idx !== -1) {
-    out.push([idx, idx + anchor.length]);
-    idx = text.indexOf(anchor, idx + anchor.length);
-  }
-  if (out.length > 0) return out;
-
-  // Whitespace-tolerant fallback: build a regex where every whitespace
-  // run in the anchor matches any whitespace run in the text.
-  const escaped = anchor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pattern = escaped.replace(/\s+/g, "\\s+");
-  try {
-    const re = new RegExp(pattern, "g");
-    for (let m: RegExpExecArray | null; (m = re.exec(text)); ) {
-      out.push([m.index, m.index + m[0].length]);
-      if (m[0].length === 0) re.lastIndex++;
-    }
-  } catch { /* invalid regex (unlikely after escape) */ }
-  return out;
+    )
+    .map((r) => ({ text: r.anchor_text!, reviewId: r.id }));
 }
 
 
@@ -569,8 +477,10 @@ function SectionView({ section, pid, paperSlug, knownDois, reviews }: {
   reviews: Review[];
 }) {
   const [showComment, setShowComment] = useState(false);
-  const bodyRef = useRef<HTMLDivElement | null>(null);
-  useAnchorHighlights(bodyRef, reviews, section.key, section.body);
+  const anchors = useMemo(
+    () => anchorsForSection(reviews, section.key),
+    [reviews, section.key],
+  );
   return (
     <div className="group mb-6 border-l-2 border-transparent pl-4 hover:border-accent">
       <div className="mb-2 flex items-center justify-between">
@@ -589,8 +499,10 @@ function SectionView({ section, pid, paperSlug, knownDois, reviews }: {
         </div>
       </div>
       {section.body ? (
-        <div data-section-key={section.key} ref={bodyRef}>
-          <Markdown className="text-sm" knownDois={knownDois}>{section.body}</Markdown>
+        <div data-section-key={section.key}>
+          <Markdown className="text-sm" knownDois={knownDois} anchors={anchors}>
+            {section.body}
+          </Markdown>
         </div>
       ) : (
         <p className="text-sm italic text-muted-foreground">empty</p>
