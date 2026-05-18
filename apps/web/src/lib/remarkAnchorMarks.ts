@@ -16,20 +16,20 @@
  */
 import { visit, SKIP } from "unist-util-visit";
 import type { Plugin } from "unified";
-import type { Root, Text, Parent, RootContent } from "mdast";
+import type { Root, Text, Parent, RootContent, Emphasis } from "mdast";
 
 export interface AnchorTarget {
   text: string;
   reviewId: string;
 }
 
-interface MarkNode extends Parent {
-  type: "anchorMark";
+// We piggy-back on `emphasis` so mdast-util-to-hast's standard handler fires.
+// The data.hName/hProperties hints override <em> → <mark> with our attributes.
+interface MarkNode extends Emphasis {
   data: {
     hName: "mark";
     hProperties: { className: "cs-anchor-mark"; "data-review-id": string };
   };
-  children: Text[];
 }
 
 export const remarkAnchorMarks: Plugin<[AnchorTarget[]], Root> = (anchors) => {
@@ -42,8 +42,9 @@ export const remarkAnchorMarks: Plugin<[AnchorTarget[]], Root> = (anchors) => {
     if (sorted.length === 0) return;
     visit(tree, "text", (node: Text, index, parent: Parent | undefined) => {
       if (!parent || index == null) return;
-      // Don't process text inside an existing anchor mark
-      if ((parent as { type: string }).type === "anchorMark") return SKIP;
+      // Don't process text inside an emphasis we've already marked
+      const p = parent as { type: string; data?: { hName?: string } };
+      if (p.type === "emphasis" && p.data?.hName === "mark") return SKIP;
       const text = node.value;
       // Find the earliest match across all anchors in this text node.
       let bestStart = -1;
@@ -68,7 +69,7 @@ export const remarkAnchorMarks: Plugin<[AnchorTarget[]], Root> = (anchors) => {
       const replacement: RootContent[] = [];
       if (before) replacement.push({ type: "text", value: before });
       const mark: MarkNode = {
-        type: "anchorMark",
+        type: "emphasis",
         data: {
           hName: "mark",
           hProperties: {

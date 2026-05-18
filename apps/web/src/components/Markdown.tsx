@@ -59,7 +59,16 @@ export function Markdown({ children, className, knownDois, anchors }: MarkdownPr
           mark: ({ children, ...props }) => (
             <mark
               {...(props as React.HTMLAttributes<HTMLElement>)}
-              className="cs-anchor-mark cursor-pointer rounded-sm bg-amber-200 px-0.5 dark:bg-amber-300/40"
+              className="cs-anchor-mark"
+              // Inline style so this works regardless of Tailwind purge or
+              // mobile browser <mark> default reset.
+              style={{
+                backgroundColor: "#fde68a",
+                color: "inherit",
+                borderRadius: "2px",
+                padding: "0 2px",
+                cursor: "pointer",
+              }}
             >
               {children}
             </mark>
