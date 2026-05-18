@@ -17,7 +17,8 @@ interface Props {
 interface SelectionInfo {
   text: string;
   sectionKey: string;
-  rect: DOMRect;
+  x: number;  // viewport-relative anchor (mouse release point)
+  y: number;
 }
 
 /** Listens for text selection inside section bodies. Pops up a small
@@ -57,8 +58,20 @@ export function SelectionBubble({
         return;
       }
       const sectionKey = (sectionEl as HTMLElement).dataset.sectionKey || "";
-      const rect = selection.getRangeAt(0).getBoundingClientRect();
-      setSel({ text, sectionKey, rect });
+      // Anchor to the mouse release point (most predictable). Fall back
+      // to selection's last client rect for touch / keyboard selection
+      // where event coords aren't available.
+      let x = e.clientX;
+      let y = e.clientY;
+      if (!x && !y) {
+        const rects = selection.getRangeAt(0).getClientRects();
+        const last = rects[rects.length - 1];
+        if (last) {
+          x = last.right;
+          y = last.top;
+        }
+      }
+      setSel({ text, sectionKey, x, y });
     }
 
     function onScroll() {
@@ -82,9 +95,14 @@ export function SelectionBubble({
     setSel(null);
   };
 
-  // Position the bubble above the selection, clamped to viewport.
-  const top = Math.max(8, sel.rect.top - 46);
-  const left = Math.max(8, Math.min(sel.rect.left, window.innerWidth - 280));
+  // Position the bubble above-left of the mouse release point, clamped
+  // to viewport. Width-aware so it doesn't clip off-screen on mobile.
+  const bubbleApproxWidth = composing ? 360 : 220;
+  const top = Math.max(8, sel.y - 46);
+  const left = Math.max(
+    8,
+    Math.min(sel.x - bubbleApproxWidth / 2, window.innerWidth - bubbleApproxWidth - 8),
+  );
 
   return (
     <div
