@@ -129,7 +129,7 @@ export function SelectionBubble({
       style={{ top, left }}
     >
       {!composing ? (
-        <div className="flex items-center gap-1 rounded-full border bg-popover px-2 py-1 shadow-md">
+        <div className="flex items-center gap-1 rounded-full border bg-white px-2 py-1 shadow-lg ring-1 ring-black/5 dark:bg-zinc-900 dark:ring-white/10">
           <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-xs"
                   onClick={copy} title="Copy selection">
             <Copy className="h-3 w-3" /> Copy
@@ -200,7 +200,7 @@ function CommentComposer({
   const [text, setText] = useState("");
   void pid; void paperSlug;
   return (
-    <div className="w-[min(360px,92vw)] space-y-2 rounded-lg border bg-popover p-3 shadow-lg">
+    <div className="w-[min(360px,92vw)] space-y-2 rounded-lg border bg-white p-3 shadow-xl ring-1 ring-black/5 dark:bg-zinc-900 dark:ring-white/10">
       <div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-muted-foreground">
         <span>Comment on {sectionKey ? <code>{sectionKey}</code> : "selection"}</span>
         <Button size="icon" variant="ghost" className="h-5 w-5" onClick={onCancel} aria-label="Close">
