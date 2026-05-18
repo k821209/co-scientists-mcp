@@ -32,6 +32,7 @@ export function SelectionBubble({
   const [sel, setSel] = useState<SelectionInfo | null>(null);
   const [composing, setComposing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
   const composingRef = useRef(composing);
   composingRef.current = composing;
   // Captures where the drag started, so we can anchor the bubble there
@@ -153,6 +154,7 @@ export function SelectionBubble({
           paperSlug={paperSlug}
           submitting={submitting}
           onCancel={() => { setComposing(false); setSel(null); }}
+          justSaved={justSaved}
           onSubmit={async (comment) => {
             setSubmitting(true);
             try {
@@ -166,7 +168,7 @@ export function SelectionBubble({
                 severity: "minor",
                 status: "open",
                 comment,
-                anchor_text: sel.text,           // the quoted selection
+                anchor_text: sel.text,
                 manuscript_ref: sel.sectionKey
                   ? `section:${sel.sectionKey}`
                   : null,
@@ -174,8 +176,15 @@ export function SelectionBubble({
                 created_at: new Date().toISOString(),
                 resolved_at: null,
               });
-              setComposing(false);
-              setSel(null);
+              setJustSaved(true);
+              // brief success state, then close + scroll user to Comments
+              setTimeout(() => {
+                setComposing(false);
+                setSel(null);
+                setJustSaved(false);
+                const target = document.getElementById("comments-anchor");
+                target?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }, 1200);
             } finally {
               setSubmitting(false);
             }
@@ -187,18 +196,34 @@ export function SelectionBubble({
 }
 
 function CommentComposer({
-  quoted, sectionKey, pid, paperSlug, submitting, onCancel, onSubmit,
+  quoted, sectionKey, pid, paperSlug, submitting, justSaved, onCancel, onSubmit,
 }: {
   quoted: string;
   sectionKey: string;
   pid: string;
   paperSlug: string;
   submitting: boolean;
+  justSaved: boolean;
   onCancel: () => void;
   onSubmit: (comment: string) => Promise<void>;
 }) {
   const [text, setText] = useState("");
   void pid; void paperSlug;
+
+  if (justSaved) {
+    return (
+      <div className="w-[min(360px,92vw)] rounded-lg border bg-white p-3 shadow-xl ring-1 ring-black/5 dark:bg-zinc-900 dark:ring-white/10">
+        <div className="flex items-center gap-2 text-sm font-medium text-green-700 dark:text-green-400">
+          <Check className="h-4 w-4" /> Comment saved
+        </div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          Scrolling to Comments — Claude Code will see your note + the
+          quoted text on its next session.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-[min(360px,92vw)] space-y-2 rounded-lg border bg-white p-3 shadow-xl ring-1 ring-black/5 dark:bg-zinc-900 dark:ring-white/10">
       <div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-muted-foreground">

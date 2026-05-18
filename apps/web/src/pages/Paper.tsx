@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type RefObject } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   addDoc, collection, doc, onSnapshot, orderBy, query, updateDoc,
@@ -323,7 +323,7 @@ export function Paper() {
               sections.map((s) => (
                 <SectionView
                   key={s.id} section={s} pid={pid} paperSlug={slug}
-                  knownDois={knownDois}
+                  knownDois={knownDois} reviews={reviews}
                 />
               ))
             ) : (
@@ -403,7 +403,7 @@ export function Paper() {
           </div>
         )}
 
-        <div className="space-y-4">
+        <div className="space-y-4" id="comments-anchor">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
@@ -432,10 +432,104 @@ export function Paper() {
   );
 }
 
-function SectionView({ section, pid, paperSlug, knownDois }: {
-  section: Section; pid: string; paperSlug: string; knownDois: ReadonlySet<string>;
+/** After a section's markdown renders, walk its text nodes and wrap any
+ *  exact-match anchor_text from open user comments in a yellow <mark>.
+ *  Click the mark → smooth-scroll + flash the corresponding comment.
+ *
+ *  Limitation: anchor_text must fit inside a single text node. If the
+ *  user selected across bold/italic/link boundaries the highlight won't
+ *  render (the comment still works, just no inline mark).
+ */
+function useAnchorHighlights(
+  containerRef: RefObject<HTMLDivElement | null>,
+  reviews: Review[],
+  sectionKey: string,
+  body: string | undefined,
+) {
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const relevant = reviews.filter(
+      (r) =>
+        r.status === "open" &&
+        r.source === "user" &&
+        !!r.anchor_text &&
+        (r.section === sectionKey ||
+          r.manuscript_ref === `section:${sectionKey}`),
+    );
+    if (relevant.length === 0) return;
+
+    const wrappers: HTMLElement[] = [];
+    for (const r of relevant) {
+      const anchor = r.anchor_text!;
+      if (anchor.length < 3) continue;
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      const matches: Array<{ node: Text; start: number }> = [];
+      while (walker.nextNode()) {
+        const node = walker.currentNode as Text;
+        // Skip text nodes already inside one of our marks
+        if ((node.parentElement?.closest("mark.cs-anchor-mark"))) continue;
+        const text = node.textContent || "";
+        let idx = text.indexOf(anchor);
+        while (idx !== -1) {
+          matches.push({ node, start: idx });
+          idx = text.indexOf(anchor, idx + anchor.length);
+        }
+      }
+      // Reverse so wrapping later matches first doesn't shift earlier indices
+      matches.reverse();
+      for (const m of matches) {
+        try {
+          const range = document.createRange();
+          range.setStart(m.node, m.start);
+          range.setEnd(m.node, m.start + anchor.length);
+          const mark = document.createElement("mark");
+          mark.className = "cs-anchor-mark";
+          mark.dataset.reviewId = r.id;
+          mark.style.cssText =
+            "background:#fde68a;color:inherit;border-radius:2px;padding:0 1px;cursor:pointer;";
+          mark.title = (r.comment || "").slice(0, 200);
+          mark.addEventListener("click", () => {
+            const target = document.getElementById(`review-${r.id}`);
+            if (target) {
+              target.scrollIntoView({ behavior: "smooth", block: "center" });
+              target.classList.add("ring-2", "ring-amber-400");
+              setTimeout(
+                () => target.classList.remove("ring-2", "ring-amber-400"),
+                1500,
+              );
+            }
+          });
+          range.surroundContents(mark);
+          wrappers.push(mark);
+        } catch {
+          // surroundContents fails if range spans element boundaries — skip
+        }
+      }
+    }
+
+    return () => {
+      for (const w of wrappers) {
+        const parent = w.parentNode;
+        if (!parent) continue;
+        while (w.firstChild) parent.insertBefore(w.firstChild, w);
+        parent.removeChild(w);
+        parent.normalize();
+      }
+    };
+    // Re-run when reviews change, section body changes, or sectionKey changes
+  }, [containerRef, reviews, sectionKey, body]);
+}
+
+
+function SectionView({ section, pid, paperSlug, knownDois, reviews }: {
+  section: Section; pid: string; paperSlug: string;
+  knownDois: ReadonlySet<string>;
+  reviews: Review[];
 }) {
   const [showComment, setShowComment] = useState(false);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  useAnchorHighlights(bodyRef, reviews, section.key, section.body);
   return (
     <div className="group mb-6 border-l-2 border-transparent pl-4 hover:border-accent">
       <div className="mb-2 flex items-center justify-between">
@@ -454,7 +548,7 @@ function SectionView({ section, pid, paperSlug, knownDois }: {
         </div>
       </div>
       {section.body ? (
-        <div data-section-key={section.key}>
+        <div data-section-key={section.key} ref={bodyRef}>
           <Markdown className="text-sm" knownDois={knownDois}>{section.body}</Markdown>
         </div>
       ) : (
@@ -1054,7 +1148,7 @@ function ReviewView({ review, pid, paperSlug, knownDois }: {
 }) {
   const isResolved = review.status !== "open";
   return (
-    <Card>
+    <Card id={`review-${review.id}`} className="transition-shadow">
       <CardContent className="space-y-2 p-4">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Badge variant={review.source === "ai" ? "secondary" : "outline"} className="text-[10px]">
