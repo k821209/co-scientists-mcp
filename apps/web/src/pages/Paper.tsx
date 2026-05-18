@@ -6,7 +6,7 @@ import {
 import {
   ArrowLeft, MessageSquare, CheckCircle2, XCircle, Download, Loader2,
   ImageIcon, BookOpen, ExternalLink, Table2, Activity, Beaker,
-  FileText, Layers, Clock,
+  FileText, Layers, Clock, RefreshCw,
 } from "lucide-react";
 import { db } from "@/firebase";
 import { downloadProjectBlobAsText, getProjectStorage } from "@/projectAuth";
@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Markdown } from "@/components/Markdown";
+import { SyncDoisDialog } from "@/components/SyncDoisDialog";
 import { cn } from "@/lib/utils";
 
 interface Section {
@@ -355,7 +356,7 @@ export function Paper() {
 
         {references.length > 0 && (
           <div className="lg:col-span-1">
-            <ReferencesCard references={references} cited={knownDois} />
+            <ReferencesCard pid={pid} slug={slug} references={references} cited={knownDois} />
           </div>
         )}
 
@@ -626,10 +627,13 @@ function AnalysisRow({ pid, paperSlug, analysis }: {
 }
 
 
-function ReferencesCard({ references, cited }: {
+function ReferencesCard({ pid, slug, references, cited }: {
+  pid: string;
+  slug: string;
   references: Reference[];
   cited: ReadonlySet<string>;  // DOIs that appear in /references — same Set we use for badges
 }) {
+  const [syncOpen, setSyncOpen] = useState(false);
   // Sort: alphabetical by citation_key (matches BibTeX export order)
   const sorted = [...references].sort((a, b) =>
     (a.citation_key || "").localeCompare(b.citation_key || ""),
@@ -641,16 +645,25 @@ function ReferencesCard({ references, cited }: {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <BookOpen className="h-4 w-4" /> References
-          <Badge variant="secondary" className="ml-auto text-[10px]">
+          <Badge variant="secondary" className="text-[10px]">
             {references.length}
           </Badge>
+          <Button
+            size="sm"
+            variant="outline"
+            className="ml-auto h-7 gap-1 text-xs"
+            onClick={() => setSyncOpen(true)}
+            title="Verify every DOI against CrossRef"
+          >
+            <RefreshCw className="h-3 w-3" /> Sync DOIs
+          </Button>
         </CardTitle>
         <CardDescription>
           Registered via{" "}
           <code className="bg-muted px-1 py-0.5 text-[10px]">
-            mcp__co_scientist__add_reference
-          </code>{" "}
-          (manually or by DOI/PMID lookup).
+            mcp__co_scientist__add_reference_by_doi
+          </code>
+          . Sync runs CrossRef checks to catch hallucinated citations.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -695,6 +708,14 @@ function ReferencesCard({ references, cited }: {
           );
         })}
       </CardContent>
+      {syncOpen && (
+        <SyncDoisDialog
+          pid={pid}
+          slug={slug}
+          references={references}
+          onClose={() => setSyncOpen(false)}
+        />
+      )}
     </Card>
   );
 }
