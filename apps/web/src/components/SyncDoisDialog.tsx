@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { doc, deleteDoc, setDoc, updateDoc } from "firebase/firestore";
+import { doc, deleteDoc, setDoc, updateDoc, type DocumentReference } from "firebase/firestore";
 import {
   X, CheckCircle2, AlertTriangle, HelpCircle, Trash2, RefreshCw, BookPlus,
 } from "lucide-react";
@@ -76,6 +76,10 @@ export function SyncDoisDialog({ pid, slug, references, inlineDois, onClose }: P
         ) {
           await maybeFillMissingFields(pid, slug, source.ref, verdict.meta);
         }
+        // Persist verdict so Claude Code can read it in a later session.
+        await writeFinding(pid, slug, source, verdict).catch((e) =>
+          console.warn("writeFinding failed:", e),
+        );
         await sleep(150);
       }
       if (!cancelled) setRunning(false);
@@ -189,6 +193,7 @@ function ResultRow({ pid, slug, row }: { pid: string; slug: string; row: RowResu
       authors: meta.authors,
       updated_at: new Date().toISOString(),
     });
+    if (source.ref.doi) await deleteDoc(findingDoc(pid, slug, source.ref.doi));
     setActed("Updated from CrossRef");
   };
 
@@ -196,6 +201,7 @@ function ResultRow({ pid, slug, row }: { pid: string; slug: string; row: RowResu
     if (source.kind !== "ref") return;
     if (!confirm(`Delete reference '${source.ref.citation_key}'?`)) return;
     await deleteDoc(refDoc(pid, slug, source.ref.id));
+    if (source.ref.doi) await deleteDoc(findingDoc(pid, slug, source.ref.doi));
     setActed("Deleted");
   };
 
@@ -214,6 +220,16 @@ function ResultRow({ pid, slug, row }: { pid: string; slug: string; row: RowResu
       cited_in: [],
       created_at: now,
       updated_at: now,
+    });
+    // Upgrade the finding from inline → registered_ref (overwrite same doc id)
+    await setDoc(findingDoc(pid, slug, meta.doi), {
+      doi: meta.doi.toLowerCase(),
+      kind: "resolved",
+      source: "registered_ref",
+      ref_citation_key: key,
+      crossref_title: meta.title,
+      detected_at: now,
+      acknowledged: false,
     });
     setActed(`Registered as '${key}'`);
   };
@@ -315,6 +331,39 @@ function deriveBase(meta: CrossrefMeta): string {
 
 function refDoc(pid: string, slug: string, citationKey: string) {
   return doc(db, "projects", pid, "papers", slug, "references", citationKey);
+}
+
+function findingDoc(pid: string, slug: string, doi: string): DocumentReference {
+  const safe = doi.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "_";
+  return doc(db, "projects", pid, "papers", slug, "verification_findings", safe);
+}
+
+async function writeFinding(
+  pid: string,
+  slug: string,
+  source: Source,
+  verdict: Verdict,
+): Promise<void> {
+  const doi = source.kind === "ref" ? source.ref.doi : source.doi;
+  if (!doi) return;  // nothing to key on
+  const payload: Record<string, unknown> = {
+    doi: doi.toLowerCase(),
+    kind: verdict.kind,
+    source: source.kind === "ref" ? "registered_ref" : "inline",
+    detected_at: new Date().toISOString(),
+    acknowledged: false,
+  };
+  if (source.kind === "ref") {
+    payload.ref_citation_key = source.ref.citation_key;
+    if (source.ref.title) payload.stored_title = source.ref.title;
+  }
+  if (verdict.kind === "resolved" || verdict.kind === "title_mismatch") {
+    payload.crossref_title = verdict.meta.title;
+    payload.shared_words = verdict.sharedWords;
+    if (verdict.kind === "title_mismatch") payload.stored_title = verdict.storedTitle;
+  }
+  if (verdict.kind === "error") payload.message = verdict.message;
+  await setDoc(findingDoc(pid, slug, doi), payload);
 }
 
 async function maybeFillMissingFields(

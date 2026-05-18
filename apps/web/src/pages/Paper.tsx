@@ -99,6 +99,20 @@ interface ActivityEntry {
   created_at?: string;
 }
 
+interface Finding {
+  id: string;
+  doi: string;
+  kind: "resolved" | "unresolved" | "title_mismatch" | "missing_doi" | "error";
+  source: "registered_ref" | "inline";
+  ref_citation_key?: string;
+  stored_title?: string;
+  crossref_title?: string;
+  shared_words?: number;
+  message?: string;
+  detected_at?: string;
+  acknowledged?: boolean;
+}
+
 export function Paper() {
   const { pid, slug } = useParams<{ pid: string; slug: string }>();
   const [paper, setPaper] = useState<Record<string, unknown> | null>(null);
@@ -109,6 +123,7 @@ export function Paper() {
   const [tables, setTables] = useState<PaperTable[]>([]);
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const [findings, setFindings] = useState<Finding[]>([]);
   const [viewMode, setViewMode] = useState<"sections" | "compiled">("sections");
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -148,9 +163,16 @@ export function Paper() {
         setActivity(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ActivityEntry, "id">) }))),
       () => {/* empty subcollection is fine */},
     );
+    const findingsRef = collection(paperRef, "verification_findings");
+    const unsubFnd = onSnapshot(
+      findingsRef,
+      (snap) =>
+        setFindings(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Finding, "id">) }))),
+      () => {/* empty subcollection is fine */},
+    );
     return () => {
       unsubPaper(); unsubSec(); unsubRev(); unsubRefs();
-      unsubFigs(); unsubTabs(); unsubAna(); unsubAct();
+      unsubFigs(); unsubTabs(); unsubAna(); unsubAct(); unsubFnd();
     };
   }, [pid, slug]);
 
@@ -357,7 +379,7 @@ export function Paper() {
         <div className="lg:col-span-1">
           <ReferencesCard
             pid={pid} slug={slug} references={references}
-            sections={sections} cited={knownDois}
+            sections={sections} cited={knownDois} findings={findings}
           />
         </div>
 
@@ -628,13 +650,18 @@ function AnalysisRow({ pid, paperSlug, analysis }: {
 }
 
 
-function ReferencesCard({ pid, slug, references, sections, cited }: {
+function ReferencesCard({ pid, slug, references, sections, cited, findings }: {
   pid: string;
   slug: string;
   references: Reference[];
   sections: Section[];
   cited: ReadonlySet<string>;
+  findings: Finding[];
 }) {
+  const problemFindings = useMemo(
+    () => findings.filter((f) => !f.acknowledged && f.kind !== "resolved"),
+    [findings],
+  );
   const [syncOpen, setSyncOpen] = useState(false);
   const sorted = [...references].sort((a, b) =>
     (a.citation_key || "").localeCompare(b.citation_key || ""),
@@ -666,6 +693,15 @@ function ReferencesCard({ pid, slug, references, sections, cited }: {
               <span className="ml-1 text-amber-700">+{inlineDois.size}</span>
             )}
           </Badge>
+          {problemFindings.length > 0 && (
+            <Badge
+              variant="outline"
+              className="border-red-300 bg-red-50 text-[10px] text-red-700"
+              title="Unacknowledged verification problems"
+            >
+              ⚠ {problemFindings.length}
+            </Badge>
+          )}
           <Button
             size="sm"
             variant="outline"

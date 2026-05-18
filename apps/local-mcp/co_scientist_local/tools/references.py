@@ -307,40 +307,55 @@ def enrich_reference_from_doi(state: State, slug: str, citation_key: str) -> dic
 
 
 def validate_references(state: State, slug: str) -> dict:
-    """Run CrossRef against every reference in a paper. Categorizes:
-
-      - `resolved`: DOI exists on CrossRef and metadata matches loosely
-      - `unresolved`: DOI returned 404 — almost certainly hallucinated
-      - `missing_doi`: reference has no DOI field at all
-      - `errors`: transient network/CrossRef failures (retry later)
+    """Run CrossRef against every reference in a paper. Categorizes results
+    into resolved / unresolved / title_mismatch / missing_doi / errors, AND
+    persists each verdict to /papers/{slug}/verification_findings/{doi_safe}
+    so a future session (or the dashboard) can read what was found.
 
     Title-mismatch heuristic: if the stored title and CrossRef title share
     fewer than 3 substantive words, flag for review (CrossRef title is
     authoritative). This catches "right DOI, wrong title" hallucinations.
     """
+    # Local import to avoid circular dep
+    from . import verification as _verification
+
     refs = list_references(state, slug)
     resolved: list[dict] = []
     unresolved: list[dict] = []
     missing_doi: list[dict] = []
     title_mismatch: list[dict] = []
     errors: list[dict] = []
+    now = now_iso()
     for r in refs:
         key = r.get("citation_key", "")
         doi = (r.get("doi") or "").strip()
         if not doi:
             missing_doi.append({"citation_key": key, "title": r.get("title")})
+            # No DOI to identify the finding by — skip persistence (would
+            # collide for every untitled reference).
             continue
         try:
             meta = _fetch_crossref(doi)
         except DoiNotFound:
-            unresolved.append({
+            entry = {
                 "citation_key": key, "doi": doi, "stored_title": r.get("title"),
-            })
+            }
+            unresolved.append(entry)
+            _write_finding(
+                state, slug, doi=doi, kind="unresolved", source="registered_ref",
+                ref_citation_key=key, stored_title=r.get("title"), now=now,
+                verification=_verification,
+            )
             continue
         except Exception as e:
-            errors.append({"citation_key": key, "doi": doi, "error": str(e)})
+            entry = {"citation_key": key, "doi": doi, "error": str(e)}
+            errors.append(entry)
+            _write_finding(
+                state, slug, doi=doi, kind="error", source="registered_ref",
+                ref_citation_key=key, message=str(e), now=now,
+                verification=_verification,
+            )
             continue
-        # Loose title comparison — 3+ shared substantive words
         stored_title = (r.get("title") or "").lower()
         crossref_title = (meta.get("title") or "").lower()
         shared = _shared_words(stored_title, crossref_title)
@@ -352,16 +367,64 @@ def validate_references(state: State, slug: str) -> dict:
         }
         if shared < 3 and stored_title:
             title_mismatch.append(entry)
+            _write_finding(
+                state, slug, doi=doi, kind="title_mismatch", source="registered_ref",
+                ref_citation_key=key, stored_title=r.get("title"),
+                crossref_title=meta.get("title"), shared_words=shared, now=now,
+                verification=_verification,
+            )
         else:
             resolved.append(entry)
+            _write_finding(
+                state, slug, doi=doi, kind="resolved", source="registered_ref",
+                ref_citation_key=key, stored_title=r.get("title"),
+                crossref_title=meta.get("title"), shared_words=shared, now=now,
+                verification=_verification,
+            )
     return {
         "total": len(refs),
         "resolved": resolved,
-        "unresolved": unresolved,           # hallucination suspects
-        "title_mismatch": title_mismatch,   # wrong-paper-for-DOI suspects
+        "unresolved": unresolved,
+        "title_mismatch": title_mismatch,
         "missing_doi": missing_doi,
         "errors": errors,
     }
+
+
+def _write_finding(
+    state: State, slug: str, *,
+    doi: str, kind: str, source: str,
+    ref_citation_key: str | None = None,
+    stored_title: str | None = None,
+    crossref_title: str | None = None,
+    shared_words: int | None = None,
+    message: str | None = None,
+    now: str,
+    verification,
+) -> None:
+    """Persist one verification verdict as a Firestore doc."""
+    doc_id = verification._doi_safe_id(doi)
+    payload = {
+        "doi": doi.lower(),
+        "kind": kind,
+        "source": source,
+        "detected_at": now,
+        "acknowledged": False,
+    }
+    if ref_citation_key is not None:
+        payload["ref_citation_key"] = ref_citation_key
+    if stored_title is not None:
+        payload["stored_title"] = stored_title
+    if crossref_title is not None:
+        payload["crossref_title"] = crossref_title
+    if shared_words is not None:
+        payload["shared_words"] = shared_words
+    if message is not None:
+        payload["message"] = message
+    state.backend.set_doc(
+        verification._finding_doc_path(state, slug, doc_id),
+        payload,
+    )
 
 
 _STOPWORDS = {

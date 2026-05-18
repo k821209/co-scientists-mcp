@@ -19,6 +19,7 @@ from .tools import sections as _sections
 from .tools import servers as _servers
 from .tools import ssh_ops as _ssh_ops
 from .tools import tables as _tables
+from .tools import verification as _verification
 
 
 def build_mcp(state: State) -> FastMCP:
@@ -361,6 +362,50 @@ def build_mcp(state: State) -> FastMCP:
         Run this after writing/revising to surface fake citations.
         """
         return _references.validate_references(state, slug)
+
+    # ─── verification findings (persisted CrossRef verdicts) ─────────────────
+    @mcp.tool()
+    def list_verification_findings(
+        slug: str,
+        only_unacknowledged: bool = True,
+        only_problems: bool = True,
+    ) -> list[dict[str, Any]]:
+        """List CrossRef verification findings the dashboard's Sync DOIs
+        button wrote — or that the agent itself wrote via validate_references.
+
+        Defaults to only unacknowledged + only problems (unresolved /
+        title_mismatch / missing_doi / error). Set both to False for the
+        full audit log.
+
+        Call at session start to surface hallucinations the user already
+        flagged in the dashboard.
+        """
+        return _verification.list_verification_findings(
+            state, slug,
+            only_unacknowledged=only_unacknowledged,
+            only_problems=only_problems,
+        )
+
+    @mcp.tool()
+    def acknowledge_finding(
+        slug: str,
+        doi: str,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        """Mark a verification finding as handled (e.g. agent deleted the
+        hallucinated ref or replaced it with a real citation). Use after
+        actually fixing the citation so it doesn't keep showing up.
+        """
+        return _verification.acknowledge_finding(
+            state, slug, doi, actor="agent", note=note,
+        )
+
+    @mcp.tool()
+    def clear_findings(slug: str) -> dict[str, Any]:
+        """Wipe all verification findings for a paper. Use before a fresh
+        full re-validation if you want the audit log reset.
+        """
+        return {"deleted": _verification.clear_findings(state, slug)}
 
     # ─── analyses ────────────────────────────────────────────────────────────
     @mcp.tool()
