@@ -187,6 +187,38 @@ def test_extract_doi_contexts_stacked_citation(state):
     assert set(contexts["10.1/b"][0]["stacked_with"]) == {"10.1/a", "10.1/c"}
 
 
+def test_delete_reference_cascades_finding(state, monkeypatch):
+    """Deleting a reference should remove the doi-keyed finding doc too,
+    so the dashboard doesn't show a zombie ⚠ for a citation that's gone."""
+    slug = _setup(state)
+    references.add_reference(
+        state, slug, citation_key="x", title="X", doi="10.1/x",
+    )
+
+    def _fake_fetch(doi, *, timeout=15):
+        return {
+            "doi": doi, "title": "X", "abstract": "", "subjects": [],
+            "authors": [], "journal": None, "year": None,
+            "url": None, "type": "journal-article",
+        }
+    monkeypatch.setattr(references, "_fetch_crossref", _fake_fetch)
+
+    references.validate_references(state, slug)
+    from co_scientist_local.tools import verification as _v
+    # Finding exists before deletion
+    findings_before = _v.list_verification_findings(
+        state, slug, only_unacknowledged=False, only_problems=False,
+    )
+    assert any(f.get("doi") == "10.1/x" for f in findings_before)
+
+    references.delete_reference(state, slug, "x")
+
+    findings_after = _v.list_verification_findings(
+        state, slug, only_unacknowledged=False, only_problems=False,
+    )
+    assert not any(f.get("doi") == "10.1/x" for f in findings_after)
+
+
 def test_acknowledge_finding_records_agent_verdict(state, monkeypatch):
     """The agent's verdict (approved/rejected) is recorded on the finding,
     setting context_verified accordingly."""

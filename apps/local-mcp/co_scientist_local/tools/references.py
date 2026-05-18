@@ -241,11 +241,26 @@ def search_references(
 
 
 def delete_reference(state: State, slug: str, citation_key: str) -> bool:
+    """Delete a reference + cascade its verification finding (if any).
+
+    The finding doc is keyed by DOI, so we read the reference's DOI before
+    deleting the ref. Prevents zombie findings that survive the citation
+    they were about and clutter the dashboard's ribbon UI.
+    """
     _ensure_paper(state, slug)
     path = _ref_path(state, slug, citation_key)
-    if state.backend.get_doc(path) is None:
+    cur = state.backend.get_doc(path)
+    if cur is None:
         return False
+    doi = (cur.get("doi") or "").strip().lower()
     state.backend.delete_doc(path)
+    if doi:
+        from . import verification as _verification
+        finding_path = _verification._finding_doc_path(
+            state, slug, _verification._doi_safe_id(doi),
+        )
+        # Best-effort — silently skip if the finding doesn't exist.
+        state.backend.delete_doc(finding_path)
     return True
 
 
