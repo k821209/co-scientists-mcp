@@ -54,7 +54,18 @@ export function SelectionBubble({
         if (!composingRef.current) setSel(null);
         return;
       }
-      const text = selection.toString().trim();
+      // Strip render-only artifacts that selection.toString() picks up
+      // but markdown source doesn't have:
+      //   ✓/⚠ DOI status badges, the rendered "doi:..." link text,
+      //   and accidentally-captured {doi:…}/{fig:…}/{tab:…} tokens.
+      // Whitespace runs collapse so saved text matches Firestore neatly.
+      const rawText = selection.toString();
+      const text = rawText
+        .replace(/[✓⚠]/g, " ")
+        .replace(/\bdoi:[^\s)\]]+/gi, " ")
+        .replace(/\{(?:doi|fig|tab):[^}]*\}/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
       if (text.length < 3) {
         if (!composingRef.current) setSel(null);
         return;

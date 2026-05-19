@@ -46,9 +46,13 @@ function extractDoiFromHref(href: string | undefined): string | null {
 
 function injectAnchorMarks(body: string, anchors: AnchorTarget[]): string {
   if (!anchors || anchors.length === 0) return body;
-  // selection.toString() captures the RENDERED text (no markdown markers);
-  // tolerate **bold**, _italic_, `code`, ~~strike~~ tokens sitting in the
-  // source between the anchor's words.
+  // selection.toString() captures the RENDERED text — which for our
+  // markdown means:
+  //   - inline DOI badge characters ✓/⚠ that don't exist in source
+  //   - the rendered "doi:..." link text where source has {doi:X}
+  //   - line breaks inserted by DOM block layout around the link
+  // Plus the source has **bold**, _italic_, `code` tokens we should
+  // tolerate sitting between the anchor's words.
   const sorted = [...anchors]
     .filter((a) => a.text && a.text.length >= 3)
     .sort((a, b) => b.text.length - a.text.length);
@@ -56,9 +60,20 @@ function injectAnchorMarks(body: string, anchors: AnchorTarget[]): string {
   type Match = { start: number; end: number; reviewId: string };
   const matches: Match[] = [];
   for (const a of sorted) {
-    const escaped = a.text
+    // 1. Strip render-only artifacts from the anchor.
+    const stripped = a.text
+      .replace(/[✓⚠]/g, " ")              // DOI status badges
+      .replace(/\bdoi:[^\s)\]]+/gi, " ")   // rendered DOI link text
+      .replace(/\{(?:doi|fig|tab):[^}]*\}/g, " ") // accidentally captured markers
+      .replace(/\s+/g, " ")                // collapse whitespace
+      .trim();
+    if (stripped.length < 3) continue;
+    // 2. Build a regex that allows up to 300 chars of anything between
+    //    each pair of anchor words (so {doi:...}/{fig:N}/markdown markers
+    //    in the source don't break the match).
+    const escaped = stripped
       .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-      .replace(/\s+/g, "[\\s*_~`]+");
+      .replace(/\s+/g, "[\\s\\S]{0,300}?");
     let re: RegExp;
     try {
       re = new RegExp(escaped, "g");
