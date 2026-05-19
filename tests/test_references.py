@@ -187,6 +187,69 @@ def test_extract_doi_contexts_stacked_citation(state):
     assert set(contexts["10.1/b"][0]["stacked_with"]) == {"10.1/a", "10.1/c"}
 
 
+def test_search_works_normalizes_each_hit(monkeypatch):
+    """search_works returns normalized CrossRef metadata per hit."""
+    import urllib.request as ur
+
+    fake_payload = {
+        "message": {
+            "items": [
+                {
+                    "DOI": "10.1/foo",
+                    "title": ["A study"],
+                    "author": [{"given": "Jane", "family": "Smith"}],
+                    "container-title": ["Cell"],
+                    "issued": {"date-parts": [[2024]]},
+                    "subject": ["Plant Sci"],
+                    "abstract": "<jats>concise</jats>",
+                    "URL": "https://doi.org/10.1/foo",
+                    "type": "journal-article",
+                },
+                {
+                    "DOI": "10.2/bar",
+                    "title": ["Another"],
+                    "issued": {"date-parts": [[2025]]},
+                },
+            ],
+        },
+    }
+
+    class FakeResp:
+        def __init__(self, b): self.b = b
+        def read(self): return self.b
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    captured: dict = {}
+    def fake_urlopen(req, timeout=20):
+        captured["url"] = req.full_url
+        import json
+        return FakeResp(json.dumps(fake_payload).encode())
+    monkeypatch.setattr(ur, "urlopen", fake_urlopen)
+
+    hits = references.search_works(
+        None, query="plant pangenome", limit=2, year_from=2022,
+    )
+    assert len(hits) == 2
+    assert hits[0]["doi"] == "10.1/foo"
+    assert hits[0]["title"] == "A study"
+    assert hits[0]["authors"] == ["Jane Smith"]
+    assert hits[0]["journal"] == "Cell"
+    assert hits[0]["year"] == 2024
+    assert hits[0]["abstract"] == "concise"
+    assert "Plant Sci" in hits[0]["subjects"]
+    # Year filter actually went into the URL
+    assert "from-pub-date%3A2022" in captured["url"]
+
+
+def test_search_works_empty_query_raises():
+    import pytest
+    with pytest.raises(ValueError):
+        references.search_works(None, query="")
+    with pytest.raises(ValueError):
+        references.search_works(None, query="   ")
+
+
 def test_delete_reference_cascades_finding(state, monkeypatch):
     """Deleting a reference should remove the doi-keyed finding doc too,
     so the dashboard doesn't show a zombie ⚠ for a citation that's gone."""

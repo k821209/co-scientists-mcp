@@ -28,6 +28,7 @@ from ..util import now_iso
 from .papers import _paper_path
 
 _CROSSREF_BASE = "https://api.crossref.org/works/"
+_CROSSREF_SEARCH = "https://api.crossref.org/works"
 _CROSSREF_UA = "co-scientist-local/0.1 (mailto:dev@co-scientist.example)"
 
 
@@ -36,6 +37,60 @@ class DoiNotFound(Exception):
     def __init__(self, doi: str) -> None:
         self.doi = doi
         super().__init__(f"CrossRef returned 404 for {doi!r} — likely a hallucinated DOI")
+
+
+def search_works(
+    state: State,
+    *,
+    query: str,
+    limit: int = 10,
+    year_from: int | None = None,
+    year_to: int | None = None,
+) -> list[dict]:
+    """Search CrossRef for works matching `query`.
+
+    Returns normalized metadata using the same shape as `verify_doi`
+    (title / abstract / subjects / authors / year / journal / url / doi).
+    Up to `limit` results, optionally filtered by publication year range.
+    Pure read — no Firestore writes. Use this from /literature-review to
+    get candidates the agent can then `add_reference_by_doi` after the
+    user picks.
+    """
+    del state  # network-only — no state needed, but keep signature symmetric
+    if not query or not query.strip():
+        raise ValueError("query is required")
+    limit = max(1, min(limit, 50))
+    params: list[tuple[str, str]] = [
+        ("query", query.strip()),
+        ("rows", str(limit)),
+        ("select", "DOI,title,author,container-title,issued,subject,abstract,URL,type"),
+    ]
+    filters: list[str] = []
+    if year_from:
+        filters.append(f"from-pub-date:{int(year_from)}")
+    if year_to:
+        filters.append(f"until-pub-date:{int(year_to)}")
+    if filters:
+        params.append(("filter", ",".join(filters)))
+    url = _CROSSREF_SEARCH + "?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers={"User-Agent": _CROSSREF_UA})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            payload = _json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", errors="replace")[:200]
+        except Exception:
+            pass
+        raise RuntimeError(
+            f"CrossRef HTTP {e.code} {e.reason or ''} for search {query!r}"
+            + (f" — {body}" if body else "")
+        ) from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"CrossRef network error: {e.reason}") from e
+    items = (payload.get("message") or {}).get("items") or []
+    return [_normalize_crossref(it, (it.get("DOI") or "")) for it in items]
 
 
 def _fetch_crossref(doi: str, *, timeout: int = 15) -> dict:

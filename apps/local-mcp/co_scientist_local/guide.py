@@ -48,8 +48,10 @@ On every session start:
 - `/paper-export [docx|tex|pdf|md]` — pandoc-based export with placeholder/
   unresolved-DOI pre-flight check; uploads result to Storage so the
   dashboard's Paper page lists it.
+- `/literature-review [topic] [slug?]` — CrossRef keyword search via
+  `search_works`, candidate-then-pick UX, registers selected via
+  `add_reference_by_doi`, writes a structured synthesis.
 - `/paper-review` — run AI reviewers   *(skill not yet ported)*
-- `/literature-review [topic]` — search + add references *(skill not yet ported)*
 - `/analysis-run [name] [command]` — local or registered-HPC *(skill not yet ported)*
 
 ## Tool surface (~60 tools under `mcp__co_scientist__*`)

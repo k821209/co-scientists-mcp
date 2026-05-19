@@ -316,6 +316,27 @@ def build_mcp(state: State) -> FastMCP:
 
     # ─── DOI verification (CrossRef-backed) ──────────────────────────────────
     @mcp.tool()
+    def search_works(
+        query: str,
+        limit: int = 10,
+        year_from: int | None = None,
+        year_to: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Search CrossRef for works matching `query` (free-text topic).
+
+        Returns up to `limit` (max 50) results each with title, authors,
+        journal, year, subjects, abstract, DOI, and URL. Use BEFORE
+        `add_reference_by_doi` so the agent can show candidates and let
+        the user pick which to register.
+
+        Optional year filters: `year_from`/`year_to` (inclusive).
+        """
+        return _references.search_works(
+            state, query=query, limit=limit,
+            year_from=year_from, year_to=year_to,
+        )
+
+    @mcp.tool()
     def verify_doi(doi: str) -> dict[str, Any]:
         """Resolve a DOI against CrossRef. Returns title/authors/journal/year
         if real, raises if CrossRef returns 404 (likely hallucinated DOI).
