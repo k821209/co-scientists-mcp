@@ -113,18 +113,34 @@ export function Markdown({ children, className, knownDois, anchors }: MarkdownPr
         ]}
         rehypePlugins={[rehypeRaw, rehypeKatex]}
         components={{
-          mark: ({ children, ...props }) => {
-            const p = props as React.HTMLAttributes<HTMLElement> & {
-              "data-review-ids"?: string;
+          mark: ({ children, node, ...props }) => {
+            // Read the IDs from any of the places they might land:
+            // - React kebab-case prop (HTML attribute pass-through)
+            // - React camelCase prop (hast-util-to-jsx-runtime normalization)
+            // - hast node.properties (always present, kebab-case keys)
+            const p = props as Record<string, unknown> & {
               className?: string;
             };
-            const ids = (p["data-review-ids"] || "").split(",").filter(Boolean);
+            const fromProps =
+              (p["data-review-ids"] as string | undefined) ??
+              (p["dataReviewIds"] as string | undefined) ??
+              "";
+            const hastProps = (node as { properties?: Record<string, unknown> } | undefined)?.properties;
+            const fromNode = hastProps
+              ? ((hastProps["data-review-ids"] as string | undefined) ??
+                 (hastProps["dataReviewIds"] as string | undefined) ?? "")
+              : "";
+            const ids = (fromProps || fromNode)
+              .split(",").map((s) => s.trim()).filter(Boolean);
             const multi = ids.length > 1;
             // Inline style: survives Tailwind Preflight + mobile mark reset.
+            // Explicitly write data-review-ids so the popover's
+            // mark.dataset.reviewIds always sees it, regardless of how
+            // hast-util-to-jsx-runtime spelled the incoming prop.
             return (
               <mark
-                {...p}
                 className="cs-anchor-mark"
+                data-review-ids={ids.join(",")}
                 style={{
                   backgroundColor: multi ? "#fcd34d" : "#fde68a",
                   color: "inherit",

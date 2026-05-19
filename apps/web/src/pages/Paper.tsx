@@ -456,16 +456,21 @@ export function Paper() {
 
 /** Pick out the open user comments for a given section and return them as
  *  AnchorTarget[] for the Markdown component's remarkAnchorMarks plugin. */
-function anchorsForSection(reviews: Review[], sectionKey: string): AnchorTarget[] {
+function anchorsForSection(reviews: Review[], _sectionKey: string): AnchorTarget[] {
+  // section / manuscript_ref are HINTS — but a comment made in the
+  // compiled view lands with section="__compiled__" (no real section
+  // owner), and very old comments may have neither field. Always offer
+  // every anchored open user comment to the injector and let it match
+  // wherever the anchor text actually lives in the body. False matches
+  // would require the same exact phrase to appear in two sections,
+  // which is rare; missed matches (section filter wrong) were silent.
   return reviews
     .filter(
       (r) =>
         r.status === "open" &&
         r.source === "user" &&
         !!r.anchor_text &&
-        r.anchor_text.length >= 3 &&
-        (r.section === sectionKey ||
-          r.manuscript_ref === `section:${sectionKey}`),
+        r.anchor_text.length >= 3,
     )
     .map((r) => ({ text: r.anchor_text!, reviewId: r.id }));
 }
