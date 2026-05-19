@@ -1,33 +1,334 @@
-import { Presentation } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useOutletContext } from "react-router-dom";
+import { collection, onSnapshot } from "firebase/firestore";
+import {
+  Presentation, FileText, ArrowRight, ChevronDown, ChevronRight,
+} from "lucide-react";
+import { db } from "@/firebase";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { type ProjectContext } from "./ProjectShell";
+
+interface Paper { id: string; slug: string; title: string }
+
+interface Deck {
+  id: string;
+  paperSlug: string;
+  paperTitle: string;
+  title: string;
+  audience?: string | null;
+  duration_min?: number | null;
+  theme?: string | null;
+  concept?: string | null;
+  status?: string;
+  slide_count?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+interface Slide {
+  id: string;
+  slide_number?: number;
+  role?: string;
+  title?: string;
+  body?: string;
+  prompt?: string;
+  notes?: string;
+  code?: string;
+  render_mode?: string;
+  figure_number?: number | null;
+  status?: string;
+}
 
 export function ProjectPresentations() {
+  const { pid } = useOutletContext<ProjectContext>();
+  const [papers, setPapers] = useState<Paper[]>([]);
+  const [decksByPaper, setDecksByPaper] = useState<Record<string, Deck[]>>({});
+  const [loading, setLoading] = useState(true);
+  const [openDeck, setOpenDeck] = useState<string | null>(null);
+
+  // Subscribe to papers list.
+  useEffect(() => {
+    if (!pid) return;
+    return onSnapshot(
+      collection(db, "projects", pid, "papers"),
+      (snap) => {
+        setPapers(snap.docs.map((d) => ({
+          id: d.id,
+          slug: d.id,
+          title: (d.data() as { title?: string }).title || d.id,
+        })));
+        setLoading(false);
+      },
+      () => setLoading(false),
+    );
+  }, [pid]);
+
+  // For each paper, subscribe to its decks subcollection.
+  useEffect(() => {
+    if (!pid || papers.length === 0) {
+      setDecksByPaper({});
+      return;
+    }
+    const unsubs: Array<() => void> = [];
+    for (const p of papers) {
+      const ref = collection(db, "projects", pid, "papers", p.slug, "decks");
+      const unsub = onSnapshot(
+        ref,
+        (snap) => {
+          const decks: Deck[] = snap.docs.map((d) => ({
+            ...(d.data() as Omit<Deck, "id" | "paperSlug" | "paperTitle">),
+            id: d.id,
+            paperSlug: p.slug,
+            paperTitle: p.title,
+          }));
+          setDecksByPaper((prev) => ({ ...prev, [p.slug]: decks }));
+        },
+        () => {/* empty subcoll → keep */},
+      );
+      unsubs.push(unsub);
+    }
+    return () => { for (const u of unsubs) u(); };
+  }, [pid, papers]);
+
+  const allDecks = useMemo(() => {
+    const out: Deck[] = [];
+    for (const slug of Object.keys(decksByPaper)) out.push(...decksByPaper[slug]);
+    out.sort((a, b) => (b.updated_at || "").localeCompare(a.updated_at || ""));
+    return out;
+  }, [decksByPaper]);
+
+  if (loading) {
+    return <p className="text-sm text-muted-foreground">Loading presentations…</p>;
+  }
+
+  if (papers.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>No papers yet</CardTitle>
+          <CardDescription>
+            Decks attach to papers. Create a paper first via{" "}
+            <code className="bg-muted px-1 py-0.5 text-xs">/paper-writing</code>{" "}
+            in Claude Code, then build a deck with{" "}
+            <code className="bg-muted px-1 py-0.5 text-xs">/paper-deck</code>.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Link
+            to={`/projects/${pid}/setup`}
+            className="inline-flex items-center gap-2 text-sm font-medium text-foreground hover:underline"
+          >
+            Go to Setup guide <ArrowRight className="h-4 w-4" />
+          </Link>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (allDecks.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Presentation className="h-4 w-4" /> Presentations
+          </CardTitle>
+          <CardDescription>
+            No decks yet. In Claude Code, run{" "}
+            <code className="bg-muted px-1 py-0.5 text-xs">
+              /paper-deck &lt;paper-slug&gt; "lab seminar" 20
+            </code>{" "}
+            and the deck will appear here live.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        {allDecks.length} deck{allDecks.length === 1 ? "" : "s"} across{" "}
+        {Object.keys(decksByPaper).filter((s) => (decksByPaper[s]?.length ?? 0) > 0).length}{" "}
+        paper{papers.length === 1 ? "" : "s"}. Rendering (slide PNGs +
+        .pptx export) is Phase 3 — for now decks are content-only.
+      </p>
+      {allDecks.map((d) => (
+        <DeckCard
+          key={`${d.paperSlug}::${d.id}`}
+          pid={pid!}
+          deck={d}
+          open={openDeck === `${d.paperSlug}::${d.id}`}
+          onToggle={() =>
+            setOpenDeck(
+              openDeck === `${d.paperSlug}::${d.id}`
+                ? null
+                : `${d.paperSlug}::${d.id}`,
+            )
+          }
+        />
+      ))}
+    </div>
+  );
+}
+
+function DeckCard({ pid, deck, open, onToggle }: {
+  pid: string;
+  deck: Deck;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const [slides, setSlides] = useState<Slide[]>([]);
+  useEffect(() => {
+    if (!open) return;
+    const ref = collection(
+      db, "projects", pid, "papers", deck.paperSlug, "decks", deck.id, "slides",
+    );
+    return onSnapshot(
+      ref,
+      (snap) =>
+        setSlides(
+          snap.docs
+            .map((d) => ({ id: d.id, ...(d.data() as Omit<Slide, "id">) }))
+            .sort((a, b) => (a.slide_number || 0) - (b.slide_number || 0)),
+        ),
+      () => setSlides([]),
+    );
+  }, [open, pid, deck.id, deck.paperSlug]);
+
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Presentation className="h-5 w-5" /> Presentations
+      <CardHeader
+        onClick={onToggle}
+        className="cursor-pointer select-none"
+      >
+        <CardTitle className="flex items-center gap-2 text-base">
+          {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          <Presentation className="h-4 w-4" />
+          <span className="truncate">{deck.title}</span>
+          {deck.status && (
+            <Badge
+              variant={deck.status === "rendered" ? "default" : "secondary"}
+              className="text-[10px]"
+            >
+              {deck.status}
+            </Badge>
+          )}
+          <Badge variant="outline" className="ml-auto text-[10px]">
+            {deck.slide_count ?? 0} slide{(deck.slide_count ?? 0) === 1 ? "" : "s"}
+          </Badge>
         </CardTitle>
-        <CardDescription>
-          Build slide decks from your papers using the{" "}
-          <code className="bg-muted px-1 py-0.5 text-xs">/paper-deck</code> skill
-          in Claude Code.
+        <CardDescription className="flex flex-wrap items-center gap-2 text-xs">
+          <Link
+            to={`/projects/${pid}/papers/${deck.paperSlug}`}
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center gap-1 hover:underline"
+          >
+            <FileText className="h-3 w-3" /> {deck.paperTitle}
+          </Link>
+          {deck.audience && <span>• {deck.audience}</span>}
+          {deck.duration_min != null && <span>• {deck.duration_min} min</span>}
+          {deck.theme && (
+            <Badge variant="outline" className="text-[10px]">{deck.theme}</Badge>
+          )}
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-3 text-sm text-muted-foreground">
-        <p>
-          Coming soon: per-paper deck list with PNG thumbnails, theme picker,
-          and a Download <code className="text-xs">.pptx</code> button — fed by
-          the deck-pipeline tools in the local MCP (port pending — see the open
-          item list in the repo).
-        </p>
-        <p>
-          For now the deck tools aren't wired in this build. Once the{" "}
-          <code className="text-xs">paper-deck</code> skill is ported to the
-          cloud schema, decks created in Claude Code will appear here
-          automatically — same pattern as Papers.
-        </p>
-      </CardContent>
+      {open && (
+        <CardContent className="space-y-2">
+          {deck.concept && (
+            <details className="rounded-md border bg-muted/30 p-2 text-xs">
+              <summary className="cursor-pointer font-medium">Concept (palette / typography / motif)</summary>
+              <pre className="mt-2 whitespace-pre-wrap font-mono text-[11px] text-muted-foreground">
+                {deck.concept}
+              </pre>
+            </details>
+          )}
+          {slides.length === 0 ? (
+            <p className="text-xs italic text-muted-foreground">
+              No slides yet. Run <code>/paper-deck</code> to draft.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {slides.map((s) => <SlideRow key={s.id} slide={s} />)}
+            </div>
+          )}
+        </CardContent>
+      )}
     </Card>
+  );
+}
+
+function SlideRow({ slide }: { slide: Slide }) {
+  const [expanded, setExpanded] = useState(false);
+  const notesMissing = !slide.notes || !slide.notes.trim();
+  return (
+    <div className="rounded-md border bg-card p-2">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center gap-2 text-left"
+      >
+        <Badge variant="outline" className="font-mono text-[10px]">
+          {slide.slide_number ?? "?"}
+        </Badge>
+        {slide.role && (
+          <Badge variant="secondary" className="text-[10px]">{slide.role}</Badge>
+        )}
+        <span className="flex-1 truncate text-sm font-medium">
+          {slide.title || <em className="text-muted-foreground">untitled</em>}
+        </span>
+        {slide.render_mode && (
+          <Badge variant="outline" className="text-[10px]">{slide.render_mode}</Badge>
+        )}
+        {notesMissing && (
+          <Badge variant="outline" className="border-amber-300 text-[10px] text-amber-700">
+            no notes
+          </Badge>
+        )}
+        {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+      </button>
+      {expanded && (
+        <div className="mt-2 space-y-2 text-xs">
+          {slide.body && (
+            <div>
+              <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">Body</div>
+              <pre className="whitespace-pre-wrap rounded bg-muted/30 p-2 font-mono text-[11px]">
+                {slide.body}
+              </pre>
+            </div>
+          )}
+          {slide.notes && (
+            <div>
+              <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">Speaker notes</div>
+              <div className="rounded bg-muted/30 p-2 leading-relaxed">{slide.notes}</div>
+            </div>
+          )}
+          {slide.prompt && (
+            <details className="rounded border bg-muted/30 p-2">
+              <summary className="cursor-pointer text-[10px] uppercase tracking-wide text-muted-foreground">
+                Image prompt
+              </summary>
+              <pre className="mt-1 whitespace-pre-wrap font-mono text-[11px]">{slide.prompt}</pre>
+            </details>
+          )}
+          {slide.code && (
+            <details className="rounded border bg-muted/30 p-2">
+              <summary className="cursor-pointer text-[10px] uppercase tracking-wide text-muted-foreground">
+                Code
+              </summary>
+              <pre className="mt-1 whitespace-pre-wrap font-mono text-[11px]">{slide.code}</pre>
+            </details>
+          )}
+          {slide.figure_number != null && (
+            <a
+              href={`#figure-${slide.figure_number}`}
+              className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+            >
+              References paper figure {slide.figure_number}
+            </a>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
