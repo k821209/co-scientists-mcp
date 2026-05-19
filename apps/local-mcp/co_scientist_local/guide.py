@@ -10,7 +10,7 @@ only) and refers the agent here on every session start.
 """
 from __future__ import annotations
 
-GUIDE_VERSION = "2026-05-19b"
+GUIDE_VERSION = "2026-05-19c"
 
 
 def render_guide() -> str:
@@ -62,6 +62,11 @@ On every session start:
   generate → critique) around `generate_image` for schematics
   (pathway, network, workflow, comparison, architecture, tree).
   Real data plots go through `/analysis-run` instead.
+- `/paper-deck [slug] [audience] [duration_min] [--theme slug]` —
+  Phase 1 of the presentation pipeline: write deck-level concept
+  (palette/typography/motif) + outline slides scaled to duration +
+  per-slide content with MANDATORY speaker notes + prompt placeholders.
+  Rendering and PPTX export are Phase 3.
 
 ## Tool surface (~60 tools under `mcp__co_scientist__*`)
 

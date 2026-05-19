@@ -8,6 +8,7 @@ from mcp.server.fastmcp import FastMCP
 from .guide import GUIDE_VERSION, render_guide
 from .state import State
 from .tools import analyses as _analyses
+from .tools import decks as _decks
 from .tools import exports as _exports
 from .tools import figures as _figures
 from .tools import images as _images
@@ -749,5 +750,119 @@ def build_mcp(state: State) -> FastMCP:
     @mcp.tool()
     def delete_asset(slug: str, asset_id_or_filename: str) -> dict[str, Any]:
         return {"deleted": _images.delete_asset(state, slug, asset_id_or_filename)}
+
+    # ─── decks (presentations built from a paper) ────────────────────────────
+    @mcp.tool()
+    def create_deck(
+        slug: str,
+        title: str,
+        audience: str | None = None,
+        duration_min: int | None = None,
+        theme: str | None = None,
+        deck_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Create or retrieve a presentation deck attached to a paper.
+        Idempotent: returns the existing deck unchanged if `deck_id` is
+        provided and already exists.
+        """
+        return _decks.create_deck(
+            state, slug, title=title, audience=audience,
+            duration_min=duration_min, theme=theme, deck_id=deck_id,
+        )
+
+    @mcp.tool()
+    def get_deck(slug: str, deck_id: str) -> dict[str, Any]:
+        return _decks.get_deck(state, slug, deck_id)
+
+    @mcp.tool()
+    def list_decks(slug: str) -> list[dict[str, Any]]:
+        return _decks.list_decks(state, slug)
+
+    @mcp.tool()
+    def update_deck(
+        slug: str,
+        deck_id: str,
+        title: str | None = None,
+        audience: str | None = None,
+        duration_min: int | None = None,
+        theme: str | None = None,
+        concept: str | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        """Patch deck-level fields. `concept` is the unity header
+        (palette / typography / motif) inherited by every slide's
+        prompt."""
+        return _decks.update_deck(
+            state, slug, deck_id, title=title, audience=audience,
+            duration_min=duration_min, theme=theme, concept=concept,
+            status=status,
+        )
+
+    @mcp.tool()
+    def delete_deck(slug: str, deck_id: str) -> dict[str, Any]:
+        return {"deleted": _decks.delete_deck(state, slug, deck_id)}
+
+    @mcp.tool()
+    def add_slide(
+        slug: str,
+        deck_id: str,
+        slide_number: int,
+        role: str,
+        title: str,
+        body: str = "",
+        prompt: str = "",
+        notes: str = "",
+        code: str = "",
+        render_mode: str = "code-shape",
+        figure_number: int | None = None,
+    ) -> dict[str, Any]:
+        """Add a slide to a deck. `notes` is MANDATORY for any non-title
+        slide — empty notes mean the presenter wings the take-home.
+        Use `renumber_deck` after bulk add/delete to pack numbers.
+        """
+        return _decks.add_slide(
+            state, slug, deck_id,
+            slide_number=slide_number, role=role, title=title,
+            body=body, prompt=prompt, notes=notes, code=code,
+            render_mode=render_mode, figure_number=figure_number,
+        )
+
+    @mcp.tool()
+    def update_slide(
+        slug: str,
+        deck_id: str,
+        slide_id: str,
+        slide_number: int | None = None,
+        role: str | None = None,
+        title: str | None = None,
+        body: str | None = None,
+        prompt: str | None = None,
+        notes: str | None = None,
+        code: str | None = None,
+        render_mode: str | None = None,
+        figure_number: int | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        return _decks.update_slide(
+            state, slug, deck_id, slide_id,
+            slide_number=slide_number, role=role, title=title,
+            body=body, prompt=prompt, notes=notes, code=code,
+            render_mode=render_mode, figure_number=figure_number,
+            status=status,
+        )
+
+    @mcp.tool()
+    def delete_slide(slug: str, deck_id: str, slide_id: str) -> dict[str, Any]:
+        return {"deleted": _decks.delete_slide(state, slug, deck_id, slide_id)}
+
+    @mcp.tool()
+    def list_slides(slug: str, deck_id: str) -> list[dict[str, Any]]:
+        return _decks.list_slides(state, slug, deck_id)
+
+    @mcp.tool()
+    def renumber_deck(slug: str, deck_id: str) -> dict[str, Any]:
+        """Pack slide_numbers tightly starting at 1, preserving order.
+        Call after bulk add/delete. Returns {count, old_to_new}."""
+        return _decks.renumber_deck(state, slug, deck_id)
 
     return mcp
