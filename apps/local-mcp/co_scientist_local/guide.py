@@ -51,7 +51,10 @@ On every session start:
 - `/literature-review [topic] [slug?]` — CrossRef keyword search via
   `search_works`, candidate-then-pick UX, registers selected via
   `add_reference_by_doi`, writes a structured synthesis.
-- `/paper-review` — run AI reviewers   *(skill not yet ported)*
+- `/paper-review [slug] [mode?]` — three-persona AI review (methods /
+  stats / domain) + consistency pass; each finding becomes one
+  Firestore review row (`source="ai"`) anchored to the offending
+  passage so the dashboard renders inline highlights.
 - `/analysis-run [name] [command]` — local or registered-HPC *(skill not yet ported)*
 
 ## Tool surface (~60 tools under `mcp__co_scientist__*`)
