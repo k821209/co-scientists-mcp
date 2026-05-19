@@ -44,11 +44,13 @@ On every session start:
 ## Available skills
 
 - `/paper-writing [title]` — create or update manuscript sections
-- `/paper-revision` — address open user comments (the bidirectional loop)
-- `/paper-review` — run AI reviewers
-- `/paper-export [docx|tex|pdf]` — pandoc-based export
-- `/literature-review [topic]` — search + add references
-- `/analysis-run [name] [command]` — local or registered-HPC
+- `/paper-revision` — address open user comments (anchor_text-anchored)
+- `/paper-export [docx|tex|pdf|md]` — pandoc-based export with placeholder/
+  unresolved-DOI pre-flight check; uploads result to Storage so the
+  dashboard's Paper page lists it.
+- `/paper-review` — run AI reviewers   *(skill not yet ported)*
+- `/literature-review [topic]` — search + add references *(skill not yet ported)*
+- `/analysis-run [name] [command]` — local or registered-HPC *(skill not yet ported)*
 
 ## Tool surface (~60 tools under `mcp__co_scientist__*`)
 

@@ -42,7 +42,8 @@ function buildSetupScript(
   const m1 = "CO_SCIENTIST_MCP_END_" + Math.random().toString(36).slice(2, 10).toUpperCase();
   const m2 = "CO_SCIENTIST_CLAUDE_END_" + Math.random().toString(36).slice(2, 10).toUpperCase();
   return `#!/usr/bin/env bash
-# co-scientist setup — drops .mcp.json + CLAUDE.md into the current directory.
+# co-scientist setup — drops .mcp.json + CLAUDE.md + Claude Code skills
+# into the current directory.
 # Usage:
 #   cd /path/to/your/project
 #   bash setup-${projectSlug}.sh
@@ -55,6 +56,34 @@ ${m1}
 cat > CLAUDE.md <<'${m2}'
 ${claudeMd}
 ${m2}
+
+# Wire up Claude Code skills shipped with the co-scientists-mcp package.
+# Looks for the repo in a few well-known spots, then symlinks each skill
+# folder into .claude/skills/ so 'git pull' on the repo updates them all.
+mkdir -p .claude/skills
+REPO=""
+for candidate in \\
+    "$HOME/co-scientists-mcp" \\
+    "$HOME/Projects/co-scientists-mcp" \\
+    "$HOME/works/co-scientists-mcp" \\
+    "$(dirname "$0")/.."; do
+  if [ -d "$candidate/packages/skills" ]; then
+    REPO="$candidate"
+    break
+  fi
+done
+if [ -n "$REPO" ]; then
+  for skill_dir in "$REPO"/packages/skills/*/; do
+    skill_name="$(basename "$skill_dir")"
+    [ -L ".claude/skills/$skill_name" ] && rm ".claude/skills/$skill_name"
+    [ -d ".claude/skills/$skill_name" ] && continue   # don't clobber a real folder
+    ln -s "$skill_dir" ".claude/skills/$skill_name"
+  done
+  echo "✓ Linked $(ls "$REPO/packages/skills" | wc -l | tr -d ' ') skills from $REPO/packages/skills"
+else
+  echo "⚠  co-scientists-mcp repo not found. Skills not installed."
+  echo "   Clone https://github.com/k821209/co-scientists-mcp and re-run."
+fi
 
 echo "✓ Wrote .mcp.json + CLAUDE.md to $(pwd)"
 echo ""
