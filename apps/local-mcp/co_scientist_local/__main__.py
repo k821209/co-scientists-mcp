@@ -86,7 +86,7 @@ def _build_api_key_state() -> State:
         exchange_api_key,
     )
     from .backends.firestore import FirestoreBackend
-    from .image_gen import CloudFunctionImageGenerator, LocalOpenAIImageGenerator
+    from .image_gen import CloudFunctionImageGenerator
 
     from .constants import (
         DEFAULT_EXCHANGE_URL_TEMPLATE,
@@ -131,27 +131,18 @@ def _build_api_key_state() -> State:
         user_token_provider=auth_client.get_id_token,
     )
 
-    # 5. Image generator — always route through the Cloud Function in API-key
-    #    mode. The function enforces plan gating (free → 403, Pro+ → quota →
-    #    gpt-image-2). A stray OPENAI_API_KEY in the user's shell must NOT
-    #    redirect to direct OpenAI calls — explicit opt-in only via
-    #    CO_SCIENTIST_USE_LOCAL_OPENAI=1.
-    if os.environ.get("CO_SCIENTIST_USE_LOCAL_OPENAI") == "1":
-        local_key = os.environ.get("OPENAI_API_KEY")
-        if not local_key:
-            raise RuntimeError(
-                "CO_SCIENTIST_USE_LOCAL_OPENAI=1 set but OPENAI_API_KEY is empty"
-            )
-        image_gen = LocalOpenAIImageGenerator(api_key=local_key)
-    else:
-        gen_image_url = os.environ.get(
-            "CO_SCIENTIST_GENERATE_IMAGE_URL",
-            DEFAULT_GENERATE_IMAGE_URL_TEMPLATE.format(project_id=fb_project),
-        )
-        image_gen = CloudFunctionImageGenerator(
-            function_url=gen_image_url,
-            get_id_token=auth_client.get_id_token,
-        )
+    # 5. Image generator — always the Cloud Function. The function gates on
+    #    plan_id (free → 403, Pro+ → quota check → gpt-image-2). Free-tier
+    #    users who want image generation wire up their own provider through
+    #    Claude Code (other MCPs / built-in tools) — outside our scope.
+    gen_image_url = os.environ.get(
+        "CO_SCIENTIST_GENERATE_IMAGE_URL",
+        DEFAULT_GENERATE_IMAGE_URL_TEMPLATE.format(project_id=fb_project),
+    )
+    image_gen = CloudFunctionImageGenerator(
+        function_url=gen_image_url,
+        get_id_token=auth_client.get_id_token,
+    )
 
     return State(
         project_id=project_id, owner_uid=owner_uid, backend=backend,

@@ -30,13 +30,18 @@ free-tier abuse would be unbounded.
 
 ## What we explicitly do NOT do
 
-- ❌ Free-tier image gen on the server. They'd need to use their own
-  Gemini key via the `image_gen_mode="local"` TOML path.
+- ❌ Free-tier image gen on the server. They'd need to wire up
+  another image-gen MCP / Claude Code's built-in tools with their
+  own key — outside our scope.
 - ❌ Web UI for users to register an OpenAI key. Constraint 3.
 - ❌ Auto-detect `OPENAI_API_KEY` env var → take that path. We had
   this and it bit a user — a stray stale OpenAI key in their shell
-  hijacked the cloud route. Now it requires explicit
-  `CO_SCIENTIST_USE_LOCAL_OPENAI=1`.
+  hijacked the cloud route.
+- ❌ ANY local image-gen backdoor (used to have
+  `CO_SCIENTIST_USE_LOCAL_OPENAI=1` as an opt-in for power users;
+  removed 2026-05-20 to keep the policy unambiguous: Pro+ uses the
+  Cloud Function, free uses something else they wire up
+  themselves).
 
 ## How gating works
 

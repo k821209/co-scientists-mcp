@@ -56,18 +56,16 @@ The plan was a `/stripe_webhook` Cloud Function that listens for
 `checkout.session.completed` + `customer.subscription.deleted` and updates
 `plan_id` accordingly. Currently a manual admin step.
 
-## Free-tier image generation alternative
+## Free-tier image generation policy
 
-Free users can still generate images by using their own Gemini key:
+**Free tier cannot use `generate_image`** through the built-in MCP. The
+Cloud Function returns 403 for `plan_id="free"`, and the MCP no longer
+provides any in-process fallback (the `CO_SCIENTIST_USE_LOCAL_OPENAI`
+backdoor was removed for clarity — a stray `OPENAI_API_KEY` in the
+shell shouldn't accidentally enable a paid feature).
 
-1. `pip install 'co-scientist-local[gemini]'`
-2. Create `~/.co-scientist/projects/<pid>.toml`:
-   ```toml
-   image_gen_mode = "local"
-   gemini_api_key = "AIza…"
-   ```
-3. The MCP picks up the TOML at startup, instantiates
-   `LocalGeminiImageGenerator` instead of `CloudFunctionImageGenerator`.
-
-Or set `CO_SCIENTIST_USE_LOCAL_OPENAI=1` + `OPENAI_API_KEY=sk-…` to route
-to OpenAI directly (their bill, no Cloud Function involvement).
+Free users who want image generation should wire their own provider
+through Claude Code directly (other image-gen MCPs, or Claude Code's
+built-in image tools where available). Since Claude Code is what
+calls the image generator anyway, the user controls that part — no
+work for us. We just don't ship a free-tier path through our service.

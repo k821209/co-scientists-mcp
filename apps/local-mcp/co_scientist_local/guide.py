@@ -10,7 +10,7 @@ only) and refers the agent here on every session start.
 """
 from __future__ import annotations
 
-GUIDE_VERSION = "2026-05-19c"
+GUIDE_VERSION = "2026-05-20a"
 
 
 def render_guide() -> str:
@@ -145,8 +145,16 @@ Use `mcp__co_scientist__submit_remote_job` so the run is tracked in
 
 ## Image generation
 
-`mcp__co_scientist__generate_image` routes through a Firebase Cloud Function
-(Pro+ subscription required for the hosted OpenAI gpt-image-2 backend).
-Free-tier users with their own `GEMINI_API_KEY` can still generate images
-locally via the Gemini backend (imagen-3).
+`mcp__co_scientist__generate_image` routes through the Firebase Cloud
+Function (Cloud Run gen2) backed by OpenAI gpt-image-2.
+
+**Plan gating** — the function enforces:
+  - `plan_id="free"`   → HTTP 403 (`PermissionError` on the client).
+  - `plan_id="pro"`    → up to 200 images / month
+  - `plan_id="enterprise"` → up to 2000 / month
+
+Free-tier users who want image generation do it OUTSIDE this MCP —
+wire up another image-gen MCP / built-in Claude Code tool with their
+own API key. The skill `/scientific-image` will surface the 403 to the
+user and suggest the upgrade.
 """
