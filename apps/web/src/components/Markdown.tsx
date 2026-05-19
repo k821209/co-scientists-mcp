@@ -46,11 +46,9 @@ function extractDoiFromHref(href: string | undefined): string | null {
 
 function injectAnchorMarks(body: string, anchors: AnchorTarget[]): string {
   if (!anchors || anchors.length === 0) return body;
-  // selection.toString() captures the RENDERED text (no markdown markers).
-  // The markdown source may have **bold**, _italic_, `code`, ~~strike~~
-  // tokens between or around the words. Build a regex that escapes the
-  // anchor text but allows markdown markers + whitespace to appear at
-  // word boundaries.
+  // selection.toString() captures the RENDERED text (no markdown markers);
+  // tolerate **bold**, _italic_, `code`, ~~strike~~ tokens sitting in the
+  // source between the anchor's words.
   const sorted = [...anchors]
     .filter((a) => a.text && a.text.length >= 3)
     .sort((a, b) => b.text.length - a.text.length);
@@ -70,23 +68,34 @@ function injectAnchorMarks(body: string, anchors: AnchorTarget[]): string {
       if (m[0].length === 0) re.lastIndex++;
     }
   }
-  // Resolve overlaps: prefer the earliest start, then the longest match.
-  matches.sort((x, y) => x.start - y.start || y.end - x.end);
-  const accepted: Match[] = [];
+  matches.sort((x, y) => x.start - y.start || x.end - y.end);
+
+  // MERGE overlapping ranges into one mark carrying all reviewIds, so
+  // overlapping comments don't disappear behind each other. The popover
+  // reads `data-review-ids` (CSV) and lets the user page through them.
+  type Group = { start: number; end: number; reviewIds: string[] };
+  const groups: Group[] = [];
   for (const m of matches) {
-    const last = accepted[accepted.length - 1];
-    if (last && m.start < last.end) continue;
-    accepted.push(m);
+    const last = groups[groups.length - 1];
+    if (last && m.start < last.end) {
+      last.end = Math.max(last.end, m.end);
+      if (!last.reviewIds.includes(m.reviewId)) last.reviewIds.push(m.reviewId);
+    } else {
+      groups.push({ start: m.start, end: m.end, reviewIds: [m.reviewId] });
+    }
   }
-  // Splice <mark> wrappers into the source.
+
   let out = "";
   let pos = 0;
-  for (const m of accepted) {
-    out += body.slice(pos, m.start);
-    const inner = body.slice(m.start, m.end);
-    const safeId = m.reviewId.replace(/"/g, "");
-    out += `<mark class="cs-anchor-mark" data-review-id="${safeId}">${inner}</mark>`;
-    pos = m.end;
+  for (const g of groups) {
+    out += body.slice(pos, g.start);
+    const inner = body.slice(g.start, g.end);
+    const ids = g.reviewIds.map((id) => id.replace(/"/g, "")).join(",");
+    const klass = g.reviewIds.length > 1
+      ? "cs-anchor-mark cs-anchor-multi"
+      : "cs-anchor-mark";
+    out += `<mark class="${klass}" data-review-ids="${ids}">${inner}</mark>`;
+    pos = g.end;
   }
   out += body.slice(pos);
   return out;
@@ -104,23 +113,43 @@ export function Markdown({ children, className, knownDois, anchors }: MarkdownPr
         ]}
         rehypePlugins={[rehypeRaw, rehypeKatex]}
         components={{
-          mark: ({ children, ...props }) => (
-            <mark
-              {...(props as React.HTMLAttributes<HTMLElement>)}
-              className="cs-anchor-mark"
-              // Inline style so this works regardless of Tailwind purge or
-              // mobile browser <mark> default reset.
-              style={{
-                backgroundColor: "#fde68a",
-                color: "inherit",
-                borderRadius: "2px",
-                padding: "0 2px",
-                cursor: "pointer",
-              }}
-            >
-              {children}
-            </mark>
-          ),
+          mark: ({ children, ...props }) => {
+            const p = props as React.HTMLAttributes<HTMLElement> & {
+              "data-review-ids"?: string;
+              className?: string;
+            };
+            const ids = (p["data-review-ids"] || "").split(",").filter(Boolean);
+            const multi = ids.length > 1;
+            // Inline style: survives Tailwind Preflight + mobile mark reset.
+            return (
+              <mark
+                {...p}
+                className="cs-anchor-mark"
+                style={{
+                  backgroundColor: multi ? "#fcd34d" : "#fde68a",
+                  color: "inherit",
+                  borderRadius: "2px",
+                  padding: "0 2px",
+                  cursor: "pointer",
+                  boxShadow: multi ? "inset 0 -2px 0 #f59e0b" : undefined,
+                }}
+              >
+                {children}
+                {multi && (
+                  <sup
+                    style={{
+                      marginLeft: 2,
+                      fontSize: "0.65em",
+                      fontWeight: 600,
+                      color: "#92400e",
+                    }}
+                  >
+                    ×{ids.length}
+                  </sup>
+                )}
+              </mark>
+            );
+          },
           // Use Tailwind classes rather than @tailwindcss/typography to keep
           // bundle small. Tweak per-element styling here.
           h1: ({ children }) => <h2 className="mt-4 mb-2 text-xl font-semibold">{children}</h2>,

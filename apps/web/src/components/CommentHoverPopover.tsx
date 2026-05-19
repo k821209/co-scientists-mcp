@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { doc, updateDoc } from "firebase/firestore";
-import { CheckCircle2, XCircle, X } from "lucide-react";
+import { CheckCircle2, XCircle, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { db } from "@/firebase";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,19 +29,32 @@ interface Props {
  *  Click another mark → moves to that one. Click outside → closes.
  *  No hover trigger (intentional — less twitchy on dense paragraphs). */
 export function CommentHoverPopover({ pid, paperSlug, reviews }: Props) {
-  const [active, setActive] = useState<{ review: Review; rect: DOMRect } | null>(null);
+  const [active, setActive] = useState<
+    { reviews: Review[]; index: number; rect: DOMRect } | null
+  >(null);
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
       const target = e.target as HTMLElement;
       const mark = target.closest("mark.cs-anchor-mark") as HTMLElement | null;
       if (mark) {
-        const reviewId = mark.dataset.reviewId;
-        const review = reviews.find((r) => r.id === reviewId);
-        if (review) setActive({ review, rect: mark.getBoundingClientRect() });
+        // New format: data-review-ids="id1,id2" (overlap-merged).
+        // Legacy: data-review-id="id" (single).
+        const idsRaw =
+          mark.dataset.reviewIds ?? mark.dataset.reviewId ?? "";
+        const ids = idsRaw.split(",").map((s) => s.trim()).filter(Boolean);
+        const matched = ids
+          .map((id) => reviews.find((r) => r.id === id))
+          .filter((r): r is Review => !!r);
+        if (matched.length > 0) {
+          setActive({
+            reviews: matched,
+            index: 0,
+            rect: mark.getBoundingClientRect(),
+          });
+        }
         return;
       }
-      // Ignore clicks inside the popover itself
       if (target.closest("[data-comment-popover]")) return;
       setActive(null);
     }
@@ -57,6 +70,9 @@ export function CommentHoverPopover({ pid, paperSlug, reviews }: Props) {
   }, [reviews]);
 
   if (!active) return null;
+  const total = active.reviews.length;
+  const reviewIdx = Math.min(active.index, total - 1);
+  const review = active.reviews[reviewIdx];
 
   const width = 320;
   const popHeight = 240;
@@ -100,22 +116,43 @@ export function CommentHoverPopover({ pid, paperSlug, reviews }: Props) {
     maxHeight = Math.max(140, roomAbove - gap);
   }
 
-  const review = active.review;
   const isResolved = review.status !== "open";
+
+  const advance = (delta: number) => {
+    setActive((prev) => {
+      if (!prev) return prev;
+      const n = prev.reviews.length;
+      return { ...prev, index: (prev.index + delta + n) % n };
+    });
+  };
+
+  const closeIfLast = () => {
+    if (total <= 1) {
+      setActive(null);
+    } else {
+      // Drop the just-acted review from the list, stay on next.
+      setActive((prev) => {
+        if (!prev) return prev;
+        const remaining = prev.reviews.filter((_, i) => i !== reviewIdx);
+        if (remaining.length === 0) return null;
+        return { ...prev, reviews: remaining, index: Math.min(reviewIdx, remaining.length - 1) };
+      });
+    }
+  };
 
   const resolve = async () => {
     await updateDoc(
       doc(db, "projects", pid, "papers", paperSlug, "reviews", review.id),
       { status: "resolved", resolved_at: new Date().toISOString() },
     );
-    setActive(null);
+    closeIfLast();
   };
   const withdraw = async () => {
     await updateDoc(
       doc(db, "projects", pid, "papers", paperSlug, "reviews", review.id),
       { status: "rejected", resolved_at: new Date().toISOString() },
     );
-    setActive(null);
+    closeIfLast();
   };
 
   return (
@@ -125,6 +162,24 @@ export function CommentHoverPopover({ pid, paperSlug, reviews }: Props) {
       style={{ top, left, width, maxHeight }}
     >
      <div className="flex h-full flex-col overflow-y-auto p-3">
+      {total > 1 && (
+        <div className="mb-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+          <Button
+            size="icon" variant="ghost" className="h-5 w-5"
+            onClick={() => advance(-1)} aria-label="Previous comment"
+          >
+            <ChevronLeft className="h-3 w-3" />
+          </Button>
+          <span className="tabular-nums">{reviewIdx + 1} / {total}</span>
+          <Button
+            size="icon" variant="ghost" className="h-5 w-5"
+            onClick={() => advance(1)} aria-label="Next comment"
+          >
+            <ChevronRight className="h-3 w-3" />
+          </Button>
+          <span className="ml-1">overlapping comments</span>
+        </div>
+      )}
       <div className="flex items-center gap-2">
         <Badge
           variant={review.source === "ai" ? "secondary" : "outline"}
