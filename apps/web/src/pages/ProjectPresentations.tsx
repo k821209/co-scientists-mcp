@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import { collection, onSnapshot } from "firebase/firestore";
 import {
-  Presentation, FileText, ArrowRight, ChevronDown, ChevronRight,
+  Presentation, FileText, ArrowRight, ChevronDown, ChevronRight, Download,
 } from "lucide-react";
 import { db } from "@/firebase";
+import { downloadProjectBlobAsFile } from "@/projectAuth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { type ProjectContext } from "./ProjectShell";
 
 interface Paper { id: string; slug: string; title: string }
@@ -24,6 +26,16 @@ interface Deck {
   slide_count?: number;
   created_at?: string;
   updated_at?: string;
+}
+
+interface DeckExport {
+  id: string;
+  filename: string;
+  blob_path: string;
+  size_bytes?: number;
+  slide_count?: number;
+  missing_renders?: number[];
+  created_at?: string;
 }
 
 interface Slide {
@@ -179,6 +191,9 @@ function DeckCard({ pid, deck, open, onToggle }: {
   onToggle: () => void;
 }) {
   const [slides, setSlides] = useState<Slide[]>([]);
+  const [exports, setExports] = useState<DeckExport[]>([]);
+  const [downloading, setDownloading] = useState<string | null>(null);
+
   useEffect(() => {
     if (!open) return;
     const ref = collection(
@@ -195,6 +210,34 @@ function DeckCard({ pid, deck, open, onToggle }: {
       () => setSlides([]),
     );
   }, [open, pid, deck.id, deck.paperSlug]);
+
+  useEffect(() => {
+    if (!open) return;
+    const ref = collection(
+      db, "projects", pid, "papers", deck.paperSlug, "decks", deck.id, "exports",
+    );
+    return onSnapshot(
+      ref,
+      (snap) =>
+        setExports(
+          snap.docs
+            .map((d) => ({ id: d.id, ...(d.data() as Omit<DeckExport, "id">) }))
+            .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || "")),
+        ),
+      () => setExports([]),
+    );
+  }, [open, pid, deck.id, deck.paperSlug]);
+
+  const download = async (exp: DeckExport) => {
+    setDownloading(exp.id);
+    try {
+      await downloadProjectBlobAsFile(pid, exp.blob_path, exp.filename);
+    } catch (e) {
+      alert(`Download failed: ${(e as Error).message}`);
+    } finally {
+      setDownloading(null);
+    }
+  };
 
   return (
     <Card>
@@ -234,7 +277,7 @@ function DeckCard({ pid, deck, open, onToggle }: {
         </CardDescription>
       </CardHeader>
       {open && (
-        <CardContent className="space-y-2">
+        <CardContent className="space-y-3">
           {deck.concept && (
             <details className="rounded-md border bg-muted/30 p-2 text-xs">
               <summary className="cursor-pointer font-medium">Concept (palette / typography / motif)</summary>
@@ -242,6 +285,47 @@ function DeckCard({ pid, deck, open, onToggle }: {
                 {deck.concept}
               </pre>
             </details>
+          )}
+          {exports.length > 0 && (
+            <div className="rounded-md border bg-muted/30 p-2">
+              <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                Exports
+              </div>
+              <div className="space-y-1">
+                {exports.map((e) => (
+                  <div key={e.id} className="flex items-center gap-2 text-xs">
+                    <span className="flex-1 truncate font-mono">{e.filename}</span>
+                    {e.size_bytes && (
+                      <span className="text-[10px] text-muted-foreground">
+                        {(e.size_bytes / 1024).toFixed(0)} KB
+                      </span>
+                    )}
+                    {e.missing_renders && e.missing_renders.length > 0 && (
+                      <Badge variant="outline" className="border-amber-300 text-[10px] text-amber-700">
+                        {e.missing_renders.length} unrendered
+                      </Badge>
+                    )}
+                    <Button
+                      size="sm" variant="outline" className="h-7 gap-1 text-xs"
+                      onClick={() => download(e)}
+                      disabled={downloading === e.id}
+                    >
+                      <Download className="h-3 w-3" />
+                      {downloading === e.id ? "…" : "Download"}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {exports.length === 0 && deck.status === "rendered" && (
+            <p className="text-xs italic text-muted-foreground">
+              All slides rendered. Run{" "}
+              <code className="bg-muted px-1 py-0.5 text-[10px]">
+                export_deck_to_pptx
+              </code>{" "}
+              in Claude Code to generate a downloadable .pptx.
+            </p>
           )}
           {slides.length === 0 ? (
             <p className="text-xs italic text-muted-foreground">

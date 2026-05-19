@@ -109,3 +109,21 @@ export async function downloadProjectBlobAsText(pid: string, path: string): Prom
   const bytes = await getBytes(ref(storage, path));
   return new TextDecoder().decode(bytes);
 }
+
+/** Trigger a browser download of a project Storage blob (binary). */
+export async function downloadProjectBlobAsFile(
+  pid: string,
+  path: string,
+  filename: string,
+): Promise<void> {
+  const { getBytes, ref } = await import("firebase/storage");
+  const storage = await getProjectStorage(pid);
+  const bytes = await getBytes(ref(storage, path));
+  const blob = new Blob([bytes]);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}

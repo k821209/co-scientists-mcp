@@ -214,15 +214,48 @@ turn this into slide images + .pptx."
 - "Reorder so methods come after background" → `update_slide` each
   affected one with new `slide_number`, then `renumber_deck`.
 
-## Phase status (read this if you're confused about what's missing)
+## Rendering + export (Phase 3 — shipped)
 
-- **Phase 1 (current)**: Firestore data layer + MCP tools + this
-  skill. **No rendering yet.**
-- **Phase 2 (later)**: Dashboard Presentation tab lists decks + slides.
-- **Phase 3 (later)**: Slide → PNG via `generate_image` /
-  matplotlib (for code-shape). Deck → PPTX export via python-pptx.
+After every slide has its body / prompt / notes filled:
 
-If the user asks "where are the slide images?" or "give me the .pptx,"
-explain: Phase 1 ships the structure; Phase 3 ships the rendering.
-For now the structure is queryable via `list_slides(slug, deck_id)`
-and visible in Firestore.
+```
+mcp__co_scientist__render_deck(slug, deck_id)
+```
+
+This walks every slide and:
+- `paper-figure` → copies the existing figure blob into a slide image
+- `ai-image`     → substitutes `{accent}` etc. from `deck.concept`,
+                   calls `generate_image`
+- `code-shape` / `hybrid` → returned in `skipped[]` because the MCP
+                   can't safely exec arbitrary Python. You're expected
+                   to run the slide's `code` block yourself locally
+                   (matplotlib/seaborn/etc. into a PNG), then pass
+                   that path back:
+
+```
+mcp__co_scientist__render_slide(
+  slug, deck_id, slide_id,
+  local_path="/abs/path/to/slide-3.png",
+)
+```
+
+Once every slide has an `image_blob_path`, the deck's `status` flips
+to `"rendered"` and the dashboard's Presentation tab will offer the
+PPTX export. To trigger from Claude Code directly:
+
+```
+mcp__co_scientist__export_deck_to_pptx(
+  slug, deck_id,
+  output_path="~/decks/my-talk.pptx",
+)
+```
+
+Returns `{ local_path, blob_path, slide_count, missing_renders }`.
+`missing_renders[]` is the slide numbers that came out as text-only
+placeholders because they hadn't been rendered yet — those should
+go back through `render_slide` and the PPTX re-exported.
+
+PPTX layout: 16:9, one slide per deck slide, title at top, image
+centered (12.3" × 6"), speaker notes on the notes pane.
+
+Requires `pip install 'co-scientist-local[deck]'` (pulls python-pptx).

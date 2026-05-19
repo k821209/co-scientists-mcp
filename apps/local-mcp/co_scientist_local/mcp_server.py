@@ -9,6 +9,7 @@ from .guide import GUIDE_VERSION, render_guide
 from .state import State
 from .tools import analyses as _analyses
 from .tools import decks as _decks
+from .tools import deck_render as _deck_render
 from .tools import exports as _exports
 from .tools import figures as _figures
 from .tools import images as _images
@@ -864,5 +865,55 @@ def build_mcp(state: State) -> FastMCP:
         """Pack slide_numbers tightly starting at 1, preserving order.
         Call after bulk add/delete. Returns {count, old_to_new}."""
         return _decks.renumber_deck(state, slug, deck_id)
+
+    # ─── deck rendering + PPTX export (Phase 3) ──────────────────────────────
+    @mcp.tool()
+    def render_slide(
+        slug: str,
+        deck_id: str,
+        slide_id: str,
+        local_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Materialize one slide's image into Storage at
+        papers/{slug}/decks/{deck_id}/slides/{N}.png.
+
+        Modes handled by the MCP:
+          - paper-figure : copies the existing figure blob
+          - ai-image     : substitutes {accent}/{display_font} etc.
+                           from deck.concept, calls generate_image
+
+        Modes that need agent help (run the code yourself, then pass the
+        resulting PNG path here):
+          - code-shape, hybrid : pass `local_path="path/to/slide.png"`
+        """
+        return _deck_render.render_slide(
+            state, slug, deck_id, slide_id, local_path=local_path,
+        )
+
+    @mcp.tool()
+    def render_deck(slug: str, deck_id: str) -> dict[str, Any]:
+        """Render every slide we can do automatically. Skips code-shape /
+        hybrid (returns them in `skipped[]` for agent follow-up). When
+        every slide has an image_blob_path, flips deck.status to 'rendered'.
+        """
+        return _deck_render.render_deck(state, slug, deck_id)
+
+    @mcp.tool()
+    def export_deck_to_pptx(
+        slug: str,
+        deck_id: str,
+        output_path: str,
+    ) -> dict[str, Any]:
+        """Emit a .pptx from a (mostly) rendered deck. One slide per
+        deck slide; embedded PNG + title + speaker notes. Slides without
+        an `image_blob_path` get a text-only placeholder so the deck
+        isn't blocked by one missing render. Uploads a copy to
+        Storage at papers/{slug}/decks/{deck_id}/exports/{name}.pptx.
+
+        Requires the [deck] extra: pip install 'co-scientist-local[deck]'.
+        """
+        return _deck_render.export_deck_to_pptx(
+            state, slug, deck_id, output_path=output_path,
+        )
 
     return mcp
