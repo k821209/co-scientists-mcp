@@ -4,6 +4,7 @@ import { Copy, MessageSquare, X, Check } from "lucide-react";
 import { db } from "@/firebase";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { stripRenderArtifacts } from "@/lib/anchorInjector";
 
 interface Props {
   pid: string;
@@ -55,17 +56,10 @@ export function SelectionBubble({
         return;
       }
       // Strip render-only artifacts that selection.toString() picks up
-      // but markdown source doesn't have:
-      //   ✓/⚠ DOI status badges, the rendered "doi:..." link text,
-      //   and accidentally-captured {doi:…}/{fig:…}/{tab:…} tokens.
-      // Whitespace runs collapse so saved text matches Firestore neatly.
-      const rawText = selection.toString();
-      const text = rawText
-        .replace(/[✓⚠]/g, " ")
-        .replace(/\bdoi:[^\s)\]]+/gi, " ")
-        .replace(/\{(?:doi|fig|tab):[^}]*\}/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
+      // but markdown source doesn't have (✓ DOI badges, "doi:..." link
+      // text, accidentally captured {doi:…} tokens). Shared helper so
+      // the injector at render time uses the same normalization.
+      const text = stripRenderArtifacts(selection.toString());
       if (text.length < 3) {
         if (!composingRef.current) setSel(null);
         return;

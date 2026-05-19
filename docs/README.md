@@ -9,6 +9,7 @@ Notes for future-me. Optimized for quick re-orientation, not for newcomers.
 - [setup-host.md](setup-host.md) — self-host from scratch
 - [mcp-tools.md](mcp-tools.md) — full MCP tool catalog
 - [doi-verification.md](doi-verification.md) — CrossRef hallucination check
+- [comments.md](comments.md) — selection-anchored comment flow + inline highlight pipeline
 - [plans.md](plans.md) — free / pro / enterprise gating
 
 ### Architecture decisions (ADRs)

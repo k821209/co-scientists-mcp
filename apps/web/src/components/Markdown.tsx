@@ -25,6 +25,7 @@ import { remarkDoi } from "@/lib/remarkDoi";
 import { remarkFigureRefs } from "@/lib/remarkFigureRefs";
 import { remarkTableRefs } from "@/lib/remarkTableRefs";
 import type { AnchorTarget } from "@/lib/remarkAnchorMarks";
+import { injectAnchorMarks } from "@/lib/anchorInjector";
 
 interface MarkdownProps {
   children: string;
@@ -42,78 +43,6 @@ function extractDoiFromHref(href: string | undefined): string | null {
   if (!href) return null;
   const m = href.match(/^https?:\/\/(?:dx\.)?doi\.org\/(.+)$/i);
   return m ? m[1] : null;
-}
-
-function injectAnchorMarks(body: string, anchors: AnchorTarget[]): string {
-  if (!anchors || anchors.length === 0) return body;
-  // selection.toString() captures the RENDERED text — which for our
-  // markdown means:
-  //   - inline DOI badge characters ✓/⚠ that don't exist in source
-  //   - the rendered "doi:..." link text where source has {doi:X}
-  //   - line breaks inserted by DOM block layout around the link
-  // Plus the source has **bold**, _italic_, `code` tokens we should
-  // tolerate sitting between the anchor's words.
-  const sorted = [...anchors]
-    .filter((a) => a.text && a.text.length >= 3)
-    .sort((a, b) => b.text.length - a.text.length);
-
-  type Match = { start: number; end: number; reviewId: string };
-  const matches: Match[] = [];
-  for (const a of sorted) {
-    // 1. Strip render-only artifacts from the anchor.
-    const stripped = a.text
-      .replace(/[✓⚠]/g, " ")              // DOI status badges
-      .replace(/\bdoi:[^\s)\]]+/gi, " ")   // rendered DOI link text
-      .replace(/\{(?:doi|fig|tab):[^}]*\}/g, " ") // accidentally captured markers
-      .replace(/\s+/g, " ")                // collapse whitespace
-      .trim();
-    if (stripped.length < 3) continue;
-    // 2. Build a regex that allows up to 300 chars of anything between
-    //    each pair of anchor words (so {doi:...}/{fig:N}/markdown markers
-    //    in the source don't break the match).
-    const escaped = stripped
-      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-      .replace(/\s+/g, "[\\s\\S]{0,300}?");
-    let re: RegExp;
-    try {
-      re = new RegExp(escaped, "g");
-    } catch { continue; }
-    for (let m: RegExpExecArray | null; (m = re.exec(body)); ) {
-      matches.push({ start: m.index, end: m.index + m[0].length, reviewId: a.reviewId });
-      if (m[0].length === 0) re.lastIndex++;
-    }
-  }
-  matches.sort((x, y) => x.start - y.start || x.end - y.end);
-
-  // MERGE overlapping ranges into one mark carrying all reviewIds, so
-  // overlapping comments don't disappear behind each other. The popover
-  // reads `data-review-ids` (CSV) and lets the user page through them.
-  type Group = { start: number; end: number; reviewIds: string[] };
-  const groups: Group[] = [];
-  for (const m of matches) {
-    const last = groups[groups.length - 1];
-    if (last && m.start < last.end) {
-      last.end = Math.max(last.end, m.end);
-      if (!last.reviewIds.includes(m.reviewId)) last.reviewIds.push(m.reviewId);
-    } else {
-      groups.push({ start: m.start, end: m.end, reviewIds: [m.reviewId] });
-    }
-  }
-
-  let out = "";
-  let pos = 0;
-  for (const g of groups) {
-    out += body.slice(pos, g.start);
-    const inner = body.slice(g.start, g.end);
-    const ids = g.reviewIds.map((id) => id.replace(/"/g, "")).join(",");
-    const klass = g.reviewIds.length > 1
-      ? "cs-anchor-mark cs-anchor-multi"
-      : "cs-anchor-mark";
-    out += `<mark class="${klass}" data-review-ids="${ids}">${inner}</mark>`;
-    pos = g.end;
-  }
-  out += body.slice(pos);
-  return out;
 }
 
 export function Markdown({ children, className, knownDois, anchors }: MarkdownProps) {

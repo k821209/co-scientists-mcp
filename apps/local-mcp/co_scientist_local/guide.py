@@ -10,7 +10,7 @@ only) and refers the agent here on every session start.
 """
 from __future__ import annotations
 
-GUIDE_VERSION = "2026-05-18f"
+GUIDE_VERSION = "2026-05-19a"
 
 
 def render_guide() -> str:
@@ -20,18 +20,26 @@ def render_guide() -> str:
 ## How this project works
 
 A human collaborator views the dashboard and can leave inline comments on
-paragraphs, figures, and claims. Those comments land in Firestore as
-`reviews` with `source='user'`.
+specific passages by drag-selecting in the manuscript. Each comment lands
+in Firestore as a `review` with `source='user'`, `status='open'`, plus an
+`anchor_text` field containing the exact selected passage and a
+`manuscript_ref` like `section:<key>`. The dashboard renders the anchor
+as a yellow highlight in the rendered manuscript; clicking the highlight
+opens a popover with the comment.
 
 On every session start:
 
 1. Call `mcp__co_scientist__whoami()` once — verifies the MCP is bound to
    the project_id your CLAUDE.md mentions. If they differ, STOP and tell
    the user — they likely mixed `.mcp.json` and `CLAUDE.md` from two
-   different dashboard projects.
+   different dashboard projects. (The MCP also prints a stderr warning
+   banner on startup when this mismatch is detected.)
 2. Call `mcp__co_scientist__list_papers()` then, for each paper,
    `mcp__co_scientist__count_open_user_comments(slug)`. If non-zero,
-   surface them and offer `/paper-revision`.
+   call `mcp__co_scientist__list_reviews(slug, status="open")` to get
+   the open comments with their `anchor_text` — use that quoted passage
+   to locate the exact place in the manuscript the user is pointing at,
+   then offer `/paper-revision`.
 
 ## Available skills
 

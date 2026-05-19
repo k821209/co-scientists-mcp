@@ -26,11 +26,50 @@ Env vars per mode:
 from __future__ import annotations
 
 import os
+import pathlib
+import re
 import sys
 
 from .backends import InMemoryBackend
 from .mcp_server import build_mcp
 from .state import State
+
+
+def _check_claude_md_project_id(state: State) -> None:
+    """Compare ./CLAUDE.md's stated project id (if any) against the one
+    the MCP actually authenticated to. A mismatch usually means the user
+    mixed `.mcp.json` and `CLAUDE.md` from two different dashboard
+    projects — the source of the long-running 'paper not found' bug.
+
+    Prints a prominent banner to stderr; doesn't fail startup so the
+    user can still operate (just with the wrong project bound).
+    """
+    cwd_claude = pathlib.Path.cwd() / "CLAUDE.md"
+    if not cwd_claude.is_file():
+        return
+    try:
+        text = cwd_claude.read_text(encoding="utf-8")
+    except OSError:
+        return
+    # The dashboard template writes `Project id: \`<pid>\``; older
+    # templates may say `id: \`<pid>\`` or embed the pid in the heading.
+    pid_pattern = re.compile(r"[Pp]roject\s+id\s*:\s*`([a-zA-Z0-9_-]+)`")
+    m = pid_pattern.search(text)
+    claimed = m.group(1) if m else None
+    if claimed is None:
+        return
+    if claimed != state.project_id:
+        sys.stderr.write(
+            "\n"
+            "  ╭─ ⚠  CLAUDE.md / API key mismatch ─────────────────────────────╮\n"
+            f"  │  CLAUDE.md project_id : {claimed:<36} │\n"
+            f"  │  MCP authenticated as : {state.project_id:<36} │\n"
+            "  │                                                                │\n"
+            "  │  These should match. You probably mixed `.mcp.json` and        │\n"
+            "  │  CLAUDE.md from two different dashboard projects. Re-download  │\n"
+            "  │  setup-<slug>.sh from a single project's Setup tab to fix.     │\n"
+            "  ╰────────────────────────────────────────────────────────────────╯\n\n"
+        )
 
 
 def _build_dev_state() -> State:
@@ -155,6 +194,7 @@ def main() -> None:
             f"project={state.project_id}, owner={state.owner_uid}",
             file=sys.stderr,
         )
+        _check_claude_md_project_id(state)
     elif os.environ.get("CO_SCIENTIST_PROJECT_ID") and os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
         try:
             state = _build_service_account_state()
