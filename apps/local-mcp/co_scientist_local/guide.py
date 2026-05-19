@@ -10,7 +10,7 @@ only) and refers the agent here on every session start.
 """
 from __future__ import annotations
 
-GUIDE_VERSION = "2026-05-19a"
+GUIDE_VERSION = "2026-05-19b"
 
 
 def render_guide() -> str:
@@ -55,7 +55,13 @@ On every session start:
   stats / domain) + consistency pass; each finding becomes one
   Firestore review row (`source="ai"`) anchored to the offending
   passage so the dashboard renders inline highlights.
-- `/analysis-run [name] [command]` — local or registered-HPC *(skill not yet ported)*
+- `/analysis-run [name]` — wrap a computation (local or registered HPC)
+  in a tracked run, then `add_figure` / `add_table` selected outputs.
+  Dashboard Runs tab streams logs in real time.
+- `/scientific-image` — staged pipeline (classify → blueprint →
+  generate → critique) around `generate_image` for schematics
+  (pathway, network, workflow, comparison, architecture, tree).
+  Real data plots go through `/analysis-run` instead.
 
 ## Tool surface (~60 tools under `mcp__co_scientist__*`)
 
