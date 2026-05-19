@@ -406,50 +406,126 @@ export function Paper() {
           </div>
         )}
 
-        {(() => {
-          const unanchored = reviews.filter((r) => !r.anchor_text);
-          const anchoredOpen = reviews.filter(
-            (r) => r.anchor_text && r.status === "open",
-          ).length;
-          if (unanchored.length === 0 && anchoredOpen === 0) return null;
-          return (
-            <div className="space-y-4" id="comments-anchor">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <MessageSquare className="h-4 w-4" /> Comments
-                    {anchoredOpen > 0 && (
-                      <Badge variant="outline" className="text-[10px]">
-                        {anchoredOpen} on highlights
-                      </Badge>
-                    )}
-                  </CardTitle>
-                  <CardDescription>
-                    Highlighted passages have hover-to-view comments. The
-                    list below holds general (unanchored) comments only.
-                    Both are picked up by Claude Code.
-                  </CardDescription>
-                </CardHeader>
-                {unanchored.length === 0 && (
-                  <CardContent>
-                    <p className="text-xs italic text-muted-foreground">
-                      No general comments. Drag-select any passage above to
-                      add a highlighted comment.
-                    </p>
-                  </CardContent>
-                )}
-              </Card>
-
-              {unanchored.map((r) => (
-                <ReviewView
-                  key={r.id} review={r} pid={pid} paperSlug={slug}
-                  knownDois={knownDois}
-                />
-              ))}
-            </div>
-          );
-        })()}
+        <CommentsPanel
+          pid={pid} slug={slug} reviews={reviews} knownDois={knownDois}
+        />
       </div>
+    </div>
+  );
+}
+
+/** Bottom-of-page Comments summary. Collapsed by default — click the
+ *  header to expand and see every open user comment (anchored + general)
+ *  with its quoted text. Each row click scrolls to + flashes the
+ *  highlight in the manuscript. */
+function CommentsPanel({ pid, slug, reviews, knownDois }: {
+  pid: string; slug: string; reviews: Review[]; knownDois: ReadonlySet<string>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const openUser = useMemo(
+    () => reviews.filter((r) => r.status === "open" && r.source === "user"),
+    [reviews],
+  );
+  const anchoredCount = useMemo(
+    () => openUser.filter((r) => !!r.anchor_text).length,
+    [openUser],
+  );
+  const unanchored = useMemo(
+    () => reviews.filter((r) => !r.anchor_text),
+    [reviews],
+  );
+  if (openUser.length === 0 && unanchored.length === 0) return null;
+
+  const scrollToMark = (reviewId: string) => {
+    const marks = document.querySelectorAll<HTMLElement>("mark.cs-anchor-mark");
+    for (const m of marks) {
+      const ids = (m.dataset.reviewIds ?? m.dataset.reviewId ?? "").split(",");
+      if (ids.includes(reviewId)) {
+        m.scrollIntoView({ behavior: "smooth", block: "center" });
+        const orig = m.style.boxShadow;
+        m.style.boxShadow = "0 0 0 3px #f59e0b";
+        setTimeout(() => { m.style.boxShadow = orig; }, 1500);
+        m.click();  // opens the popover
+        return;
+      }
+    }
+  };
+
+  return (
+    <div className="space-y-4" id="comments-anchor">
+      <Card>
+        <CardHeader
+          onClick={() => setExpanded((v) => !v)}
+          className="cursor-pointer select-none"
+        >
+          <CardTitle className="flex items-center gap-2 text-base">
+            <MessageSquare className="h-4 w-4" /> Comments
+            <Badge variant="secondary" className="text-[10px]">
+              {openUser.length} open
+            </Badge>
+            {anchoredCount > 0 && (
+              <Badge variant="outline" className="text-[10px]">
+                {anchoredCount} on highlights
+              </Badge>
+            )}
+            <span className="ml-auto text-xs text-muted-foreground">
+              {expanded ? "Hide" : "Show list"}
+            </span>
+          </CardTitle>
+          <CardDescription>
+            Click a row to jump to the highlighted passage. Highlighted
+            comments also pop on click of their yellow mark above.
+          </CardDescription>
+        </CardHeader>
+        {expanded && (
+          <CardContent className="space-y-2">
+            {openUser.length === 0 && (
+              <p className="text-xs italic text-muted-foreground">
+                No open comments yet. Drag-select a passage above to add one.
+              </p>
+            )}
+            {openUser.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => r.anchor_text && scrollToMark(r.id)}
+                className={
+                  "w-full rounded-md border p-2 text-left text-sm transition-colors " +
+                  (r.anchor_text ? "hover:bg-accent" : "")
+                }
+              >
+                <div className="mb-1 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                  {r.section && (
+                    <Badge variant="outline" className="text-[10px]">{r.section}</Badge>
+                  )}
+                  {r.severity && (
+                    <Badge variant="outline" className="text-[10px]">{r.severity}</Badge>
+                  )}
+                  {!r.anchor_text && (
+                    <Badge variant="outline" className="text-[10px]">general</Badge>
+                  )}
+                </div>
+                {r.anchor_text && (
+                  <blockquote className="mb-1 line-clamp-2 border-l-2 border-amber-400 pl-2 text-[11px] italic text-muted-foreground">
+                    “{r.anchor_text.length > 140
+                      ? r.anchor_text.slice(0, 140) + "…"
+                      : r.anchor_text}”
+                  </blockquote>
+                )}
+                <div className="line-clamp-2">{r.comment}</div>
+              </button>
+            ))}
+          </CardContent>
+        )}
+      </Card>
+
+      {/* Anchorless legacy reviews (no anchor_text, can't be inline) */}
+      {unanchored.map((r) => (
+        <ReviewView
+          key={r.id} review={r} pid={pid} paperSlug={slug}
+          knownDois={knownDois}
+        />
+      ))}
     </div>
   );
 }

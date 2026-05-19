@@ -188,14 +188,12 @@ export function SelectionBubble({
                 resolved_at: null,
               });
               setJustSaved(true);
-              // brief success state, then close + scroll user to Comments
+              // brief success state, then close — stay where the user was.
               setTimeout(() => {
                 setComposing(false);
                 setSel(null);
                 setJustSaved(false);
-                const target = document.getElementById("comments-anchor");
-                target?.scrollIntoView({ behavior: "smooth", block: "start" });
-              }, 1200);
+              }, 1000);
             } finally {
               setSubmitting(false);
             }
@@ -228,8 +226,8 @@ function CommentComposer({
           <Check className="h-4 w-4" /> Comment saved
         </div>
         <div className="mt-1 text-xs text-muted-foreground">
-          Scrolling to Comments — Claude Code will see your note + the
-          quoted text on its next session.
+          The passage is highlighted. Claude Code will see your note +
+          the quoted text on its next session.
         </div>
       </div>
     );
