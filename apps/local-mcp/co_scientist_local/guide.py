@@ -10,7 +10,7 @@ only) and refers the agent here on every session start.
 """
 from __future__ import annotations
 
-GUIDE_VERSION = "2026-05-20a"
+GUIDE_VERSION = "2026-05-20b"
 
 
 def render_guide() -> str:
@@ -63,10 +63,16 @@ On every session start:
   (pathway, network, workflow, comparison, architecture, tree).
   Real data plots go through `/analysis-run` instead.
 - `/paper-deck [slug] [audience] [duration_min] [--theme slug]` —
-  Phase 1 of the presentation pipeline: write deck-level concept
-  (palette/typography/motif) + outline slides scaled to duration +
-  per-slide content with MANDATORY speaker notes + prompt placeholders.
-  Rendering and PPTX export are Phase 3.
+  full presentation pipeline: deck concept + slides + render
+  (`render_deck`) + PPTX export (`export_deck_to_pptx`).
+- `/promote-result [slug] [analysis]` — map an analysis group's
+  output files onto manuscript figures/tables (map mode → promote mode).
+- `/supplementary-material [slug]` — identify + register supplementary
+  figures/tables/text (the +100 figure_number offset convention).
+- `/analysis-audit [slug]` — scan analysis scripts for hardcoded
+  literals + verify cited manuscript numbers against live data.
+- `/release-publish [slug] [analysis]` — audit + publish an analysis
+  release folder as a standalone GitHub repo (git workflow, gated).
 
 ## Tool surface (~60 tools under `mcp__co_scientist__*`)
 
