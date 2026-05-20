@@ -53,29 +53,24 @@ export function SelectionBubble({
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
-    function onMouseDown(e: MouseEvent) {
-      dragStartRef.current = { x: e.clientX, y: e.clientY };
-    }
-    function onMouseUp(e: MouseEvent) {
-      // Don't interfere if click is inside our own UI.
-      const target = e.target as HTMLElement | null;
-      if (target?.closest("[data-selection-bubble]")) return;
-
+    // Event-independent: given the CURRENT window selection, decide
+    // whether to show the bubble and where. Called from mouseup
+    // (desktop, immediate) and a debounced selectionchange (mobile —
+    // iOS Safari does NOT fire reliable synthetic mouse events for
+    // long-press text selection, so mouseup alone never triggered).
+    function evaluateSelection() {
       const selection = window.getSelection();
       if (!selection || selection.isCollapsed) {
         if (!composingRef.current) setSel(null);
         return;
       }
-      // Strip render-only artifacts that selection.toString() picks up
-      // but markdown source doesn't have (✓ DOI badges, "doi:..." link
-      // text, accidentally captured {doi:…} tokens). Shared helper so
-      // the injector at render time uses the same normalization.
+      // Strip render-only artifacts (✓ DOI badges, "doi:..." link text,
+      // captured {doi:…} tokens) so saved text matches markdown source.
       const text = stripRenderArtifacts(selection.toString());
       if (text.length < 3) {
         if (!composingRef.current) setSel(null);
         return;
       }
-      // Anchor node must live inside a selectable section.
       const anchorEl = selection.anchorNode?.parentElement;
       const sectionEl = anchorEl?.closest(selectableSelector);
       if (!sectionEl) {
@@ -83,38 +78,59 @@ export function SelectionBubble({
         return;
       }
       const sectionKey = (sectionEl as HTMLElement).dataset.sectionKey || "";
-      // Anchor strategy:
-      //   - X: horizontal start of the drag (where the user's eye was
-      //     when they began the selection). Falls back to the first
-      //     selection rect's left if dragStart is unavailable.
-      //   - Y: top of the selection's FIRST client rect — the visual top
-      //     of the selected text — so the bubble appears above the
-      //     selection regardless of drag direction.
       const rects = selection.getRangeAt(0).getClientRects();
       const firstRect = rects[0];
       const lastRect = rects[rects.length - 1];
+      if (!firstRect) return;
+      // X: drag-start point if we have one (desktop), else selection's
+      //    visual left edge (mobile — no mousedown fired).
+      // Y: top of the first selection rect — above the selection.
       const start = dragStartRef.current;
-      let x = start?.x ?? firstRect?.left ?? e.clientX;
-      let y = firstRect?.top ?? e.clientY;
-      // If selection's top is too close to the viewport top, flip the
-      // bubble to BELOW the selection's bottom edge.
+      let x = start?.x ?? firstRect.left;
+      let y = firstRect.top;
       const flipBelow = y < 60;
       if (flipBelow && lastRect) y = lastRect.bottom;
       setSel({ text, sectionKey, x, y, flipBelow });
     }
 
+    function onMouseDown(e: MouseEvent) {
+      dragStartRef.current = { x: e.clientX, y: e.clientY };
+    }
+    function onMouseUp(e: MouseEvent) {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("[data-selection-bubble]")) return;
+      evaluateSelection();
+    }
+
+    // Debounced selectionchange — fires continuously while the user
+    // drags a selection handle; we act only once it settles (~350ms
+    // quiet). This is the mobile path.
+    let selTimer: number | null = null;
+    function onSelectionChange() {
+      if (selTimer) clearTimeout(selTimer);
+      selTimer = window.setTimeout(() => {
+        // A touch that lands on our own UI shouldn't re-evaluate.
+        const active = document.activeElement;
+        if (active?.closest?.("[data-selection-bubble]")) return;
+        evaluateSelection();
+      }, 350);
+    }
+
     function onScroll() {
-      // Bubble is positioned to a one-shot rect; hide on scroll rather than
-      // chase it. The user can re-select.
+      // Bubble is positioned to a one-shot rect; hide on scroll rather
+      // than chase it. The user can re-select.
       if (!composingRef.current) setSel(null);
     }
 
     document.addEventListener("mousedown", onMouseDown);
     document.addEventListener("mouseup", onMouseUp);
+    document.addEventListener("selectionchange", onSelectionChange);
     document.addEventListener("scroll", onScroll, true);
     return () => {
+      if (selTimer) clearTimeout(selTimer);
       document.removeEventListener("mousedown", onMouseDown);
       document.removeEventListener("mouseup", onMouseUp);
+      document.removeEventListener("selectionchange", onSelectionChange);
       document.removeEventListener("scroll", onScroll, true);
     };
   }, [selectableSelector]);
