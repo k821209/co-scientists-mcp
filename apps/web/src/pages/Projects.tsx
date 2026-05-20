@@ -1,9 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   addDoc, collection, onSnapshot, query, where,
 } from "firebase/firestore";
-import { Folder, Plus, X } from "lucide-react";
+import { Folder, Plus, X, FolderPlus, Download, TerminalSquare } from "lucide-react";
 import { useAuth } from "@/auth";
 import { db } from "@/firebase";
 import { Button } from "@/components/ui/button";
@@ -79,17 +79,7 @@ export function Projects() {
       {loading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : projects.length === 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Folder className="h-4 w-4" /> No projects yet
-            </CardTitle>
-            <CardDescription>
-              Click "New Project" to create your first one (e.g. "Arabidopsis genome").
-              Each project gets its own MCP config bundle to download.
-            </CardDescription>
-          </CardHeader>
-        </Card>
+        <GettingStarted onCreate={() => setShowNew(true)} showForm={showNew} />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {projects.map((p) => (
@@ -121,11 +111,65 @@ export function Projects() {
   );
 }
 
+function GettingStarted({ onCreate, showForm }: {
+  onCreate: () => void;
+  showForm: boolean;
+}) {
+  const steps = [
+    {
+      icon: FolderPlus,
+      title: "1 · Create a project",
+      body: "A project (e.g. \"Arabidopsis genome\") is one research thread. It gets its own MCP key, agent, and skill set. Free tier: 3 projects.",
+    },
+    {
+      icon: Download,
+      title: "2 · Download the setup script",
+      body: "Each project's Setup tab gives you a one-line setup-<slug>.sh — it drops .mcp.json + CLAUDE.md + the skill set into your working directory.",
+    },
+    {
+      icon: TerminalSquare,
+      title: "3 · Run Claude Code",
+      body: "Open Claude Code in that directory and say /paper-writing \"Your title\". Papers, figures, comments — all appear here live.",
+    },
+  ];
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Folder className="h-5 w-5" /> Welcome to co-scientist
+        </CardTitle>
+        <CardDescription>
+          A scientific-writing workspace: you write papers with Claude Code
+          locally; this dashboard mirrors everything live and lets you (or
+          a collaborator) leave inline comments. Three steps to start:
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 sm:grid-cols-3">
+          {steps.map((s) => (
+            <div key={s.title} className="rounded-lg border bg-muted/30 p-3">
+              <s.icon className="mb-2 h-5 w-5 text-primary" />
+              <div className="mb-1 text-sm font-semibold">{s.title}</div>
+              <p className="text-xs text-muted-foreground">{s.body}</p>
+            </div>
+          ))}
+        </div>
+        {!showForm && (
+          <Button onClick={onCreate}>
+            <Plus className="mr-2 h-4 w-4" /> Create your first project
+          </Button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function NewProjectForm({ onCancel, onCreated }: {
   onCancel: () => void;
   onCreated: () => void;
 }) {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
@@ -138,7 +182,7 @@ function NewProjectForm({ onCancel, onCreated }: {
     setError(null);
     try {
       const now = new Date().toISOString();
-      await addDoc(collection(db, "projects"), {
+      const ref = await addDoc(collection(db, "projects"), {
         owner_uid: user.uid,
         name: name.trim(),
         description: description.trim() || null,
@@ -149,6 +193,9 @@ function NewProjectForm({ onCancel, onCreated }: {
         updated_at: now,
       });
       onCreated();
+      // The natural next step is connecting Claude Code — jump straight
+      // to the new project's Setup tab.
+      navigate(`/projects/${ref.id}/setup`);
     } catch (err) {
       setError((err as Error).message);
     } finally {
