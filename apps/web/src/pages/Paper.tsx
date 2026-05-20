@@ -245,7 +245,7 @@ export function Paper() {
   if (!pid || !slug) return null;
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-4xl space-y-6">
       {pid && slug && <SelectionBubble pid={pid} paperSlug={slug} />}
       {pid && slug && (
         <CommentHoverPopover pid={pid} paperSlug={slug} reviews={reviews} />
@@ -286,7 +286,7 @@ export function Paper() {
         />
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+      <div className="space-y-6">
         <Card>
           <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
             <div>
@@ -362,7 +362,7 @@ export function Paper() {
         </Card>
 
         {mainFigures.length > 0 && (
-          <div className="lg:col-span-1 space-y-4">
+          <div className="space-y-4">
             <h2 className="flex items-center gap-2 text-lg font-semibold">
               <ImageIcon className="h-5 w-5" /> Figures
             </h2>
@@ -373,7 +373,7 @@ export function Paper() {
         )}
 
         {mainTables.length > 0 && (
-          <div className="lg:col-span-1 space-y-4">
+          <div className="space-y-4">
             <h2 className="flex items-center gap-2 text-lg font-semibold">
               <Table2 className="h-5 w-5" /> Tables
             </h2>
@@ -384,7 +384,7 @@ export function Paper() {
         )}
 
         {suppFigures.length > 0 && (
-          <div className="lg:col-span-1 space-y-4">
+          <div className="space-y-4">
             <h2 className="flex items-center gap-2 text-lg font-semibold">
               <ImageIcon className="h-5 w-5" /> Supplementary Figures
             </h2>
@@ -398,7 +398,7 @@ export function Paper() {
         )}
 
         {suppTables.length > 0 && (
-          <div className="lg:col-span-1 space-y-4">
+          <div className="space-y-4">
             <h2 className="flex items-center gap-2 text-lg font-semibold">
               <Table2 className="h-5 w-5" /> Supplementary Tables
             </h2>
@@ -409,12 +409,12 @@ export function Paper() {
         )}
 
         {analyses.length > 0 && (
-          <div className="lg:col-span-1">
+          <div className="">
             <AnalysesCard pid={pid} paperSlug={slug} analyses={analyses} />
           </div>
         )}
 
-        <div className="lg:col-span-1">
+        <div className="">
           <ReferencesCard
             pid={pid} slug={slug} references={references}
             sections={sections} cited={knownDois} findings={findings}
@@ -422,7 +422,7 @@ export function Paper() {
         </div>
 
         {activity.length > 0 && (
-          <div className="lg:col-span-1">
+          <div className="">
             <ActivityCard entries={activity} />
           </div>
         )}
