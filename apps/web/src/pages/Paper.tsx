@@ -4,7 +4,7 @@ import {
   addDoc, collection, doc, onSnapshot, orderBy, query, updateDoc,
 } from "firebase/firestore";
 import {
-  ArrowLeft, MessageSquare, CheckCircle2, XCircle, Download, Loader2,
+  ArrowLeft, MessageSquare, CheckCircle2, Download, Loader2,
   ImageIcon, BookOpen, ExternalLink, Table2, Activity, Beaker,
   FileText, Layers, Clock, RefreshCw, Share2,
 } from "lucide-react";
@@ -19,6 +19,7 @@ import { SyncDoisDialog } from "@/components/SyncDoisDialog";
 import { SharePaperDialog } from "@/components/SharePaperDialog";
 import { SelectionBubble } from "@/components/SelectionBubble";
 import { CommentHoverPopover } from "@/components/CommentHoverPopover";
+import { CommentsList } from "@/components/CommentsList";
 import type { AnchorTarget } from "@/lib/remarkAnchorMarks";
 import { cn } from "@/lib/utils";
 
@@ -286,7 +287,8 @@ export function Paper() {
         />
       )}
 
-      <div className="space-y-6">
+      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+        <div className="space-y-6">
         <Card>
           <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
             <div>
@@ -426,140 +428,29 @@ export function Paper() {
             <ActivityCard entries={activity} />
           </div>
         )}
+        </div>
 
-        <CommentsPanel
-          pid={pid} slug={slug} reviews={reviews} knownDois={knownDois}
-        />
+        {/* Right: persistent comment list — the reliable view of the
+            review thread even after edits dissolve the highlights.
+            Owner can Resolve / Withdraw straight from a row. */}
+        <div className="lg:sticky lg:top-4 lg:self-start">
+          <CommentsList
+            reviews={reviews}
+            onResolve={(id) =>
+              updateDoc(
+                doc(db, "projects", pid!, "papers", slug!, "reviews", id),
+                { status: "resolved", resolved_at: new Date().toISOString() },
+              )
+            }
+            onWithdraw={(id) =>
+              updateDoc(
+                doc(db, "projects", pid!, "papers", slug!, "reviews", id),
+                { status: "rejected", resolved_at: new Date().toISOString() },
+              )
+            }
+          />
+        </div>
       </div>
-    </div>
-  );
-}
-
-/** Bottom-of-page Comments summary. Collapsed by default — click the
- *  header to expand and see every open user comment (anchored + general)
- *  with its quoted text. Each row click scrolls to + flashes the
- *  highlight in the manuscript. */
-function CommentsPanel({ pid, slug, reviews, knownDois }: {
-  pid: string; slug: string; reviews: Review[]; knownDois: ReadonlySet<string>;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  // Show every open comment — owner's own ("user"), shared-reviewer
-  // ("external"), and AI-reviewer ("ai"). The source is shown as a
-  // badge so they're still distinguishable.
-  const openUser = useMemo(
-    () => reviews.filter((r) => r.status === "open"),
-    [reviews],
-  );
-  const anchoredCount = useMemo(
-    () => openUser.filter((r) => !!r.anchor_text).length,
-    [openUser],
-  );
-  const unanchored = useMemo(
-    () => reviews.filter((r) => !r.anchor_text),
-    [reviews],
-  );
-  if (openUser.length === 0 && unanchored.length === 0) return null;
-
-  const scrollToMark = (reviewId: string) => {
-    const marks = document.querySelectorAll<HTMLElement>("mark.cs-anchor-mark");
-    for (const m of marks) {
-      const ids = (m.dataset.reviewIds ?? m.dataset.reviewId ?? "").split(",");
-      if (ids.includes(reviewId)) {
-        m.scrollIntoView({ behavior: "smooth", block: "center" });
-        const orig = m.style.boxShadow;
-        m.style.boxShadow = "0 0 0 3px #f59e0b";
-        setTimeout(() => { m.style.boxShadow = orig; }, 1500);
-        m.click();  // opens the popover
-        return;
-      }
-    }
-  };
-
-  return (
-    <div className="space-y-4" id="comments-anchor">
-      <Card>
-        <CardHeader
-          onClick={() => setExpanded((v) => !v)}
-          className="cursor-pointer select-none"
-        >
-          <CardTitle className="flex items-center gap-2 text-base">
-            <MessageSquare className="h-4 w-4" /> Comments
-            <Badge variant="secondary" className="text-[10px]">
-              {openUser.length} open
-            </Badge>
-            {anchoredCount > 0 && (
-              <Badge variant="outline" className="text-[10px]">
-                {anchoredCount} on highlights
-              </Badge>
-            )}
-            <span className="ml-auto text-xs text-muted-foreground">
-              {expanded ? "Hide" : "Show list"}
-            </span>
-          </CardTitle>
-          <CardDescription>
-            Click a row to jump to the highlighted passage. Highlighted
-            comments also pop on click of their yellow mark above.
-          </CardDescription>
-        </CardHeader>
-        {expanded && (
-          <CardContent className="space-y-2">
-            {openUser.length === 0 && (
-              <p className="text-xs italic text-muted-foreground">
-                No open comments yet. Drag-select a passage above to add one.
-              </p>
-            )}
-            {openUser.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                onClick={() => r.anchor_text && scrollToMark(r.id)}
-                className={
-                  "w-full rounded-md border p-2 text-left text-sm transition-colors " +
-                  (r.anchor_text ? "hover:bg-accent" : "")
-                }
-              >
-                <div className="mb-1 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
-                  {r.source === "external" && (
-                    <Badge className="bg-sky-100 text-[10px] text-sky-800 dark:bg-sky-900/40 dark:text-sky-300">
-                      shared · {r.reviewer_name || "anonymous"}
-                    </Badge>
-                  )}
-                  {r.source === "ai" && (
-                    <Badge variant="secondary" className="text-[10px]">
-                      AI · {r.reviewer_name || "reviewer"}
-                    </Badge>
-                  )}
-                  {r.section && (
-                    <Badge variant="outline" className="text-[10px]">{r.section}</Badge>
-                  )}
-                  {r.severity && (
-                    <Badge variant="outline" className="text-[10px]">{r.severity}</Badge>
-                  )}
-                  {!r.anchor_text && (
-                    <Badge variant="outline" className="text-[10px]">general</Badge>
-                  )}
-                </div>
-                {r.anchor_text && (
-                  <blockquote className="mb-1 line-clamp-2 border-l-2 border-amber-400 pl-2 text-[11px] italic text-muted-foreground">
-                    “{r.anchor_text.length > 140
-                      ? r.anchor_text.slice(0, 140) + "…"
-                      : r.anchor_text}”
-                  </blockquote>
-                )}
-                <div className="line-clamp-2">{r.comment}</div>
-              </button>
-            ))}
-          </CardContent>
-        )}
-      </Card>
-
-      {/* Anchorless legacy reviews (no anchor_text, can't be inline) */}
-      {unanchored.map((r) => (
-        <ReviewView
-          key={r.id} review={r} pid={pid} paperSlug={slug}
-          knownDois={knownDois}
-        />
-      ))}
     </div>
   );
 }
@@ -1209,63 +1100,5 @@ function NewCommentBox({ pid, paperSlug, section }: { pid: string; paperSlug: st
         </Button>
       </div>
     </form>
-  );
-}
-
-function ReviewView({ review, pid, paperSlug, knownDois }: {
-  review: Review; pid: string; paperSlug: string; knownDois: ReadonlySet<string>;
-}) {
-  const isResolved = review.status !== "open";
-  return (
-    <Card id={`review-${review.id}`} className="transition-shadow">
-      <CardContent className="space-y-2 p-4">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Badge variant={review.source === "ai" ? "secondary" : "outline"} className="text-[10px]">
-            {review.source}
-          </Badge>
-          {review.section && (
-            <Badge variant="outline" className="text-[10px]">{review.section}</Badge>
-          )}
-          {review.severity && (
-            <Badge
-              variant={review.severity === "major" ? "destructive" : "outline"}
-              className="text-[10px]"
-            >
-              {review.severity}
-            </Badge>
-          )}
-          {isResolved ? (
-            <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-emerald-500" />
-          ) : null}
-        </div>
-        {review.anchor_text && (
-          <blockquote className="rounded border-l-2 border-primary/60 bg-muted/40 px-2 py-1 text-xs italic text-muted-foreground">
-            “{review.anchor_text.length > 280
-              ? review.anchor_text.slice(0, 280) + "…"
-              : review.anchor_text}”
-          </blockquote>
-        )}
-        <Markdown className="text-sm" knownDois={knownDois}>{review.comment}</Markdown>
-        {review.response && (
-          <div className="rounded-md bg-muted p-2 text-xs">
-            <div className="mb-1 font-medium">Claude's response:</div>
-            <Markdown className="text-xs" knownDois={knownDois}>{review.response}</Markdown>
-          </div>
-        )}
-        {!isResolved && (
-          <div className="flex gap-2">
-            <Button
-              size="sm" variant="ghost"
-              onClick={() => updateDoc(
-                doc(db, "projects", pid, "papers", paperSlug, "reviews", review.id),
-                { status: "rejected", resolved_at: new Date().toISOString() },
-              )}
-            >
-              <XCircle className="mr-1 h-3 w-3" /> Withdraw
-            </Button>
-          </div>
-        )}
-      </CardContent>
-    </Card>
   );
 }
