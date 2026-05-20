@@ -7,6 +7,10 @@ service firebase.storage {
     function hasProjectClaim(pid) {
       return isSignedIn() && request.auth.token.project_id == pid;
     }
+    function hasShareClaim(pid, slug) {
+      return isSignedIn()
+             && request.auth.token.share_paper == pid + '/' + slug;
+    }
 
     // All paper content lives under projects/{pid}/papers/{slug}/…
     //   - manuscript.md
@@ -21,6 +25,14 @@ service firebase.storage {
     // (TODO: dashboard helper to fetch one for the active project).
     match /projects/{pid}/{allPaths=**} {
       allow read, write: if isAdmin() || hasProjectClaim(pid);
+    }
+
+    // Anonymous share-link visitors get READ-ONLY access to one paper's
+    // blobs (figure images, etc.) — never write.
+    match /projects/{pid}/papers/{slug}/{allPaths=**} {
+      allow read: if isAdmin()
+                  || hasProjectClaim(pid)
+                  || hasShareClaim(pid, slug);
     }
 
     // Cloud-Function-generated images (server-side writes bypass rules):

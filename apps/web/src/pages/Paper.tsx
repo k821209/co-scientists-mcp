@@ -6,7 +6,7 @@ import {
 import {
   ArrowLeft, MessageSquare, CheckCircle2, XCircle, Download, Loader2,
   ImageIcon, BookOpen, ExternalLink, Table2, Activity, Beaker,
-  FileText, Layers, Clock, RefreshCw,
+  FileText, Layers, Clock, RefreshCw, Share2,
 } from "lucide-react";
 import { db } from "@/firebase";
 import { downloadProjectBlobAsText, getProjectStorage } from "@/projectAuth";
@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Markdown } from "@/components/Markdown";
 import { SyncDoisDialog } from "@/components/SyncDoisDialog";
+import { SharePaperDialog } from "@/components/SharePaperDialog";
 import { SelectionBubble } from "@/components/SelectionBubble";
 import { CommentHoverPopover } from "@/components/CommentHoverPopover";
 import type { AnchorTarget } from "@/lib/remarkAnchorMarks";
@@ -140,6 +141,7 @@ export function Paper() {
   const [viewMode, setViewMode] = useState<"sections" | "compiled">("sections");
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
 
   useEffect(() => {
     if (!pid || !slug) return;
@@ -254,16 +256,34 @@ export function Paper() {
         >
           <ArrowLeft className="mr-2 h-4 w-4" /> Back to project
         </Link>
-        <h1 className="mt-2 text-2xl font-bold tracking-tight">
-          {(paper?.title as string) ?? slug}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {(paper?.journal as string) ?? "no journal"} ·{" "}
-          <Badge variant="secondary" className="text-[10px]">
-            {(paper?.status as string) ?? "draft"}
-          </Badge>
-        </p>
+        <div className="mt-2 flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">
+              {(paper?.title as string) ?? slug}
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              {(paper?.journal as string) ?? "no journal"} ·{" "}
+              <Badge variant="secondary" className="text-[10px]">
+                {(paper?.status as string) ?? "draft"}
+              </Badge>
+            </p>
+          </div>
+          <Button
+            size="sm" variant="outline"
+            onClick={() => setShareOpen(true)}
+            className="gap-1"
+          >
+            <Share2 className="h-4 w-4" /> Share for review
+          </Button>
+        </div>
       </div>
+      {shareOpen && pid && slug && (
+        <SharePaperDialog
+          pid={pid} slug={slug}
+          paperTitle={(paper?.title as string) ?? slug}
+          onClose={() => setShareOpen(false)}
+        />
+      )}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
         <Card>

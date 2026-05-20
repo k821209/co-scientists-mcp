@@ -8,6 +8,12 @@ service cloud.firestore {
     function hasProjectClaim(pid) {
       return isSignedIn() && request.auth.token.project_id == pid;
     }
+    // Anonymous share-link visitor: custom token carries
+    // share_paper == "<pid>/<slug>" (minted by /exchange_share_token).
+    function hasShareClaim(pid, slug) {
+      return isSignedIn()
+             && request.auth.token.share_paper == pid + '/' + slug;
+    }
     function onlyChangesField(allowed) {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowed);
     }
@@ -60,6 +66,28 @@ service cloud.firestore {
       // Functions (using Admin SDK) issue/revoke them.
       match /api_keys/{hash} {
         allow read, write: if isAdmin();
+      }
+
+      // Per-paper share access. An anonymous share-link visitor holds a
+      // custom token with share_paper == "<pid>/<slug>". They may READ
+      // the paper + everything under it, and CREATE comment reviews —
+      // nothing else (no section edits, no other papers). The owner /
+      // project-claim / admin grants come from the {document=**} rule
+      // below; this block only ADDS the share-visitor capability.
+      match /papers/{slug} {
+        allow read: if hasShareClaim(pid, slug);
+
+        match /reviews/{reviewId} {
+          // Share visitors post comments only: source must be 'external',
+          // status 'open'. They can't edit or resolve existing reviews.
+          allow create: if hasShareClaim(pid, slug)
+                        && request.resource.data.source == 'external'
+                        && request.resource.data.status == 'open';
+        }
+
+        match /{paperDoc=**} {
+          allow read: if hasShareClaim(pid, slug);
+        }
       }
 
       // Everything else under the project: papers, sections, reviews,

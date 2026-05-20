@@ -22,13 +22,20 @@ interface Props {
   pid: string;
   paperSlug: string;
   reviews: Review[];
+  /** Hide Resolve/Withdraw actions — used by the read-only share view
+   *  where the anonymous visitor can't mutate reviews. */
+  readOnly?: boolean;
+  /** Firestore instance — share visitors pass their session db. */
+  firestore?: typeof db;
 }
 
 /** Global click-to-open popover for inline anchored comments.
  *  Click <mark.cs-anchor-mark> → popover opens below the mark.
  *  Click another mark → moves to that one. Click outside → closes.
  *  No hover trigger (intentional — less twitchy on dense paragraphs). */
-export function CommentHoverPopover({ pid, paperSlug, reviews }: Props) {
+export function CommentHoverPopover({
+  pid, paperSlug, reviews, readOnly = false, firestore = db,
+}: Props) {
   const [active, setActive] = useState<
     { reviews: Review[]; index: number; rect: DOMRect } | null
   >(null);
@@ -142,14 +149,14 @@ export function CommentHoverPopover({ pid, paperSlug, reviews }: Props) {
 
   const resolve = async () => {
     await updateDoc(
-      doc(db, "projects", pid, "papers", paperSlug, "reviews", review.id),
+      doc(firestore, "projects", pid, "papers", paperSlug, "reviews", review.id),
       { status: "resolved", resolved_at: new Date().toISOString() },
     );
     closeIfLast();
   };
   const withdraw = async () => {
     await updateDoc(
-      doc(db, "projects", pid, "papers", paperSlug, "reviews", review.id),
+      doc(firestore, "projects", pid, "papers", paperSlug, "reviews", review.id),
       { status: "rejected", resolved_at: new Date().toISOString() },
     );
     closeIfLast();
@@ -220,7 +227,7 @@ export function CommentHoverPopover({ pid, paperSlug, reviews }: Props) {
           <div className="whitespace-pre-wrap">{review.response}</div>
         </div>
       )}
-      {!isResolved && (
+      {!isResolved && !readOnly && (
         <div className="mt-2 flex gap-2 border-t pt-2">
           <Button size="sm" variant="ghost" onClick={resolve}>
             <CheckCircle2 className="mr-1 h-3 w-3" /> Resolve

@@ -15,8 +15,11 @@ import { Admin } from "./pages/Admin";
 // Paper detail uses react-markdown + KaTeX (~300 KB). Lazy-load so the initial
 // dashboard bundle doesn't pay for it — only loaded when a user opens a paper.
 const Paper = lazy(() => import("./pages/Paper").then((m) => ({ default: m.Paper })));
+const SharedPaper = lazy(() =>
+  import("./pages/SharedPaper").then((m) => ({ default: m.SharedPaper })),
+);
 
-function LazyPaper() {
+function Lazy({ children }: { children: React.ReactNode }) {
   return (
     <Suspense
       fallback={
@@ -25,7 +28,7 @@ function LazyPaper() {
         </div>
       }
     >
-      <Paper />
+      {children}
     </Suspense>
   );
 }
@@ -47,6 +50,12 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      {/* Anonymous share link — NO RequireAuth; the page authenticates
+          itself via /exchange_share_token. */}
+      <Route
+        path="/shared/:pid/:slug/:shareId"
+        element={<Lazy><SharedPaper /></Lazy>}
+      />
       <Route
         path="/*"
         element={
@@ -57,7 +66,10 @@ export default function App() {
                 <Route path="projects" element={<Projects />} />
 
                 {/* Paper detail — lazy-loaded (react-markdown + KaTeX) */}
-                <Route path="projects/:pid/papers/:slug" element={<LazyPaper />} />
+                <Route
+                  path="projects/:pid/papers/:slug"
+                  element={<Lazy><Paper /></Lazy>}
+                />
 
                 {/* Project shell with tabs */}
                 <Route path="projects/:pid" element={<ProjectShell />}>

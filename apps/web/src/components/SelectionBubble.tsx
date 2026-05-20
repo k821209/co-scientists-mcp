@@ -13,6 +13,14 @@ interface Props {
    *  whose anchor sits inside one of these elements show the bubble.
    *  Each match must carry data-section-key="<key>". */
   selectableSelector?: string;
+  /** Review provenance. Owner dashboard → "user"/"User". Anonymous
+   *  share-link visitor → "external" + their chosen/random name. */
+  reviewSource?: "user" | "external";
+  reviewerName?: string;
+  /** Optional Firestore instance — share-link visitors use a secondary
+   *  Firebase app authed via the share custom token. Defaults to the
+   *  app's main `db`. */
+  firestore?: typeof db;
 }
 
 interface SelectionInfo {
@@ -29,6 +37,9 @@ interface SelectionInfo {
 export function SelectionBubble({
   pid, paperSlug,
   selectableSelector = "[data-section-key]",
+  reviewSource = "user",
+  reviewerName = "User",
+  firestore = db,
 }: Props) {
   const [sel, setSel] = useState<SelectionInfo | null>(null);
   const [composing, setComposing] = useState(false);
@@ -164,11 +175,11 @@ export function SelectionBubble({
             setSubmitting(true);
             try {
               const reviewsRef = collection(
-                db, "projects", pid, "papers", paperSlug, "reviews",
+                firestore, "projects", pid, "papers", paperSlug, "reviews",
               );
               await addDoc(reviewsRef, {
-                source: "user",
-                reviewer_name: "User",
+                source: reviewSource,
+                reviewer_name: reviewerName,
                 section: sel.sectionKey || null,
                 severity: "minor",
                 status: "open",

@@ -47,6 +47,11 @@
       "source": "apps/cloud-functions/exchange-key",
       "codebase": "exchange-key",
       "runtime": "python312"
+    },
+    {
+      "source": "apps/cloud-functions/exchange-share-token",
+      "codebase": "exchange-share-token",
+      "runtime": "python312"
     }
   ],
   "emulators": {
