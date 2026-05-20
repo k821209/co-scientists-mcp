@@ -24,10 +24,13 @@ interface Review {
   section?: string | null;
   comment: string;
   source: string;
+  reviewer_name?: string | null;
   status: string;
   severity?: string;
+  response?: string | null;
   anchor_text?: string | null;
   manuscript_ref?: string | null;
+  created_at?: string;
 }
 interface Figure {
   id: string;
@@ -160,7 +163,7 @@ export function SharedPaper() {
   const title = (paper?.title as string) ?? session.paperTitle ?? slug;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 p-4 sm:p-8">
+    <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-8">
       {/* Name banner */}
       <Card>
         <CardContent className="flex flex-wrap items-center gap-3 p-4">
@@ -207,8 +210,10 @@ export function SharedPaper() {
         firestore={session.db}
       />
 
-      {/* Manuscript */}
-      <Card>
+      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+        {/* Left: manuscript + figures + tables + refs */}
+        <div className="space-y-6">
+        <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <MessageSquare className="h-4 w-4" /> Manuscript
@@ -331,7 +336,132 @@ export function SharedPaper() {
           </CardContent>
         </Card>
       )}
+        </div>
+
+        {/* Right: comment list — survives manuscript edits even when the
+            inline highlight no longer matches. */}
+        <div className="lg:sticky lg:top-4 lg:self-start">
+          <SharedCommentsList reviews={reviews} myName={effectiveName} />
+        </div>
+      </div>
     </div>
+  );
+}
+
+function SharedCommentsList({ reviews, myName }: {
+  reviews: Review[]; myName: string;
+}) {
+  // Open first, then handled (resolved/accepted/rejected); newest first
+  // within each group.
+  const sorted = useMemo(() => {
+    const rank = (s: string) => (s === "open" ? 0 : 1);
+    return [...reviews].sort((a, b) => {
+      const r = rank(a.status) - rank(b.status);
+      if (r !== 0) return r;
+      return (b.created_at || "").localeCompare(a.created_at || "");
+    });
+  }, [reviews]);
+
+  const scrollToMark = (reviewId: string) => {
+    const marks = document.querySelectorAll<HTMLElement>("mark.cs-anchor-mark");
+    for (const m of marks) {
+      const ids = (m.dataset.reviewIds ?? m.dataset.reviewId ?? "").split(",");
+      if (ids.includes(reviewId)) {
+        m.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+    }
+  };
+
+  if (reviews.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Comments</CardTitle>
+        </CardHeader>
+        <CardContent className="text-xs text-muted-foreground">
+          No comments yet. Drag-select any passage in the manuscript to
+          leave one.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <MessageSquare className="h-4 w-4" /> Comments
+          <Badge variant="secondary" className="ml-auto text-[10px]">
+            {reviews.filter((r) => r.status === "open").length} open
+          </Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="max-h-[70vh] space-y-2 overflow-y-auto">
+        {sorted.map((r) => (
+          <SharedCommentRow
+            key={r.id} review={r} mine={!!myName && r.reviewer_name === myName}
+            onJump={() => r.anchor_text && scrollToMark(r.id)}
+          />
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function SharedCommentRow({ review, mine, onJump }: {
+  review: Review; mine: boolean; onJump: () => void;
+}) {
+  const status = review.status;
+  // Status → label + color. The friend's key question: was it addressed?
+  const statusMeta =
+    status === "open"
+      ? { label: "open", cls: "border-amber-300 bg-amber-50 text-amber-700" }
+    : status === "rejected"
+      ? { label: "declined", cls: "border-red-300 bg-red-50 text-red-700" }
+    : { label: "addressed", cls: "border-green-300 bg-green-50 text-green-700" };
+
+  return (
+    <button
+      type="button"
+      onClick={onJump}
+      className={
+        "w-full rounded-md border p-2 text-left text-xs transition-colors " +
+        (review.anchor_text ? "hover:bg-accent" : "")
+      }
+    >
+      <div className="mb-1 flex flex-wrap items-center gap-1">
+        <span className={`rounded-full border px-1.5 py-0 text-[9px] font-medium ${statusMeta.cls}`}>
+          {statusMeta.label}
+        </span>
+        <span className="text-[10px] text-muted-foreground">
+          {review.source === "external"
+            ? (review.reviewer_name || "anonymous")
+            : review.source === "ai"
+              ? `AI · ${review.reviewer_name || "reviewer"}`
+              : "author"}
+        </span>
+        {mine && (
+          <span className="rounded bg-sky-100 px-1 text-[9px] text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
+            you
+          </span>
+        )}
+      </div>
+      {review.anchor_text && (
+        <blockquote className="mb-1 line-clamp-2 border-l-2 border-amber-400 pl-2 italic text-muted-foreground">
+          "{review.anchor_text.length > 120
+            ? review.anchor_text.slice(0, 120) + "…"
+            : review.anchor_text}"
+        </blockquote>
+      )}
+      <div className="line-clamp-3 whitespace-pre-wrap">{review.comment}</div>
+      {review.response && (
+        <div className="mt-1 rounded bg-muted/60 p-1.5 text-[11px]">
+          <span className="font-medium">Author's reply: </span>
+          <span className="whitespace-pre-wrap">{review.response}</span>
+        </div>
+      )}
+    </button>
   );
 }
 
