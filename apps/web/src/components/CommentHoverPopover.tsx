@@ -10,6 +10,7 @@ interface Review {
   section?: string | null;
   comment: string;
   source: string;
+  reviewer_name?: string | null;
   status: string;
   severity?: string;
   response?: string | null;
@@ -192,7 +193,11 @@ export function CommentHoverPopover({
           variant={review.source === "ai" ? "secondary" : "outline"}
           className="text-[10px]"
         >
-          {review.source}
+          {review.source === "external"
+            ? `shared · ${review.reviewer_name || "anonymous"}`
+            : review.source === "ai"
+              ? `AI · ${review.reviewer_name || "reviewer"}`
+              : review.source}
         </Badge>
         {review.section && (
           <Badge variant="outline" className="text-[10px]">{review.section}</Badge>

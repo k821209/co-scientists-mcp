@@ -37,6 +37,7 @@ interface Review {
   section?: string | null;
   comment: string;
   source: string;
+  reviewer_name?: string | null;
   status: string;
   severity?: string;
   response?: string | null;
@@ -442,8 +443,11 @@ function CommentsPanel({ pid, slug, reviews, knownDois }: {
   pid: string; slug: string; reviews: Review[]; knownDois: ReadonlySet<string>;
 }) {
   const [expanded, setExpanded] = useState(false);
+  // Show every open comment — owner's own ("user"), shared-reviewer
+  // ("external"), and AI-reviewer ("ai"). The source is shown as a
+  // badge so they're still distinguishable.
   const openUser = useMemo(
-    () => reviews.filter((r) => r.status === "open" && r.source === "user"),
+    () => reviews.filter((r) => r.status === "open"),
     [reviews],
   );
   const anchoredCount = useMemo(
@@ -515,6 +519,16 @@ function CommentsPanel({ pid, slug, reviews, knownDois }: {
                 }
               >
                 <div className="mb-1 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                  {r.source === "external" && (
+                    <Badge className="bg-sky-100 text-[10px] text-sky-800 dark:bg-sky-900/40 dark:text-sky-300">
+                      shared · {r.reviewer_name || "anonymous"}
+                    </Badge>
+                  )}
+                  {r.source === "ai" && (
+                    <Badge variant="secondary" className="text-[10px]">
+                      AI · {r.reviewer_name || "reviewer"}
+                    </Badge>
+                  )}
                   {r.section && (
                     <Badge variant="outline" className="text-[10px]">{r.section}</Badge>
                   )}
@@ -560,11 +574,12 @@ function anchorsForSection(reviews: Review[], _sectionKey: string): AnchorTarget
   // wherever the anchor text actually lives in the body. False matches
   // would require the same exact phrase to appear in two sections,
   // which is rare; missed matches (section filter wrong) were silent.
+  // Highlight comments from ALL sources — owner ("user"), shared
+  // reviewer via a /shared link ("external"), and AI reviewer ("ai").
   return reviews
     .filter(
       (r) =>
         r.status === "open" &&
-        r.source === "user" &&
         !!r.anchor_text &&
         r.anchor_text.length >= 3,
     )
