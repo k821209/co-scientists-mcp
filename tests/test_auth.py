@@ -1,9 +1,15 @@
 """Firebase Auth token caching, refresh, and rotation."""
 from __future__ import annotations
 
+import io
+import json
+import urllib.error
+
 import pytest
 
-from co_scientist_local.auth import FakeTokenRefresher, FirebaseAuthClient
+from co_scientist_local.auth import (
+    FakeTokenRefresher, FirebaseAuthClient, HttpTokenRefresher,
+)
 
 
 class _Clock:
@@ -110,3 +116,74 @@ def test_refresh_failure_propagates():
     )
     with pytest.raises(RuntimeError, match="simulated token refresh"):
         client.get_id_token()
+
+
+# ─── HttpTokenRefresher transient-failure retry ──────────────────────────
+
+
+def _http_error(code: int) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError(
+        "https://securetoken", code, "err", {}, io.BytesIO(b'{"error":"x"}'),
+    )
+
+
+def _ok_response():
+    class _R:
+        def read(self): return json.dumps(
+            {"id_token": "fresh", "expires_in": "3600"}).encode()
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    return _R()
+
+
+def test_refresher_retries_transient_5xx(monkeypatch):
+    """A 503 blip then success → refresh() succeeds after retry."""
+    import co_scientist_local.auth as auth_mod
+    calls = {"n": 0}
+
+    def fake_urlopen(req, timeout=30):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise _http_error(503)
+        return _ok_response()
+
+    monkeypatch.setattr(auth_mod.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(auth_mod.time, "sleep", lambda s: None)  # no real waiting
+
+    out = HttpTokenRefresher().refresh("rt", "wk")
+    assert out["id_token"] == "fresh"
+    assert calls["n"] == 3   # 2 failures + 1 success
+
+
+def test_refresher_does_not_retry_4xx(monkeypatch):
+    """A 400 (bad refresh token) is permanent — fail immediately, no retry."""
+    import co_scientist_local.auth as auth_mod
+    calls = {"n": 0}
+
+    def fake_urlopen(req, timeout=30):
+        calls["n"] += 1
+        raise _http_error(400)
+
+    monkeypatch.setattr(auth_mod.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(auth_mod.time, "sleep", lambda s: None)
+
+    with pytest.raises(RuntimeError, match="token refresh failed"):
+        HttpTokenRefresher().refresh("rt", "wk")
+    assert calls["n"] == 1   # no retry on 4xx
+
+
+def test_refresher_gives_up_after_max_attempts(monkeypatch):
+    """Persistent 5xx → raises after MAX_ATTEMPTS tries."""
+    import co_scientist_local.auth as auth_mod
+    calls = {"n": 0}
+
+    def fake_urlopen(req, timeout=30):
+        calls["n"] += 1
+        raise _http_error(500)
+
+    monkeypatch.setattr(auth_mod.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(auth_mod.time, "sleep", lambda s: None)
+
+    with pytest.raises(RuntimeError, match="after 3 attempts"):
+        HttpTokenRefresher().refresh("rt", "wk")
+    assert calls["n"] == 3

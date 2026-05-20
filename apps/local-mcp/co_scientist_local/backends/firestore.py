@@ -136,9 +136,19 @@ def _build_user_credentials(token_provider: Callable[[], str]):
 
         @property
         def expired(self) -> bool:
-            # Delegate expiry tracking to the provider; pretend always valid
-            # so google-auth calls refresh() when it wants a fresh token.
-            return False
+            # ALWAYS report expired so google-auth calls refresh() before
+            # every request. refresh() then asks the provider
+            # (FirebaseAuthClient.get_id_token), which is itself cached —
+            # it only does a network round-trip when the ID token is
+            # actually near expiry, otherwise returns the cached token
+            # instantly. So this is cheap per request.
+            #
+            # The previous value (False) was the bug: google-auth saw the
+            # credential as permanently valid, never called refresh(), and
+            # the Firestore client kept sending the construction-time token.
+            # After ~1h that token expired and every call 401'd until the
+            # process restarted.
+            return True
 
         def refresh(self, request) -> None:  # noqa: ARG002
             self.token = self._provider()

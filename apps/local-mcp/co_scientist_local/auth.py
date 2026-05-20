@@ -29,10 +29,17 @@ SDKs and ships in every frontend bundle.
 from __future__ import annotations
 
 import json
+import sys
 import time
 import urllib.error
 import urllib.request
 from typing import Callable, Protocol
+
+
+def _log(msg: str) -> None:
+    """Surface auth events to stderr so a silent refresh failure is
+    distinguishable from a code/permission bug."""
+    print(f"co-scientist-local auth: {msg}", file=sys.stderr)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -145,33 +152,49 @@ class TokenRefresher(Protocol):
 
 class HttpTokenRefresher:
     BASE_URL = "https://securetoken.googleapis.com/v1/token"
+    # Retry transient failures (5xx, network blips) — securetoken hiccups
+    # usually clear within a second. 4xx (bad/expired refresh token) is
+    # NOT retried; it won't fix itself.
+    MAX_ATTEMPTS = 3
+    BACKOFF_SECONDS = (0.5, 1.0, 2.0)
 
     def refresh(self, refresh_token: str, web_api_key: str) -> dict:
-        status, body = _http_post_json(
-            f"{self.BASE_URL}?key={web_api_key}",
-            # Note: securetoken expects form-encoded; use urlencoded body via
-            # a dedicated helper. urllib.urlopen does this if we set the right
-            # content-type and body.
-            {},  # placeholder
-            None,
-        )
-        # securetoken needs form encoding — do it manually
         from urllib.parse import urlencode
-        data = urlencode({"grant_type": "refresh_token", "refresh_token": refresh_token}).encode()
-        req = urllib.request.Request(
-            f"{self.BASE_URL}?key={web_api_key}",
-            data=data,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                return json.loads(resp.read())
-        except urllib.error.HTTPError as e:
+
+        url = f"{self.BASE_URL}?key={web_api_key}"
+        data = urlencode({
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        }).encode()
+        last_err: Exception | None = None
+        for attempt in range(self.MAX_ATTEMPTS):
+            req = urllib.request.Request(
+                url, data=data,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
             try:
-                payload = json.loads(e.read())
-            except Exception:
-                payload = {"error": f"http {e.code}"}
-            raise RuntimeError(f"token refresh failed: {payload}") from e
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    return json.loads(resp.read())
+            except urllib.error.HTTPError as e:
+                if e.code < 500:
+                    # Permanent — bad/expired refresh token, etc.
+                    try:
+                        payload = json.loads(e.read())
+                    except Exception:
+                        payload = {"error": f"http {e.code}"}
+                    raise RuntimeError(f"token refresh failed: {payload}") from e
+                last_err = e  # 5xx — retryable
+            except urllib.error.URLError as e:
+                last_err = e  # network blip — retryable
+            if attempt < self.MAX_ATTEMPTS - 1:
+                _log(
+                    f"token refresh attempt {attempt + 1}/{self.MAX_ATTEMPTS} "
+                    f"failed ({last_err}); retrying"
+                )
+                time.sleep(self.BACKOFF_SECONDS[attempt])
+        raise RuntimeError(
+            f"token refresh failed after {self.MAX_ATTEMPTS} attempts: {last_err}"
+        )
 
 
 class FakeTokenRefresher:
