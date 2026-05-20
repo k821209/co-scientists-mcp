@@ -258,4 +258,4 @@ go back through `render_slide` and the PPTX re-exported.
 PPTX layout: 16:9, one slide per deck slide, title at top, image
 centered (12.3" × 6"), speaker notes on the notes pane.
 
-Requires `pip install 'co-scientist-local[deck]'` (pulls python-pptx).
+python-pptx ships with the base install — nothing extra to install.

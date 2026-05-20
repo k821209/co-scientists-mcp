@@ -10,17 +10,19 @@ requires-python = ">=3.11"
 dependencies = [
     "mcp>=1.0.0",
     "pydantic>=2.6",
+    # API-key mode (the production path) talks to Firestore via the
+    # google-cloud SDK with a user-token credential.
+    "google-cloud-firestore>=2.16",
+    # Service-account / developer fallback mode.
+    "firebase-admin>=6.5",
+    "google-cloud-storage>=2.16",
+    # paper-deck Phase 3 — PPTX export.
+    "python-pptx>=1.0",
 ]
 
 [project.optional-dependencies]
-firebase = [
-    "firebase-admin>=6.5",
-    "google-cloud-firestore>=2.16",
-    "google-cloud-storage>=2.16",
-]
-deck = [
-    "python-pptx>=1.0",
-]
+# Dev-only. Everything an END USER needs is in `dependencies` above —
+# `pip install -e apps/local-mcp` is all it takes.
 test = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

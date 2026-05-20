@@ -58,8 +58,8 @@ class LocalGeminiImageGenerator:
             import google.generativeai as genai  # type: ignore
         except ImportError as e:  # pragma: no cover
             raise RuntimeError(
-                "google-generativeai not installed. Install the [gemini] extra: "
-                "pip install 'co-scientist-local[gemini]'"
+                "google-generativeai not installed. "
+                "pip install google-generativeai"
             ) from e
         genai.configure(api_key=self._api_key)
         gen_model = genai.GenerativeModel(model)

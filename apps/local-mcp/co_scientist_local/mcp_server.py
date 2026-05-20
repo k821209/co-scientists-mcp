@@ -910,7 +910,7 @@ def build_mcp(state: State) -> FastMCP:
         isn't blocked by one missing render. Uploads a copy to
         Storage at papers/{slug}/decks/{deck_id}/exports/{name}.pptx.
 
-        Requires the [deck] extra: pip install 'co-scientist-local[deck]'.
+        python-pptx ships with the base install — no extra needed.
         """
         return _deck_render.export_deck_to_pptx(
             state, slug, deck_id, output_path=output_path,

@@ -212,16 +212,15 @@ def export_deck_to_pptx(
 
     Layout: one PPTX slide per deck slide, blank background with the
     image centered + the slide title in a top text box + speaker notes
-    on the notes pane. Uses python-pptx (optional dep — `pip install
-    co-scientist-local[deck]`).
+    on the notes pane. python-pptx ships in the base install.
     """
     try:
         from pptx import Presentation         # type: ignore
         from pptx.util import Inches, Pt      # type: ignore
     except ImportError as e:
         raise RuntimeError(
-            "python-pptx not installed. Install the [deck] extra: "
-            "pip install 'co-scientist-local[deck]'"
+            "python-pptx not installed — reinstall the package: "
+            "pip install -e ~/co-scientists-mcp/apps/local-mcp"
         ) from e
 
     deck = _decks.get_deck(state, slug, deck_id)
