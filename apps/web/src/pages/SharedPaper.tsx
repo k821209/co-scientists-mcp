@@ -214,7 +214,7 @@ export function SharedPaper() {
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
         {/* Left: manuscript + figures + tables + refs */}
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
         <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
@@ -342,7 +342,7 @@ export function SharedPaper() {
 
         {/* Right: comment list — survives manuscript edits even when the
             inline highlight no longer matches. */}
-        <div className="lg:sticky lg:top-4 lg:self-start">
+        <div className="min-w-0 lg:sticky lg:top-4 lg:self-start">
           <CommentsList reviews={reviews} myName={effectiveName} />
         </div>
       </div>
