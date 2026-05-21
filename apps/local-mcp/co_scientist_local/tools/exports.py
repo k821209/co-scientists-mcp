@@ -319,6 +319,8 @@ def export_to_path(
             "format": fmt,
             "blob_path": blob_path,
             "size_bytes": len(output_bytes),
+            "csl_filename": csl_filename,
+            "csl_status": csl_status,
             "updated_at": now_iso(),
         }
         if existing is None:

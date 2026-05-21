@@ -6,10 +6,12 @@ import {
 import {
   ArrowLeft, MessageSquare, CheckCircle2, Download, Loader2,
   ImageIcon, BookOpen, ExternalLink, Table2, Activity, Beaker,
-  FileText, Layers, Clock, RefreshCw, Share2,
+  FileText, Layers, Clock, RefreshCw, Share2, FileDown, AlertTriangle,
 } from "lucide-react";
 import { db } from "@/firebase";
-import { downloadProjectBlobAsText, getProjectStorage } from "@/projectAuth";
+import {
+  downloadProjectBlobAsText, downloadProjectBlobAsFile, getProjectStorage,
+} from "@/projectAuth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -107,6 +109,18 @@ interface ActivityEntry {
   created_at?: string;
 }
 
+interface ExportRow {
+  id: string;
+  filename?: string;
+  format?: string;
+  size_bytes?: number;
+  blob_path?: string | null;
+  csl_filename?: string | null;
+  csl_status?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
 interface Finding {
   id: string;
   doi: string;
@@ -140,6 +154,7 @@ export function Paper() {
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [findings, setFindings] = useState<Finding[]>([]);
+  const [exports, setExports] = useState<ExportRow[]>([]);
   const [viewMode, setViewMode] = useState<"sections" | "compiled">("sections");
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -187,9 +202,16 @@ export function Paper() {
         setFindings(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Finding, "id">) }))),
       () => {/* empty subcollection is fine */},
     );
+    const exportsRef = collection(paperRef, "exports");
+    const unsubExp = onSnapshot(
+      exportsRef,
+      (snap) =>
+        setExports(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ExportRow, "id">) }))),
+      () => {/* empty subcollection is fine */},
+    );
     return () => {
       unsubPaper(); unsubSec(); unsubRev(); unsubRefs();
-      unsubFigs(); unsubTabs(); unsubAna(); unsubAct(); unsubFnd();
+      unsubFigs(); unsubTabs(); unsubAna(); unsubAct(); unsubFnd(); unsubExp();
     };
   }, [pid, slug]);
 
@@ -423,6 +445,12 @@ export function Paper() {
           />
         </div>
 
+        {exports.length > 0 && (
+          <div className="">
+            <ExportsCard pid={pid} exports={exports} />
+          </div>
+        )}
+
         {activity.length > 0 && (
           <div className="">
             <ActivityCard entries={activity} />
@@ -622,6 +650,128 @@ function timeAgo(d: Date): string {
   if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
   if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
   return `${Math.floor(diffSec / 86400)}d ago`;
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** Renders what citation style an export used — the journal-format check
+ *  the user cares about. csl_status comes from the MCP export pipeline. */
+function CslLabel({ csl_filename, csl_status }: {
+  csl_filename?: string | null; csl_status?: string | null;
+}) {
+  // Export docs written before the CSL feature have no csl_status.
+  if (!csl_status) return null;
+  if (csl_status === "downloaded" || csl_status === "explicit") {
+    return (
+      <span>
+        Citation style:{" "}
+        <span className="font-medium text-foreground">{csl_filename}</span>
+      </span>
+    );
+  }
+  if (csl_status === "missing") {
+    return (
+      <span className="inline-flex items-center gap-1 text-amber-600">
+        <AlertTriangle className="h-3 w-3" />
+        {csl_filename ?? "CSL"} not found — default style used
+      </span>
+    );
+  }
+  if (csl_status === "no_journal") {
+    return <span>No target journal — default citation style</span>;
+  }
+  // no_references — CSL is moot
+  return <span>No references — citation style N/A</span>;
+}
+
+function ExportsCard({ pid, exports }: { pid: string; exports: ExportRow[] }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const sorted = useMemo(
+    () =>
+      [...exports].sort((a, b) =>
+        (b.updated_at ?? "").localeCompare(a.updated_at ?? ""),
+      ),
+    [exports],
+  );
+
+  const download = async (e: ExportRow) => {
+    if (!e.blob_path || !e.filename) return;
+    setBusy(e.id);
+    setErr(null);
+    try {
+      await downloadProjectBlobAsFile(pid, e.blob_path, e.filename);
+    } catch (x) {
+      setErr((x as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <FileDown className="h-4 w-4" /> Exports
+        </CardTitle>
+        <CardDescription>
+          Files produced by{" "}
+          <code className="rounded bg-muted px-1.5 py-0.5 text-[10px]">
+            /paper-export
+          </code>{" "}
+          — citations formatted for the target journal.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {sorted.map((e) => (
+          <div
+            key={e.id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm"
+          >
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="truncate font-medium">{e.filename}</span>
+                {e.format && (
+                  <Badge variant="secondary" className="text-[10px] uppercase">
+                    {e.format}
+                  </Badge>
+                )}
+              </div>
+              <div className="mt-0.5 text-xs text-muted-foreground">
+                <CslLabel
+                  csl_filename={e.csl_filename}
+                  csl_status={e.csl_status}
+                />
+                {e.csl_status && (typeof e.size_bytes === "number" || e.updated_at)
+                  ? " · "
+                  : null}
+                {typeof e.size_bytes === "number" && formatBytes(e.size_bytes)}
+                {typeof e.size_bytes === "number" && e.updated_at ? " · " : null}
+                {e.updated_at && timeAgo(new Date(e.updated_at))}
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy === e.id || !e.blob_path}
+              onClick={() => download(e)}
+            >
+              {busy === e.id ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
+        ))}
+        {err && <p className="text-xs text-destructive">{err}</p>}
+      </CardContent>
+    </Card>
+  );
 }
 
 
