@@ -3,6 +3,7 @@ import { useOutletContext } from "react-router-dom";
 import { doc, updateDoc } from "firebase/firestore";
 import {
   Copy, Check, Download, KeyRound, RefreshCw, Eye, EyeOff,
+  Sparkles, ArrowRight, ArrowLeft,
 } from "lucide-react";
 import { db } from "@/firebase";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -119,6 +120,29 @@ ${description ? `\n> ${description}\n` : ""}
    surface the comments and offer \`/paper-revision\`.
 `;
 }
+
+// User-facing tour of the Claude Code workflow. Each entry: a plain-language
+// example of what to say, and the skill it maps to.
+const CAPABILITIES: { what: string; say: string; skill: string }[] = [
+  { what: "Write or revise the manuscript",
+    say: "Write the introduction", skill: "/paper-writing" },
+  { what: "Import an existing draft (.docx / .pdf)",
+    say: "Import this Word document", skill: "/paper-import" },
+  { what: "Address comments left on this dashboard",
+    say: "Address the open comments", skill: "/paper-revision" },
+  { what: "Find literature and add citations",
+    say: "Find papers on X and cite them", skill: "/literature-review" },
+  { what: "Run an AI peer review",
+    say: "Review this paper", skill: "/paper-review" },
+  { what: "Generate a figure",
+    say: "Make a pathway diagram", skill: "/scientific-image" },
+  { what: "Run a computational analysis",
+    say: "Run this analysis script", skill: "/analysis-run" },
+  { what: "Export to a journal format",
+    say: "Export to a Nature-formatted .docx", skill: "/paper-export" },
+  { what: "Build a presentation",
+    say: "Make slides for a 15-minute talk", skill: "/paper-deck" },
+];
 
 export function ProjectSetup() {
   const { pid, project } = useOutletContext<ProjectContext>();
@@ -278,6 +302,57 @@ bash ~/Downloads/setup-${projectSlug}.sh`} />
               and watch the Papers tab update live.
             </p>
           </Step>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Sparkles className="h-4 w-4" /> What you can do from Claude Code
+          </CardTitle>
+          <CardDescription>
+            Once connected, you do the work by talking to Claude Code in plain
+            language. This dashboard is the live view of the result.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* The bidirectional loop */}
+          <div className="space-y-2 rounded-md border border-dashed p-3 text-sm">
+            <div className="flex gap-2">
+              <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <span>
+                <strong>Claude Code → dashboard.</strong> Sections, figures,
+                references, and exports it produces show up here live.
+              </span>
+            </div>
+            <div className="flex gap-2">
+              <ArrowLeft className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <span>
+                <strong>Dashboard → Claude Code.</strong> Drag-select any
+                manuscript text to leave a comment; next session Claude Code
+                picks the comments up and revises.
+              </span>
+            </div>
+          </div>
+
+          {/* Capability list */}
+          <div className="space-y-1.5">
+            {CAPABILITIES.map((c) => (
+              <div key={c.skill} className="rounded-md border bg-muted/30 p-2.5">
+                <div className="text-sm font-medium">{c.what}</div>
+                <div className="mt-0.5 break-words text-xs text-muted-foreground">
+                  Say “{c.say}” ·{" "}
+                  <code className="bg-muted px-1 py-0.5 text-[10px]">{c.skill}</code>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            The <code className="bg-muted px-1 py-0.5 text-[10px]">/skill</code>{" "}
+            names are shortcuts — you can type one directly, or just describe
+            what you want in plain language and Claude Code picks the right one.
+          </p>
         </CardContent>
       </Card>
     </div>
