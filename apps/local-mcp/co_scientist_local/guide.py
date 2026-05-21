@@ -10,7 +10,7 @@ only) and refers the agent here on every session start.
 """
 from __future__ import annotations
 
-GUIDE_VERSION = "2026-05-21c"
+GUIDE_VERSION = "2026-05-21d"
 
 
 def render_guide() -> str:
@@ -40,6 +40,12 @@ On every session start:
    the open comments with their `anchor_text` — use that quoted passage
    to locate the exact place in the manuscript the user is pointing at,
    then offer `/paper-revision`.
+3. For each paper, call `mcp__co_scientist__check_requirements(slug)`.
+   If `configured` is true and `violations` is non-empty, surface them
+   (e.g. "abstract 178/150 words — over the Short Communication limit")
+   and offer to fix. If `configured` is false and the paper has a
+   target `journal` set, suggest `/journal-requirements` so the
+   journal's word/figure/section limits get tracked.
 
 ## Available skills
 
@@ -87,7 +93,8 @@ On every session start:
 ## Tool surface (~60 tools under `mcp__co_scientist__*`)
 
 papers · sections · reviews · figures · tables · references · analyses · runs
-servers (HPC) · exports · image gen · whoami · project_guide
+servers (HPC) · exports · journal CSL · requirements · image gen · whoami
+· project_guide
 
 ## Citation format + hallucination check
 
