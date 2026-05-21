@@ -18,6 +18,8 @@ dependencies = [
     "google-cloud-storage>=2.16",
     # paper-deck Phase 3 — PPTX export.
     "python-pptx>=1.0",
+    # paper-import — PDF text extraction (docx goes through pandoc).
+    "pypdf>=4.0",
 ]
 
 [project.optional-dependencies]

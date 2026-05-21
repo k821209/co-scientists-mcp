@@ -10,7 +10,7 @@ only) and refers the agent here on every session start.
 """
 from __future__ import annotations
 
-GUIDE_VERSION = "2026-05-20b"
+GUIDE_VERSION = "2026-05-21a"
 
 
 def render_guide() -> str:
@@ -44,6 +44,9 @@ On every session start:
 ## Available skills
 
 - `/paper-writing [title]` — create or update manuscript sections
+- `/paper-import [file]` — import an existing .docx/.pdf/.odt/.tex
+  manuscript: `import_document` converts to markdown, the agent splits
+  it into canonical sections, registers figures + references.
 - `/paper-revision` — address open user comments (anchor_text-anchored)
 - `/paper-export [docx|tex|pdf|md]` — pandoc-based export with placeholder/
   unresolved-DOI pre-flight check; uploads result to Storage so the

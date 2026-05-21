@@ -11,6 +11,7 @@ from .tools import analyses as _analyses
 from .tools import decks as _decks
 from .tools import deck_render as _deck_render
 from .tools import exports as _exports
+from .tools import imports as _imports
 from .tools import figures as _figures
 from .tools import images as _images
 from .tools import papers as _papers
@@ -81,6 +82,27 @@ def build_mcp(state: State) -> FastMCP:
     def list_papers() -> list[dict[str, Any]]:
         """List all papers for the active user."""
         return _papers.list_papers(state)
+
+    @mcp.tool()
+    def import_document(
+        local_path: str,
+        extract_media_to: str | None = None,
+    ) -> dict[str, Any]:
+        """Convert an existing manuscript file to markdown so it can be
+        imported as a paper.
+
+        Supported: .docx / .odt / .rtf / .html / .tex / .epub / .md
+        (pandoc — preserves headings + embedded images) and .pdf
+        (pypdf text extraction — LOSSY: no section structure, no
+        figures).
+
+        Returns {source_format, markdown, media[], warnings[],
+        char_count}. The MCP only converts — splitting the markdown
+        into canonical sections is the agent's job (see /paper-import).
+        """
+        return _imports.import_document(
+            state, local_path=local_path, extract_media_to=extract_media_to,
+        )
 
     @mcp.tool()
     def get_paper_state(slug: str) -> dict[str, Any]:
