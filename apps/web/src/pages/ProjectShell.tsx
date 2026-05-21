@@ -48,11 +48,11 @@ export function ProjectShell() {
         >
           <ArrowLeft className="mr-2 h-4 w-4" /> All projects
         </Link>
-        <h1 className="mt-2 text-2xl font-bold tracking-tight">
+        <h1 className="mt-2 break-words text-2xl font-bold tracking-tight">
           {project?.name || pid}
         </h1>
         {project?.description && (
-          <p className="text-sm text-muted-foreground">{project.description}</p>
+          <p className="break-words text-sm text-muted-foreground">{project.description}</p>
         )}
       </div>
 

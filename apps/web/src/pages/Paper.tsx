@@ -282,7 +282,7 @@ export function Paper() {
         </Link>
         <div className="mt-2 flex flex-wrap items-start justify-between gap-2">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">
+            <h1 className="break-words text-2xl font-bold tracking-tight">
               {(paper?.title as string) ?? slug}
             </h1>
             <p className="text-sm text-muted-foreground">

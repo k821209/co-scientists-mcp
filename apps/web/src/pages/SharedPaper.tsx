@@ -188,7 +188,7 @@ export function SharedPaper() {
       </Card>
 
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
+        <h1 className="break-words text-2xl font-bold tracking-tight">{title}</h1>
         <p className="text-sm text-muted-foreground">
           {(paper?.journal as string) ?? "shared for review"} · read-only —
           drag-select any text to leave a comment
