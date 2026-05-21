@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import {
-  collectionGroup, onSnapshot, orderBy, query, where,
+  collection, collectionGroup, onSnapshot, orderBy, query, where,
 } from "firebase/firestore";
 import {
   Activity, CheckCircle2, Loader2, XCircle, Server, FileText, ChevronDown, ChevronRight,
@@ -30,6 +30,25 @@ interface Run {
   log_tail?: string | null;
   log_tail_lines?: number | null;
   log_tail_updated_at?: string | null;
+}
+
+interface ComputeServer {
+  id: string;            // doc id == alias
+  alias?: string;
+  host?: string;
+  user?: string;
+  cores?: number;
+  memory_gb?: number | null;
+  gpus?: number;
+  notes?: string | null;
+  active?: boolean;
+}
+
+interface ServerEnv {
+  id: string;
+  env_name?: string;
+  env_type?: string;
+  python_version?: string | null;
 }
 
 const RECENT_LIMIT = 50;
@@ -71,6 +90,8 @@ export function ProjectRuns() {
 
   return (
     <div className="space-y-6">
+      <ServersCard pid={pid} />
+
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
@@ -221,6 +242,118 @@ function RunRow({ run, pid }: { run: Run; pid: string }) {
             </p>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+
+function ServersCard({ pid }: { pid: string }) {
+  const [servers, setServers] = useState<ComputeServer[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    const unsub = onSnapshot(
+      collection(db, "projects", pid, "servers"),
+      (snap) => {
+        setServers(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ComputeServer, "id">) })),
+        );
+        setLoaded(true);
+      },
+      () => setLoaded(true),
+    );
+    return unsub;
+  }, [pid]);
+
+  const sorted = [...servers].sort((a, b) =>
+    (a.alias ?? a.id).localeCompare(b.alias ?? b.id),
+  );
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Server className="h-4 w-4" /> Compute servers
+          <Badge variant="secondary" className="ml-auto text-[10px]">
+            {servers.length}
+          </Badge>
+        </CardTitle>
+        <CardDescription>
+          HPC nodes and workstations registered for this project — runs
+          submitted via{" "}
+          <code className="bg-muted px-1 py-0.5 text-[10px]">submit_remote_job</code>{" "}
+          execute here. Register or edit from Claude Code with{" "}
+          <code className="bg-muted px-1 py-0.5 text-[10px]">add_server</code>{" "}
+          (see <code className="bg-muted px-1 py-0.5 text-[10px]">/analysis-run</code>).
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {!loaded ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : servers.length === 0 ? (
+          <p className="text-sm italic text-muted-foreground">
+            No servers registered. Local runs still work; to add an HPC,
+            ask Claude Code to run{" "}
+            <code className="bg-muted px-1 py-0.5 text-[10px]">add_server</code>.
+          </p>
+        ) : (
+          sorted.map((s) => <ServerRow key={s.id} server={s} pid={pid} />)
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+
+function ServerRow({ server, pid }: { server: ComputeServer; pid: string }) {
+  const [envs, setEnvs] = useState<ServerEnv[]>([]);
+  const alias = server.alias ?? server.id;
+
+  useEffect(() => {
+    const unsub = onSnapshot(
+      collection(db, "projects", pid, "servers", server.id, "envs"),
+      (snap) =>
+        setEnvs(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ServerEnv, "id">) }))),
+      () => {/* empty subcollection is fine */},
+    );
+    return unsub;
+  }, [pid, server.id]);
+
+  const specs: string[] = [];
+  if (server.cores) specs.push(`${server.cores} cores`);
+  if (server.memory_gb) specs.push(`${server.memory_gb} GB`);
+  if (server.gpus) specs.push(`${server.gpus} GPU${server.gpus > 1 ? "s" : ""}`);
+
+  return (
+    <div className="space-y-1 border-l-2 border-muted pl-3 text-sm">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <span className="font-medium">{alias}</span>
+        {server.active === false && (
+          <Badge variant="outline" className="text-[10px]">inactive</Badge>
+        )}
+        <code className="rounded bg-muted px-1.5 py-0.5 text-[10px]">
+          {server.user ? `${server.user}@` : ""}{server.host}
+        </code>
+        {specs.length > 0 && (
+          <span className="ml-auto text-[10px] text-muted-foreground">
+            {specs.join(" · ")}
+          </span>
+        )}
+      </div>
+      {envs.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
+          <span>envs:</span>
+          {envs.map((e) => (
+            <code key={e.id} className="rounded bg-muted px-1.5 py-0.5">
+              {e.env_name}
+              {e.python_version ? ` · py${e.python_version}` : ""}
+            </code>
+          ))}
+        </div>
+      )}
+      {server.notes && (
+        <p className="text-[10px] italic text-muted-foreground">{server.notes}</p>
       )}
     </div>
   );
