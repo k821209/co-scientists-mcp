@@ -6,6 +6,7 @@ import { Markdown } from "@/components/Markdown";
 import { SelectionBubble } from "@/components/SelectionBubble";
 import { CommentHoverPopover } from "@/components/CommentHoverPopover";
 import { CommentsList } from "@/components/CommentsList";
+import { ZoomableImage } from "@/components/ZoomableImage";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -378,7 +379,7 @@ function SharedFigure({ figure, storage }: {
       )}
       {figure.blob_path ? (
         url ? (
-          <img src={url} alt={figure.title}
+          <ZoomableImage src={url} alt={figure.title}
                className="max-h-[400px] w-auto max-w-full rounded border" />
         ) : err ? (
           <p className="text-xs italic text-destructive">image: {err}</p>

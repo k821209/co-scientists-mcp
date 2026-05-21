@@ -22,6 +22,7 @@ import { SharePaperDialog } from "@/components/SharePaperDialog";
 import { SelectionBubble } from "@/components/SelectionBubble";
 import { CommentHoverPopover } from "@/components/CommentHoverPopover";
 import { CommentsList } from "@/components/CommentsList";
+import { ZoomableImage } from "@/components/ZoomableImage";
 import type { AnchorTarget } from "@/lib/remarkAnchorMarks";
 import { cn } from "@/lib/utils";
 
@@ -1173,7 +1174,7 @@ function FigureCard({ pid, figure, knownDois, supplementary = false }: {
       <CardContent className="space-y-3">
         {figure.blob_path ? (
           imgUrl ? (
-            <img
+            <ZoomableImage
               src={imgUrl}
               alt={figure.title}
               className="max-h-[400px] w-auto max-w-full rounded border"
