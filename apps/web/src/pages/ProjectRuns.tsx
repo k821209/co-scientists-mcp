@@ -300,6 +300,36 @@ function ServersCard({ pid }: { pid: string }) {
         ) : (
           sorted.map((s) => <ServerRow key={s.id} server={s} pid={pid} />)
         )}
+
+        <div className="mt-1 rounded-md border border-dashed bg-muted/30 p-2.5 text-[10px] leading-relaxed text-muted-foreground">
+          <p className="mb-1 font-medium text-foreground">
+            What you can do from Claude Code
+          </p>
+          <ul className="space-y-0.5">
+            <li>
+              <code className="bg-muted px-1 py-0.5">add_server</code> /{" "}
+              <code className="bg-muted px-1 py-0.5">update_server</code> /{" "}
+              <code className="bg-muted px-1 py-0.5">delete_server</code> —
+              register and manage HPC nodes
+            </li>
+            <li>
+              <code className="bg-muted px-1 py-0.5">add_server_env</code> —
+              register a conda / venv / module environment
+            </li>
+            <li>
+              <code className="bg-muted px-1 py-0.5">server_status &lt;alias&gt;</code>{" "}
+              — live SSH check: load average, memory, running jobs
+            </li>
+            <li>
+              <code className="bg-muted px-1 py-0.5">submit_remote_job</code> —
+              run a tracked analysis on a registered server
+            </li>
+            <li>
+              <code className="bg-muted px-1 py-0.5">launch_local_job</code> —
+              run an analysis on this laptop instead
+            </li>
+          </ul>
+        </div>
       </CardContent>
     </Card>
   );
