@@ -50,7 +50,7 @@ export function Markdown({ children, className, knownDois, anchors }: MarkdownPr
     ? injectAnchorMarks(children, anchors)
     : children;
   return (
-    <div className={cn("prose-co-scientist", className)}>
+    <div className={cn("prose-co-scientist break-words", className)}>
       <ReactMarkdown
         remarkPlugins={[
           remarkGfm, remarkMath, remarkDoi, remarkFigureRefs, remarkTableRefs,

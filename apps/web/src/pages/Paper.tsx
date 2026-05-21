@@ -310,7 +310,7 @@ export function Paper() {
       )}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
         <Card>
           <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
             <div>
@@ -461,7 +461,7 @@ export function Paper() {
         {/* Right: persistent comment list — the reliable view of the
             review thread even after edits dissolve the highlights.
             Owner can Resolve / Withdraw straight from a row. */}
-        <div className="lg:sticky lg:top-4 lg:self-start">
+        <div className="min-w-0 lg:sticky lg:top-4 lg:self-start">
           <CommentsList
             reviews={reviews}
             onResolve={(id) =>

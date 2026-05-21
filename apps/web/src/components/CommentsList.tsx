@@ -50,7 +50,7 @@ export function CommentsList({ reviews, myName, onResolve, onWithdraw }: Props) 
           </Badge>
         </CardTitle>
       </CardHeader>
-      <CardContent className="max-h-[70vh] space-y-2 overflow-y-auto">
+      <CardContent className="max-h-[70vh] space-y-2 overflow-y-auto break-words">
         {reviews.length === 0 ? (
           <p className="text-xs text-muted-foreground">
             No comments yet. Drag-select any passage in the manuscript to
