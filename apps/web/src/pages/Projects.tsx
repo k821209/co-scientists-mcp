@@ -81,9 +81,9 @@ export function Projects() {
       ) : projects.length === 0 ? (
         <GettingStarted onCreate={() => setShowNew(true)} showForm={showNew} />
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {projects.map((p) => (
-            <Link key={p.id} to={`/projects/${p.id}/papers`}>
+            <Link key={p.id} to={`/projects/${p.id}/papers`} className="min-w-0">
               <Card className="h-full transition-colors hover:bg-accent">
                 <CardHeader>
                   <CardTitle className="flex items-start gap-2 text-base">
@@ -145,7 +145,7 @@ function GettingStarted({ onCreate, showForm }: {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {steps.map((s) => (
             <div key={s.title} className="rounded-lg border bg-muted/30 p-3">
               <s.icon className="mb-2 h-5 w-5 text-primary" />

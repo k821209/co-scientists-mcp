@@ -70,9 +70,9 @@ export function ProjectPapers() {
   }
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {papers.map((p) => (
-        <Link key={p.id} to={`/projects/${pid}/papers/${p.slug}`}>
+        <Link key={p.id} to={`/projects/${pid}/papers/${p.slug}`} className="min-w-0">
           <Card className="h-full transition-colors hover:bg-accent">
             <CardHeader>
               <CardTitle className="flex items-start gap-2 text-base">
