@@ -196,7 +196,7 @@ export function ProjectSetup() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 break-words">
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Connect Claude Code to this project</CardTitle>
