@@ -3,7 +3,7 @@ import { useOutletContext } from "react-router-dom";
 import { doc, updateDoc } from "firebase/firestore";
 import {
   Copy, Check, Download, KeyRound, RefreshCw, Eye, EyeOff,
-  Sparkles, ArrowRight, ArrowLeft,
+  Sparkles, ArrowRight, ArrowLeft, FolderOpen,
 } from "lucide-react";
 import { db } from "@/firebase";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -127,7 +127,7 @@ const CAPABILITIES: { what: string; say: string; skill: string }[] = [
   { what: "Write or revise the manuscript",
     say: "Write the introduction", skill: "/paper-writing" },
   { what: "Import an existing draft (.docx / .pdf)",
-    say: "Import this Word document", skill: "/paper-import" },
+    say: "Import ~/Downloads/draft.docx", skill: "/paper-import" },
   { what: "Address comments left on this dashboard",
     say: "Address the open comments", skill: "/paper-revision" },
   { what: "Find literature and add citations",
@@ -346,6 +346,22 @@ bash ~/Downloads/setup-${projectSlug}.sh`} />
                 </div>
               </div>
             ))}
+          </div>
+
+          {/* Local-execution advantage */}
+          <div className="flex gap-2 rounded-md border border-dashed bg-muted/30 p-3 text-xs">
+            <FolderOpen className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            <span>
+              <strong className="text-foreground">
+                Claude Code runs on your own computer
+              </strong>{" "}
+              — so it can read files straight off your disk, no upload step.
+              To bring an existing manuscript in, just point it at the path:{" "}
+              <code className="bg-muted px-1 py-0.5 text-[10px]">
+                Import ~/Downloads/draft.docx
+              </code>
+              . The same goes for local analysis outputs and figure images.
+            </span>
           </div>
 
           <p className="text-xs text-muted-foreground">
