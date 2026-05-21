@@ -25,6 +25,7 @@ import tempfile
 from ..backends.base import NotFound
 from ..state import State
 from ..util import now_iso
+from . import csl as _csl
 from . import figures as _figures
 from . import papers as _papers
 from . import references as _references
@@ -106,12 +107,9 @@ def prepare_export(state: State, slug: str) -> dict:
     bibtex = "".join(_ref_to_bibtex(r) for r in refs)
 
     paper = bundle["paper"]
-    journal = (paper.get("journal") or "").strip()
-    csl_suggestion = None
-    if journal:
-        # Deterministic guess at the CSL filename based on journal.
-        # Real CSL resolution (with Zotero repo download) is a v1.x refinement.
-        csl_suggestion = re.sub(r"[^a-z0-9]+", "-", journal.lower()).strip("-") + ".csl"
+    # Resolve the journal's citation style (offline — registry → in-code map →
+    # kebab guess). export_to_path does the actual download.
+    csl = _csl.resolve_csl_filename(state, paper.get("journal"))
 
     warnings: list[str] = []
     if placeholders:
@@ -135,7 +133,10 @@ def prepare_export(state: State, slug: str) -> dict:
         "bibtex": bibtex,
         "placeholders": placeholders,
         "unresolved_citations": unresolved,
-        "suggested_csl_filename": csl_suggestion,
+        "csl_filename": csl["csl_filename"],
+        "csl_slug": csl["csl_slug"],
+        "csl_source": csl["csl_source"],
+        "csl_status": csl["csl_status"],
         "warnings": warnings,
     }
 
@@ -161,6 +162,70 @@ def _format_pandoc_args(fmt: str, manuscript_filename: str, output_filename: str
     return args
 
 
+def _place_csl(
+    state: State,
+    tmp_path: pathlib.Path,
+    bundle: dict,
+    explicit_csl_path: str | None,
+) -> tuple[str | None, str, str | None, list[str]]:
+    """Put a CSL style file into `tmp_path` for pandoc to use.
+
+    Returns (csl_arg, csl_status, csl_filename, warnings):
+      - csl_arg      — filename to pass to `pandoc --csl`, or None
+      - csl_status   — explicit | downloaded | missing | no_journal
+      - csl_filename — the resolved/used filename, or None
+      - warnings     — human-readable notes for the export report
+
+    An explicit path wins. Otherwise the journal (already resolved to a
+    filename by prepare_export) is downloaded from the CSL styles repo; a
+    successful download of a *guessed* slug is written back to the
+    per-project registry so it sticks.
+    """
+    warnings: list[str] = []
+
+    if explicit_csl_path:
+        src = pathlib.Path(explicit_csl_path).expanduser()
+        if src.is_file():
+            shutil.copy2(src, tmp_path / src.name)
+            return src.name, "explicit", src.name, warnings
+        warnings.append(
+            f"csl_path not found: {explicit_csl_path} — used pandoc's "
+            "default citation style"
+        )
+        return None, "missing", None, warnings
+
+    csl_filename = bundle.get("csl_filename")
+    if not csl_filename:
+        return None, "no_journal", None, warnings
+
+    try:
+        data = _csl.download_csl(csl_filename)
+    except _csl.CslNotFound as e:
+        warnings.append(
+            f"CSL '{csl_filename}' not in the styles repo ({e}) — used "
+            "pandoc's default citation style. If you know the correct "
+            "filename, register it with register_journal_csl."
+        )
+        return None, "missing", csl_filename, warnings
+    except Exception as e:  # network failure — non-fatal, fall back
+        warnings.append(
+            f"CSL download failed ({e}) — used pandoc's default style"
+        )
+        return None, "missing", csl_filename, warnings
+
+    (tmp_path / csl_filename).write_bytes(data)
+    # Cache a working guess so the next export of this journal skips guessing.
+    if bundle.get("csl_source") == "guess":
+        try:
+            _csl.register_journal_csl(
+                state, bundle["paper"].get("journal") or "", csl_filename,
+                notes="auto-registered after a successful CSL download",
+            )
+        except Exception:
+            pass
+    return csl_filename, "downloaded", csl_filename, warnings
+
+
 def export_to_path(
     state: State,
     slug: str,
@@ -173,10 +238,15 @@ def export_to_path(
     """Full export pipeline.
 
     `fmt` is inferred from output_path extension if None.
+    The citation style is auto-resolved from the paper's journal and
+    downloaded from the CSL styles repo; pass `csl_path` to override with a
+    local CSL file.
     Returns metadata: local path, blob path (if uploaded), pandoc rc/stderr,
-    plus the prepare_export warnings so the caller can surface them.
+    csl status, plus the prepare_export warnings so the caller can surface
+    them.
     """
     bundle = prepare_export(state, slug)
+    export_warnings = list(bundle["warnings"])
     out = pathlib.Path(output_path).expanduser()
     out.parent.mkdir(parents=True, exist_ok=True)
 
@@ -191,8 +261,16 @@ def export_to_path(
         # Lay out manuscript + bib
         (tmp_path / "manuscript.md").write_text(bundle["manuscript"], encoding="utf-8")
         has_bib = bool(bundle["bibtex"].strip())
+        csl_arg: str | None = None
+        csl_status = "no_references"
+        csl_filename: str | None = None
         if has_bib:
             (tmp_path / "references.bib").write_text(bundle["bibtex"], encoding="utf-8")
+            # Citation style only matters once there's a bibliography.
+            csl_arg, csl_status, csl_filename, csl_warnings = _place_csl(
+                state, tmp_path, bundle, csl_path,
+            )
+            export_warnings.extend(csl_warnings)
 
         # Download figure blobs into tmp dir (main + supplementary)
         for fig in (*bundle["figures"], *bundle["supplementary_figures"]):
@@ -209,18 +287,18 @@ def export_to_path(
         tmp_output = tmp_path / out.name
         args = _format_pandoc_args(
             fmt, "manuscript.md", out.name,
-            has_bib=has_bib, csl_path=csl_path,
+            has_bib=has_bib, csl_path=csl_arg,
         )
         rc, stdout, stderr = state.require_pandoc().run(args, cwd=str(tmp_path))
         if rc != 0:
             return {
                 "error": f"pandoc failed (rc={rc}): {stderr.strip()}",
-                "warnings": bundle["warnings"],
+                "warnings": export_warnings,
             }
         if not tmp_output.is_file():
             return {
                 "error": "pandoc reported success but produced no output file",
-                "warnings": bundle["warnings"],
+                "warnings": export_warnings,
             }
 
         # Copy to the user-specified path
@@ -255,7 +333,9 @@ def export_to_path(
         "local_path": str(out),
         "blob_path": blob_path,
         "size_bytes": len(output_bytes),
-        "warnings": bundle["warnings"],
+        "csl_filename": csl_filename,
+        "csl_status": csl_status,
+        "warnings": export_warnings,
         "placeholders": bundle["placeholders"],
         "unresolved_citations": bundle["unresolved_citations"],
     }

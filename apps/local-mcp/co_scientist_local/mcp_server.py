@@ -8,6 +8,7 @@ from mcp.server.fastmcp import FastMCP
 from .guide import GUIDE_VERSION, render_guide
 from .state import State
 from .tools import analyses as _analyses
+from .tools import csl as _csl
 from .tools import decks as _decks
 from .tools import deck_render as _deck_render
 from .tools import exports as _exports
@@ -735,6 +736,35 @@ def build_mcp(state: State) -> FastMCP:
     def list_exports(slug: str) -> list[dict[str, Any]]:
         """List previously-exported files for a paper."""
         return _exports.list_exports(state, slug)
+
+    # ─── journal CSL registry ────────────────────────────────────────────────
+    @mcp.tool()
+    def register_journal_csl(
+        journal: str,
+        csl_filename: str,
+        notes: str | None = None,
+    ) -> dict[str, Any]:
+        """Pin a journal name to a CSL style filename for this project.
+
+        Export auto-resolves a journal to a CSL file (in-code map → kebab
+        guess) and downloads it from the citation-style-language/styles
+        repo. When the guess is wrong, find the correct filename at
+        https://github.com/citation-style-language/styles and register it
+        here (e.g. journal "J. Exp. Bot." → "journal-of-experimental-botany.csl").
+        It then takes precedence for every future export of that journal.
+        """
+        return _csl.register_journal_csl(state, journal, csl_filename, notes)
+
+    @mcp.tool()
+    def list_journal_csls() -> list[dict[str, Any]]:
+        """List this project's journal → CSL registry entries."""
+        return _csl.list_journal_csls(state)
+
+    @mcp.tool()
+    def delete_journal_csl(journal: str) -> dict[str, Any]:
+        """Remove a journal's registry entry (export falls back to the
+        in-code map / kebab guess for it again)."""
+        return {"deleted": _csl.delete_journal_csl(state, journal)}
 
     # ─── image generation ────────────────────────────────────────────────────
     @mcp.tool()

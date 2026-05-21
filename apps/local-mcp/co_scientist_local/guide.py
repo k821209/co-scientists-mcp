@@ -10,7 +10,7 @@ only) and refers the agent here on every session start.
 """
 from __future__ import annotations
 
-GUIDE_VERSION = "2026-05-21a"
+GUIDE_VERSION = "2026-05-21b"
 
 
 def render_guide() -> str:
@@ -49,7 +49,9 @@ On every session start:
   it into canonical sections, registers figures + references.
 - `/paper-revision` — address open user comments (anchor_text-anchored)
 - `/paper-export [docx|tex|pdf|md]` — pandoc-based export with placeholder/
-  unresolved-DOI pre-flight check; uploads result to Storage so the
+  unresolved-DOI pre-flight check; auto-resolves the journal's CSL
+  citation style (in-code map → kebab guess → per-project registry,
+  downloaded from the CSL styles repo); uploads result to Storage so the
   dashboard's Paper page lists it.
 - `/literature-review [topic] [slug?]` — CrossRef keyword search via
   `search_works`, candidate-then-pick UX, registers selected via

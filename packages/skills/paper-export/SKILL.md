@@ -34,6 +34,9 @@ The tool returns a bundle with a `warnings` array plus dedicated lists:
 - `placeholders[]` — TBD / TK / XXX / TODO / FIXME / `[...]` markers
 - `unresolved_citations[]` — `{doi:…}` references not in `references/`
 - `warnings[]` — short human-readable summary
+- `csl_filename` / `csl_slug` / `csl_source` / `csl_status` — the
+  citation style resolved from `paper.journal` (see step 4). Resolved
+  offline here; the file is downloaded at export time.
 
 If any of these are non-empty, **surface them to the user and ask
 whether to proceed**:
@@ -72,13 +75,57 @@ The tool:
 - Re-runs `prepare_export` (so warnings are fresh)
 - Writes manuscript.md + references.bib + every figure file into a
   temp dir
-- Invokes Pandoc with appropriate flags (citeproc when a bib exists,
-  `-t latex` for tex, etc.)
+- **Resolves + downloads the journal's CSL citation style** (see
+  "Journal citation style" below)
+- Invokes Pandoc with appropriate flags (citeproc + `--csl` when a bib
+  exists, `-t latex` for tex, etc.)
 - Uploads the output blob to Storage at
   `papers/{slug}/exports/{filename}` so it's downloadable from the
   dashboard.
 
-Returns `{ local_path, blob_path, fmt, rc, stderr, warnings }`.
+Returns `{ local_path, blob_path, format, size_bytes, csl_filename,
+csl_status, warnings, placeholders, unresolved_citations }`.
+
+### Journal citation style (CSL)
+
+The export matches the **journal's citation format** automatically — no
+manual CSL handling. The pipeline:
+
+1. `prepare_export` resolves `paper.journal` → a CSL filename, offline,
+   in this order:
+   - the project's **CSL registry** (entries you pinned earlier)
+   - an **in-code map** of ~30 common journals
+   - a **kebab-case guess** of the journal name
+2. `export_to_path` downloads that `.csl` from the public
+   citation-style-language/styles repo and passes it to Pandoc.
+3. A successful download of a *guessed* slug is **auto-registered** in
+   the project registry, so the next export of that journal is exact.
+
+`export_to_path` returns `csl_status`:
+
+- `downloaded` — style fetched + applied. Report `csl_filename`.
+- `explicit` — you passed `csl_path=` with a local CSL file; used as-is.
+- `missing` — the resolved filename isn't in the styles repo (or the
+  network failed). Export still succeeds with Pandoc's **default**
+  style; a warning carries the filename that failed.
+- `no_journal` — `paper.journal` is empty; default style used.
+- `no_references` — the paper has no references, so CSL is moot.
+
+**When `csl_status` is `missing`:** the journal name probably doesn't
+kebab-case to a real style slug. Look up the correct filename at
+https://github.com/citation-style-language/styles and pin it:
+
+```
+mcp__co_scientist__register_journal_csl(
+  journal="<exact paper.journal value>",
+  csl_filename="journal-of-experimental-botany.csl",
+)
+```
+
+Then re-export. `list_journal_csls()` shows what's pinned;
+`delete_journal_csl(journal)` removes an entry. Never guess a CSL
+filename into the registry — only pin one you verified exists in the
+styles repo.
 
 ### 5. Confirm + tell the user where the file is
 
@@ -104,15 +151,20 @@ If `rc != 0` or stderr mentions errors, surface them. Most failures are:
   it; deviating risks shipping stale figure data — the original
   co-scientist had a May 2026 incident where re-implemented assembly
   shipped an outdated figure caption.
-- **NEVER hardcode a CSL path**. `prepare_export` returns
-  `suggested_csl_filename` based on the paper's journal — pass it
-  through verbatim. Future versions will resolve it against a CSL
-  repo automatically.
+- **NEVER hardcode or guess a CSL filename**. CSL resolution is
+  harness-managed: `prepare_export` resolves it and `export_to_path`
+  downloads it. The only manual lever is `register_journal_csl` with a
+  filename you *verified* exists in the styles repo — used to correct a
+  wrong guess, never to invent one.
 
 ## Common follow-ups
 
 - "Make it ready for Nature" → set `paper.journal = "Nature"` via
-  `update_paper`, then re-export so CSL gets the right hint.
+  `update_paper`, then re-export — the Nature CSL is resolved and
+  downloaded automatically.
+- "The citations look wrong for this journal" → check `csl_status` in
+  the export result. If `missing`, pin the correct style with
+  `register_journal_csl` (see "Journal citation style") and re-export.
 - "Strip references" → call `delete_reference` for each; warnings will
   shift to "unresolved citations" instead. Decide with the user
   whether to leave inline DOI markers as plain text or remove them.

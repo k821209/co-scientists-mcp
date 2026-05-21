@@ -25,6 +25,19 @@ def _setup(state):
     return "rice-te-evolution"
 
 
+@pytest.fixture(autouse=True)
+def _no_csl_network(monkeypatch):
+    """Export tests must never hit the CSL styles repo. Default: simulate the
+    style being unavailable so export_to_path gracefully falls back to
+    pandoc's default. Tests that need a successful download re-patch this."""
+    from co_scientist_local.tools import csl as _csl
+
+    def _offline(filename, **kw):
+        raise _csl.CslNotFound(f"stubbed offline: {filename}")
+
+    monkeypatch.setattr(_csl, "download_csl", _offline)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # prepare_export
 # ──────────────────────────────────────────────────────────────────────────────
@@ -96,10 +109,13 @@ def test_prepare_export_flags_empty_sections(state):
     assert len(empty_warnings) >= 1  # all default sections are pending+empty
 
 
-def test_prepare_export_suggests_csl_from_journal(state):
+def test_prepare_export_resolves_csl_from_journal(state):
     slug = _setup(state)
     b = exports.prepare_export(state, slug)
-    assert b["suggested_csl_filename"] == "nature.csl"
+    assert b["csl_filename"] == "nature.csl"
+    assert b["csl_slug"] == "nature"
+    assert b["csl_source"] == "map"
+    assert b["csl_status"] == "resolved"
 
 
 def test_prepare_export_missing_paper_raises(state):
@@ -194,15 +210,72 @@ def test_export_to_path_omits_bib_args_when_no_refs(state, pandoc, tmp_path):
     assert "references.bib" not in pandoc.calls[0]["files"]
 
 
-def test_export_to_path_passes_csl_when_provided(state, pandoc, tmp_path):
+def test_export_to_path_passes_explicit_csl(state, pandoc, tmp_path):
     slug = _setup(state)
     references.add_reference(state, slug, citation_key="a", title="A", year=2024)
     out = tmp_path / "out.docx"
-    csl = str(tmp_path / "nature.csl")
-    exports.export_to_path(state, slug, output_path=str(out), csl_path=csl)
+    csl = tmp_path / "custom.csl"
+    csl.write_text("<style>x</style>")
+    res = exports.export_to_path(state, slug, output_path=str(out),
+                                 csl_path=str(csl))
     args = pandoc.calls[0]["args"]
     assert "--csl" in args
-    assert csl in args
+    assert "custom.csl" in args
+    assert pandoc.calls[0]["files"]["custom.csl"] == b"<style>x</style>"
+    assert res["csl_status"] == "explicit"
+
+
+def test_export_to_path_auto_downloads_csl_from_journal(
+        state, pandoc, tmp_path, monkeypatch):
+    from co_scientist_local.tools import csl as _csl
+    monkeypatch.setattr(_csl, "download_csl",
+                        lambda fn, **k: b"<style>nature</style>")
+    slug = _setup(state)  # journal=Nature → nature.csl
+    references.add_reference(state, slug, citation_key="a", title="A", year=2024)
+    out = tmp_path / "out.docx"
+    res = exports.export_to_path(state, slug, output_path=str(out))
+    args = pandoc.calls[0]["args"]
+    assert "--csl" in args and "nature.csl" in args
+    assert pandoc.calls[0]["files"]["nature.csl"] == b"<style>nature</style>"
+    assert res["csl_status"] == "downloaded"
+    assert res["csl_filename"] == "nature.csl"
+
+
+def test_export_to_path_skips_csl_without_references(
+        state, pandoc, tmp_path, monkeypatch):
+    from co_scientist_local.tools import csl as _csl
+    # download would succeed — but with no bibliography there's nothing to style
+    monkeypatch.setattr(_csl, "download_csl", lambda fn, **k: b"<style/>")
+    slug = _setup(state)
+    out = tmp_path / "out.docx"
+    res = exports.export_to_path(state, slug, output_path=str(out))
+    assert "--csl" not in pandoc.calls[0]["args"]
+    assert res["csl_status"] == "no_references"
+
+
+def test_export_to_path_missing_csl_warns_and_falls_back(
+        state, pandoc, tmp_path):
+    # the _no_csl_network autouse fixture makes the download raise CslNotFound
+    slug = _setup(state)
+    references.add_reference(state, slug, citation_key="a", title="A", year=2024)
+    out = tmp_path / "out.docx"
+    res = exports.export_to_path(state, slug, output_path=str(out))
+    assert "--csl" not in pandoc.calls[0]["args"]
+    assert res["csl_status"] == "missing"
+    assert any("nature.csl" in w for w in res["warnings"])
+
+
+def test_export_to_path_auto_registers_guessed_csl(
+        state, pandoc, tmp_path, monkeypatch):
+    from co_scientist_local.tools import csl as _csl
+    monkeypatch.setattr(_csl, "download_csl", lambda fn, **k: b"<style/>")
+    papers.create_paper(state, title="Obscure", journal="Journal of Obscure Things")
+    references.add_reference(state, "obscure", citation_key="a", title="A", year=2024)
+    out = tmp_path / "out.docx"
+    exports.export_to_path(state, "obscure", output_path=str(out))
+    # the guessed slug got cached in the per-project registry
+    assert _csl.lookup_journal_csl(state, "Journal of Obscure Things") == \
+        "journal-of-obscure-things.csl"
 
 
 def test_export_to_path_rejects_unsupported_format(state, tmp_path):
