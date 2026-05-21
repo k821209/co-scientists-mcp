@@ -273,14 +273,14 @@ bash ~/Downloads/setup-${projectSlug}.sh`} />
                   Or download the two files individually (inspect before using)
                 </summary>
                 <div className="mt-3 space-y-2">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <code className="text-xs">.mcp.json</code>
                     <Button size="sm" variant="outline" disabled={!apiKey}
                             onClick={() => downloadFile(".mcp.json", mcp, "application/json")}>
                       <Download className="mr-2 h-4 w-4" /> Download .mcp.json
                     </Button>
                   </div>
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <code className="text-xs">CLAUDE.md</code>
                     <Button size="sm" variant="outline" disabled={!project}
                             onClick={() => downloadFile("CLAUDE.md", claudeMd, "text/markdown")}>
@@ -401,7 +401,7 @@ function CodeBlock({ value }: { value: string }) {
   };
   return (
     <div className="group relative mt-2">
-      <pre className="overflow-x-auto rounded-md border bg-muted/50 p-3 text-xs leading-relaxed">
+      <pre className="whitespace-pre-wrap break-words rounded-md border bg-muted/50 p-3 pr-9 text-xs leading-relaxed">
         {value}
       </pre>
       <Button
