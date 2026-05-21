@@ -77,7 +77,7 @@ export function ProjectPapers() {
             <CardHeader>
               <CardTitle className="flex items-start gap-2 text-base">
                 <FileText className="mt-0.5 h-4 w-4 shrink-0" />
-                <span className="truncate">{p.title}</span>
+                <span className="min-w-0 truncate">{p.title}</span>
               </CardTitle>
               <CardDescription className="flex flex-wrap items-center gap-2">
                 {p.journal && <span>{p.journal}</span>}

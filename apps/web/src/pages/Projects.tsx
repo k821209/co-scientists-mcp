@@ -88,7 +88,7 @@ export function Projects() {
                 <CardHeader>
                   <CardTitle className="flex items-start gap-2 text-base">
                     <Folder className="mt-0.5 h-4 w-4 shrink-0" />
-                    <span className="truncate">{p.name}</span>
+                    <span className="min-w-0 truncate">{p.name}</span>
                   </CardTitle>
                   {p.description && (
                     <CardDescription className="line-clamp-2">
