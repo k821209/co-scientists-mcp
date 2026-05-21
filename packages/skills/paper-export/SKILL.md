@@ -37,6 +37,12 @@ The tool returns a bundle with a `warnings` array plus dedicated lists:
 - `csl_filename` / `csl_slug` / `csl_source` / `csl_status` — the
   citation style resolved from `paper.journal` (see step 4). Resolved
   offline here; the file is downloaded at export time.
+- `requirements_check` — the journal / paper-type submission check
+  (word limits, figure & table caps, required sections). If
+  `configured` is false, the paper has no journal spec yet — suggest
+  `/journal-requirements`. If `violations[]` is non-empty, list each
+  (e.g. "abstract 178/150 words") and ask whether to fix before
+  exporting — a submission system will bounce an over-limit manuscript.
 
 If any of these are non-empty, **surface them to the user and ask
 whether to proceed**:

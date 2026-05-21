@@ -17,6 +17,7 @@ from .tools import figures as _figures
 from .tools import images as _images
 from .tools import papers as _papers
 from .tools import references as _references
+from .tools import requirements as _requirements
 from .tools import reviews as _reviews
 from .tools import runs as _runs
 from .tools import sections as _sections
@@ -124,6 +125,53 @@ def build_mcp(state: State) -> FastMCP:
     def delete_paper(slug: str) -> dict[str, Any]:
         """Delete a paper and all its sections/reviews/manuscript blob."""
         return {"deleted": _papers.delete_paper(state, slug)}
+
+    # ─── journal/paper-type requirements ─────────────────────────────────────
+    @mcp.tool()
+    def set_paper_requirements(
+        slug: str,
+        paper_type: str,
+        abstract_max_words: int | None = None,
+        abstract_structured: bool | None = None,
+        main_text_max_words: int | None = None,
+        max_figures: int | None = None,
+        max_tables: int | None = None,
+        max_display_items: int | None = None,
+        max_references: int | None = None,
+        required_sections: list[str] | None = None,
+        notes: str | None = None,
+        source: str | None = None,
+    ) -> dict[str, Any]:
+        """Store this paper's journal + paper-type submission spec.
+
+        Fill the fields from the journal's *current* author guidelines for
+        the chosen paper type (Article, Short Communication, Letter,
+        Review, …). Leave a limit None when the guidelines state none —
+        never invent one. Put rules that don't fit a field in `notes`
+        (e.g. "Methods at the end", "structured abstract"). `source` is
+        the guidelines URL. See the /journal-requirements skill.
+        """
+        return _requirements.set_paper_requirements(
+            state, slug, paper_type=paper_type,
+            abstract_max_words=abstract_max_words,
+            abstract_structured=abstract_structured,
+            main_text_max_words=main_text_max_words,
+            max_figures=max_figures, max_tables=max_tables,
+            max_display_items=max_display_items, max_references=max_references,
+            required_sections=required_sections, notes=notes, source=source,
+        )
+
+    @mcp.tool()
+    def check_requirements(slug: str) -> dict[str, Any]:
+        """Measure the manuscript against its stored journal spec.
+
+        Deterministic signal provider: counts abstract/main-text words,
+        figures, tables, references and compares to the limits. Returns
+        {configured, requirements, metrics, checks, violations, ok}.
+        Judgment calls (structured-abstract format, free-text `notes`)
+        are yours — read `requirements` and decide.
+        """
+        return _requirements.check_requirements(state, slug)
 
     # ─── sections ────────────────────────────────────────────────────────────
     @mcp.tool()

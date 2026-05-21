@@ -10,7 +10,7 @@ only) and refers the agent here on every session start.
 """
 from __future__ import annotations
 
-GUIDE_VERSION = "2026-05-21b"
+GUIDE_VERSION = "2026-05-21c"
 
 
 def render_guide() -> str:
@@ -48,6 +48,11 @@ On every session start:
   manuscript: `import_document` converts to markdown, the agent splits
   it into canonical sections, registers figures + references.
 - `/paper-revision` — address open user comments (anchor_text-anchored)
+- `/journal-requirements` — capture a target journal's submission spec
+  for a paper type (Article / Short Communication / Letter / Review …):
+  the agent reads the journal's live author guidelines and stores word
+  limits, figure/table caps, structured-abstract + required-section
+  rules; `check_requirements` then measures the manuscript against them.
 - `/paper-export [docx|tex|pdf|md]` — pandoc-based export with placeholder/
   unresolved-DOI pre-flight check; auto-resolves the journal's CSL
   citation style (in-code map → kebab guess → per-project registry,

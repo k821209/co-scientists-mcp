@@ -29,6 +29,7 @@ from . import csl as _csl
 from . import figures as _figures
 from . import papers as _papers
 from . import references as _references
+from . import requirements as _requirements
 from . import sections as _sections
 from . import tables as _tables
 
@@ -111,6 +112,9 @@ def prepare_export(state: State, slug: str) -> dict:
     # kebab guess). export_to_path does the actual download.
     csl = _csl.resolve_csl_filename(state, paper.get("journal"))
 
+    # Journal / paper-type requirement check (word limits, item caps, …).
+    req_check = _requirements.check_requirements(state, slug)
+
     warnings: list[str] = []
     if placeholders:
         warnings.append(f"{len(placeholders)} placeholder marker(s) in manuscript")
@@ -119,6 +123,11 @@ def prepare_export(state: State, slug: str) -> dict:
     for s in bundle["sections"]:
         if s.get("status") == "pending" and (s.get("word_count") or 0) == 0:
             warnings.append(f"section '{s['key']}' is empty")
+    if req_check.get("violations"):
+        warnings.append(
+            f"{len(req_check['violations'])} journal-requirement violation(s) "
+            f"— see requirements_check"
+        )
 
     return {
         "slug": slug,
@@ -137,6 +146,7 @@ def prepare_export(state: State, slug: str) -> dict:
         "csl_slug": csl["csl_slug"],
         "csl_source": csl["csl_source"],
         "csl_status": csl["csl_status"],
+        "requirements_check": req_check,
         "warnings": warnings,
     }
 
