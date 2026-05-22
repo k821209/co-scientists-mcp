@@ -723,16 +723,34 @@ function SlidePreview({ pid, slide, aspectRatio }: {
 
   if (mode === "hybrid") {
     const regions = slide.regions || [];
+    const body = (slide.body || "").trim();
     return (
       <div
-        className="relative overflow-hidden rounded-md border bg-muted/20"
+        className="relative overflow-hidden rounded-md border bg-card"
         style={{ aspectRatio: ar }}
       >
-        {regions.length === 0 && (
-          <div className="flex h-full items-center justify-center text-[10px] text-muted-foreground">
-            no regions defined
+        {/* Accent stripe + title — mirror the exported slide's frame. */}
+        <div className="absolute inset-x-0 top-0 h-1.5 bg-primary" />
+        <div
+          className="absolute truncate text-sm font-bold leading-tight"
+          style={{ left: "5%", top: "6%", width: "90%" }}
+        >
+          {slide.title || (
+            <span className="text-muted-foreground">untitled</span>
+          )}
+        </div>
+        {/* Body in the LEFT half — mirrors the export's body-on-left
+            convention so the reviewer sees the bullets too, not just
+            the image regions. */}
+        {body && (
+          <div
+            className="absolute overflow-hidden whitespace-pre-wrap text-[10px] leading-snug text-muted-foreground"
+            style={{ left: "5%", top: "26%", width: "44%", height: "67%" }}
+          >
+            {stripMarkdown(body)}
           </div>
         )}
+        {/* Image regions positioned at their fractional x/y/w/h. */}
         {regions.map((r) => (
           <div
             key={r.id}
@@ -757,6 +775,11 @@ function SlidePreview({ pid, slide, aspectRatio }: {
             )}
           </div>
         ))}
+        {regions.length === 0 && !body && (
+          <div className="flex h-full items-center justify-center text-[10px] text-muted-foreground">
+            empty hybrid slide
+          </div>
+        )}
       </div>
     );
   }

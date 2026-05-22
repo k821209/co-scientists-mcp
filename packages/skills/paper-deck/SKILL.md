@@ -215,6 +215,12 @@ The slide's `body` renders as native bullets in the LEFT half; the
 image region renders in its box on the right. The bullets stay
 editable text in the .pptx; only the figure is an image.
 
+**Keep the body tight on hybrid slides.** The body box is half-width,
+so each bullet wraps onto more lines than on a full-width `text`
+slide. As a rule, aim for ≤ 4 bullets, each ≤ 2 wrapped lines (i.e.
+~80 Korean characters / 120 English characters). Dense bullets will
+overflow the box even at the reduced 20pt body type.
+
 **(b) Several images on one slide** — a generated schematic next to a
 data plot next to a manuscript figure:
 

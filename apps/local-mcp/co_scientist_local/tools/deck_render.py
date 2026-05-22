@@ -608,10 +608,20 @@ def _emit_paragraph(p, text, *, size, fg, fonts, Pt, bold=False, prefix="",
             run.font.name = name
 
 
-def _render_markdown_into(tf, body, *, fg, fonts, Pt) -> None:
+def _render_markdown_into(tf, body, *, fg, fonts, Pt,
+                          body_pt: int = _BODY_PT,
+                          head_pt: int = _HEAD_PT) -> None:
     """Render a slide body's markdown into text frame `tf` — headings,
-    bullet / numbered lists, inline **bold** / *italic* / `code`."""
+    bullet / numbered lists, inline **bold** / *italic* / `code`. Auto-
+    shrinks the type when the content overruns the body box (PowerPoint
+    honours `<a:normAutofit/>` reliably; LibreOffice less so, so callers
+    pass a smaller `body_pt` for half-width boxes)."""
+    from pptx.enum.text import MSO_AUTO_SIZE  # type: ignore
     tf.word_wrap = True
+    try:
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_SHAPE
+    except Exception:
+        pass  # very old python-pptx builds may not expose this
     first = True
     for raw in body.splitlines():
         if not raw.strip():
@@ -620,23 +630,24 @@ def _render_markdown_into(tf, body, *, fg, fonts, Pt) -> None:
         first = False
         m = _HEADING_RE.match(raw)
         if m:
-            _emit_paragraph(p, m.group(1), size=_HEAD_PT, fg=fg, fonts=fonts,
+            _emit_paragraph(p, m.group(1), size=head_pt, fg=fg, fonts=fonts,
                             Pt=Pt, bold=True, space_before=10, space_after=4)
             continue
         m = _BULLET_RE.match(raw)
         if m:
             depth = min(len(m.group(1)) // 2, 3)
-            _emit_paragraph(p, m.group(2), size=_BODY_PT, fg=fg, fonts=fonts,
-                            Pt=Pt, prefix="   " * depth + "•  ", space_after=5)
+            _emit_paragraph(p, m.group(2), size=body_pt, fg=fg, fonts=fonts,
+                            Pt=Pt, prefix="   " * depth + "•  ", space_after=3)
             continue
         m = _NUM_RE.match(raw)
         if m:
             depth = min(len(m.group(1)) // 2, 3)
-            _emit_paragraph(p, m.group(3), size=_BODY_PT, fg=fg, fonts=fonts,
+            _emit_paragraph(p, m.group(3), size=body_pt, fg=fg, fonts=fonts,
                             Pt=Pt, prefix="   " * depth + m.group(2) + ".  ",
-                            space_after=5)
+                            space_after=3)
             continue
-        _emit_paragraph(p, raw.strip(), size=_BODY_PT, fg=fg, fonts=fonts, Pt=Pt)
+        _emit_paragraph(p, raw.strip(), size=body_pt, fg=fg, fonts=fonts,
+                        Pt=Pt, space_after=4)
 
 
 def _add_slide_frame(slide, row, *, sw, sh, accent, fg, bg, fonts,
@@ -753,11 +764,12 @@ def _add_hybrid_slide(slide, row, state, tmpd, *, sw, sh, accent, fg, bg,
     body = (row.get("body") or "").strip()
     if body:
         body_box = slide.shapes.add_textbox(
-            Inches(0.7), Inches(1.95),
-            int(sw / 2) - Inches(0.8), sh - Inches(2.5),
+            Inches(0.7), Inches(1.65),
+            int(sw / 2) - Inches(0.8), sh - Inches(1.95),
         )
+        # Half-width box wraps more, so smaller body type than a text slide.
         _render_markdown_into(body_box.text_frame, body, fg=fg, fonts=fonts,
-                              Pt=Pt)
+                              Pt=Pt, body_pt=20, head_pt=24)
     unrendered = 0
     for r in row.get("regions") or []:
         left = int(r["x"] * sw)
