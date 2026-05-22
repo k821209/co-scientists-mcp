@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, Outlet, useParams } from "react-router-dom";
 import { doc, onSnapshot } from "firebase/firestore";
-import { ArrowLeft, FileText, Presentation, Settings, Activity } from "lucide-react";
+import {
+  ArrowLeft, FileText, Presentation, Settings, Activity, Brain,
+} from "lucide-react";
 import { db } from "@/firebase";
 import { TabBar } from "@/components/Tabs";
 
@@ -36,6 +38,7 @@ export function ProjectShell() {
     { to: `/projects/${pid}/papers`,        label: "Paper",         icon: FileText },
     { to: `/projects/${pid}/presentations`, label: "Presentation",  icon: Presentation },
     { to: `/projects/${pid}/runs`,          label: "Runs",          icon: Activity },
+    { to: `/projects/${pid}/memory`,        label: "Memory",        icon: Brain },
     { to: `/projects/${pid}/setup`,         label: "Setup guide",   icon: Settings },
   ];
 

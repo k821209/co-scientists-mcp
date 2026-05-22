@@ -15,6 +15,7 @@ from .tools import exports as _exports
 from .tools import imports as _imports
 from .tools import figures as _figures
 from .tools import images as _images
+from .tools import memory as _memory
 from .tools import papers as _papers
 from .tools import references as _references
 from .tools import requirements as _requirements
@@ -64,6 +65,34 @@ def build_mcp(state: State) -> FastMCP:
         via `pip install --upgrade` — no need to re-download CLAUDE.md.
         """
         return render_guide()
+
+    # ─── project memory ──────────────────────────────────────────────────────
+    @mcp.tool()
+    def get_project_memory() -> dict[str, Any]:
+        """Read this project's durable memory — a markdown document of soft
+        project knowledge (user preferences, decisions, approaches tried,
+        gotchas). Cloud-stored, shared, and shown in the dashboard's
+        Memory tab. Read it at session start; it is standing context.
+        Returns {content, updated_at, updated_by}.
+        """
+        return _memory.get_project_memory(state)
+
+    @mcp.tool()
+    def append_project_memory(note: str) -> dict[str, Any]:
+        """Append one durable fact to the project memory (a new line).
+        Use for knowledge NOT recoverable from papers/reviews/figures —
+        e.g. a user writing preference, a decision and its reason, an
+        approach that was tried and rejected, a domain gotcha.
+        """
+        return _memory.append_project_memory(state, note)
+
+    @mcp.tool()
+    def update_project_memory(content: str) -> dict[str, Any]:
+        """Replace the whole project-memory markdown document. Use when
+        reorganizing or pruning; for a single new fact prefer
+        append_project_memory.
+        """
+        return _memory.update_project_memory(state, content)
 
     # ─── papers ──────────────────────────────────────────────────────────────
     @mcp.tool()

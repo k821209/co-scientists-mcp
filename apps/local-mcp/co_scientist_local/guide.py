@@ -10,7 +10,7 @@ only) and refers the agent here on every session start.
 """
 from __future__ import annotations
 
-GUIDE_VERSION = "2026-05-21d"
+GUIDE_VERSION = "2026-05-22a"
 
 
 def render_guide() -> str:
@@ -34,13 +34,16 @@ On every session start:
    the user — they likely mixed `.mcp.json` and `CLAUDE.md` from two
    different dashboard projects. (The MCP also prints a stderr warning
    banner on startup when this mismatch is detected.)
-2. Call `mcp__co_scientist__list_papers()` then, for each paper,
+2. Call `mcp__co_scientist__get_project_memory()` — the project's durable
+   knowledge (user preferences, decisions, gotchas). Treat it as standing
+   context for the whole session. See "## Project memory" below.
+3. Call `mcp__co_scientist__list_papers()` then, for each paper,
    `mcp__co_scientist__count_open_user_comments(slug)`. If non-zero,
    call `mcp__co_scientist__list_reviews(slug, status="open")` to get
    the open comments with their `anchor_text` — use that quoted passage
    to locate the exact place in the manuscript the user is pointing at,
    then offer `/paper-revision`.
-3. For each paper, call `mcp__co_scientist__check_requirements(slug)`.
+4. For each paper, call `mcp__co_scientist__check_requirements(slug)`.
    If `configured` is true and `violations` is non-empty, surface them
    (e.g. "abstract 178/150 words — over the Short Communication limit")
    and offer to fix. If `configured` is false and the paper has a
@@ -93,8 +96,32 @@ On every session start:
 ## Tool surface (~60 tools under `mcp__co_scientist__*`)
 
 papers · sections · reviews · figures · tables · references · analyses · runs
-servers (HPC) · exports · journal CSL · requirements · image gen · whoami
-· project_guide
+servers (HPC) · exports · journal CSL · requirements · project memory
+· image gen · whoami · project_guide
+
+## Project memory
+
+`get_project_memory()` returns this project's durable knowledge — a
+markdown document stored in the cloud at `/projects/{{pid}}/memory`,
+shared across machines and editable in the dashboard's **Memory** tab.
+It is the **source of truth for soft project knowledge**.
+
+- **Read** it at session start (step 2 above) — standing context.
+- **Record** new durable facts with `append_project_memory(note)`;
+  reorganize/prune with `update_project_memory(content)`.
+
+WHAT belongs here: the user's writing preferences, decisions taken and
+why, approaches tried and rejected, domain gotchas, target-journal
+history — knowledge NOT recoverable from the papers / sections /
+reviews / figures themselves.
+
+WHAT does NOT: anything already in the structured data (section text,
+review comments, figure captions, citations) — never duplicate it.
+Keep entries concrete and short.
+
+This is separate from Claude Code's own local auto-memory (a harness
+feature, machine-local). Project knowledge goes HERE — cloud-backed, so
+it survives a new machine and the user can see it.
 
 ## Citation format + hallucination check
 
