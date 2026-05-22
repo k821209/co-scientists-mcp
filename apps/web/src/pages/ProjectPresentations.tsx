@@ -271,6 +271,14 @@ function DeckCard({ pid, deck, open, onToggle }: {
     }
   };
 
+  // Accent color from the deck's concept — keeps the preview's accents
+  // (top stripe, rule under title) in sync with what the exported PPTX
+  // actually uses.
+  const accentColor = useMemo(
+    () => parseAccentColor(deck.concept ?? null),
+    [deck.concept],
+  );
+
   // Reorder: swap a slide's slide_number with its display neighbour.
   const moveSlide = async (index: number, dir: -1 | 1) => {
     const a = slides[index];
@@ -389,6 +397,7 @@ function DeckCard({ pid, deck, open, onToggle }: {
                   paperSlug={deck.paperSlug}
                   deckId={deck.id}
                   aspectRatio={deck.aspect_ratio || "16:9"}
+                  accentColor={accentColor}
                   canMoveUp={i > 0}
                   canMoveDown={i < slides.length - 1}
                   onMoveUp={() => moveSlide(i, -1)}
@@ -404,7 +413,7 @@ function DeckCard({ pid, deck, open, onToggle }: {
 }
 
 function SlideRow({
-  slide, pid, paperSlug, deckId, aspectRatio,
+  slide, pid, paperSlug, deckId, aspectRatio, accentColor,
   canMoveUp, canMoveDown, onMoveUp, onMoveDown,
 }: {
   slide: Slide;
@@ -412,6 +421,7 @@ function SlideRow({
   paperSlug: string;
   deckId: string;
   aspectRatio: string;
+  accentColor: string;
   canMoveUp: boolean;
   canMoveDown: boolean;
   onMoveUp: () => void;
@@ -538,7 +548,10 @@ function SlideRow({
       </div>
       {expanded && (
         <div className="mt-2 space-y-2 text-xs">
-          <SlidePreview pid={pid} slide={slide} aspectRatio={aspectRatio} />
+          <SlidePreview
+            pid={pid} slide={slide}
+            aspectRatio={aspectRatio} accentColor={accentColor}
+          />
           {slide.body && (
             <div>
               <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">Body</div>
@@ -667,13 +680,76 @@ function arCss(aspectRatio: string): string {
   return "16 / 9";
 }
 
-/** Strip common markdown markers for a compact text-slide preview. */
-function stripMarkdown(text: string): string {
-  return text
-    .replace(/\*\*|__/g, "")
-    .replace(/^#{1,6}\s+/gm, "")
-    .replace(/^\s*[-*]\s+/gm, "•  ")
-    .replace(/`/g, "");
+/** Extract the deck's accent color from its concept string — keeps the
+ *  preview's accents in sync with what the exported PPTX actually uses. */
+function parseAccentColor(concept: string | null): string {
+  if (!concept) return "#2E7D32";
+  const m = concept.match(/\baccent\s*:\s*(#[0-9a-fA-F]{6})\b/);
+  return m ? m[1] : "#2E7D32";
+}
+
+const _INLINE_MD_RE =
+  /(\*\*.+?\*\*|__.+?__|\*[^*\n]+?\*|_[^_\n]+?_|`[^`\n]+?`)/g;
+
+/** Render inline **bold** / *italic* / `code` so the preview shows the
+ *  same emphasis as the exported PPTX. */
+function renderInline(text: string): React.ReactNode[] {
+  const out: React.ReactNode[] = [];
+  let i = 0;
+  for (const tok of text.split(_INLINE_MD_RE)) {
+    if (!tok) continue;
+    if ((tok.startsWith("**") && tok.endsWith("**"))
+        || (tok.startsWith("__") && tok.endsWith("__"))) {
+      out.push(<strong key={i++}>{tok.slice(2, -2)}</strong>);
+    } else if (tok.startsWith("`") && tok.endsWith("`")) {
+      out.push(
+        <code key={i++} className="rounded bg-muted px-1 font-mono">
+          {tok.slice(1, -1)}
+        </code>,
+      );
+    } else if ((tok.startsWith("*") && tok.endsWith("*"))
+               || (tok.startsWith("_") && tok.endsWith("_"))) {
+      out.push(<em key={i++}>{tok.slice(1, -1)}</em>);
+    } else {
+      out.push(<span key={i++}>{tok}</span>);
+    }
+  }
+  return out;
+}
+
+/** Render a slide body's markdown as a tiny preview — headings, bullets
+ *  with indentation, plain paragraphs, with inline emphasis intact. */
+function MiniMarkdown({ text }: { text: string }) {
+  const lines = text.split("\n");
+  return (
+    <div className="space-y-0.5">
+      {lines.map((raw, i) => {
+        if (!raw.trim()) return null;
+        const h = raw.match(/^\s*#{1,6}\s+(.+\S)\s*$/);
+        if (h) {
+          return (
+            <div key={i} className="mt-1 font-semibold text-foreground">
+              {renderInline(h[1])}
+            </div>
+          );
+        }
+        const b = raw.match(/^(\s*)[-*]\s+(.+\S)\s*$/);
+        if (b) {
+          const depth = Math.min(Math.floor(b[1].length / 2), 3);
+          return (
+            <div
+              key={i} className="flex gap-1"
+              style={{ paddingLeft: `${depth * 0.8}em` }}
+            >
+              <span aria-hidden>•</span>
+              <span className="min-w-0">{renderInline(b[2])}</span>
+            </div>
+          );
+        }
+        return <div key={i}>{renderInline(raw.trim())}</div>;
+      })}
+    </div>
+  );
 }
 
 function StorageImg({ pid, blobPath, className, alt }: {
@@ -712,45 +788,85 @@ function StorageImg({ pid, blobPath, className, alt }: {
   return <img src={url} alt={alt} className={className} />;
 }
 
+/** Shared frame for native text + hybrid previews — themed background,
+ *  top accent stripe, title, and the short accent rule under the title.
+ *  Geometry tracks `_add_slide_frame` in the export. */
+function SlideFrame({
+  title, accentColor, ar, children,
+}: {
+  title?: string;
+  accentColor: string;
+  ar: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div
+      className="relative overflow-hidden rounded-md border bg-card"
+      style={{ aspectRatio: ar }}
+    >
+      <div
+        className="absolute inset-x-0 top-0 h-1.5"
+        style={{ background: accentColor }}
+      />
+      <div
+        className="absolute truncate text-sm font-bold leading-tight"
+        style={{ left: "5%", top: "6%", width: "90%" }}
+      >
+        {title || <span className="text-muted-foreground">untitled</span>}
+      </div>
+      <div
+        className="absolute"
+        style={{
+          left: "5.4%", top: "20.3%", width: "16.5%", height: "3px",
+          background: accentColor,
+        }}
+      />
+      {children}
+    </div>
+  );
+}
+
 /** A visual of the slide, so a reviewer can comment against what they see.
- *  Rendered image slides show their PNG; hybrid slides show each region in
- *  its box; text (and not-yet-rendered) slides show a content card. */
-function SlidePreview({ pid, slide, aspectRatio }: {
-  pid: string; slide: Slide; aspectRatio: string;
+ *  Geometry, accent color, and inline markdown emphasis track the exported
+ *  PPTX so the dashboard preview matches the file. */
+function SlidePreview({ pid, slide, aspectRatio, accentColor }: {
+  pid: string;
+  slide: Slide;
+  aspectRatio: string;
+  accentColor: string;
 }) {
   const ar = arCss(aspectRatio);
   const mode = slide.render_mode || "code-shape";
 
+  // Image slide → full-bleed picture, no frame.
+  if (mode !== "hybrid" && slide.image_blob_path) {
+    return (
+      <div
+        className="overflow-hidden rounded-md border bg-muted/20"
+        style={{ aspectRatio: ar }}
+      >
+        <StorageImg
+          pid={pid} blobPath={slide.image_blob_path} alt={slide.title}
+          className="h-full w-full object-contain"
+        />
+      </div>
+    );
+  }
+
+  // Hybrid → frame + left-half body + positioned regions.
   if (mode === "hybrid") {
     const regions = slide.regions || [];
     const body = (slide.body || "").trim();
     return (
-      <div
-        className="relative overflow-hidden rounded-md border bg-card"
-        style={{ aspectRatio: ar }}
-      >
-        {/* Accent stripe + title — mirror the exported slide's frame. */}
-        <div className="absolute inset-x-0 top-0 h-1.5 bg-primary" />
-        <div
-          className="absolute truncate text-sm font-bold leading-tight"
-          style={{ left: "5%", top: "6%", width: "90%" }}
-        >
-          {slide.title || (
-            <span className="text-muted-foreground">untitled</span>
-          )}
-        </div>
-        {/* Body in the LEFT half — mirrors the export's body-on-left
-            convention so the reviewer sees the bullets too, not just
-            the image regions. */}
+      <SlideFrame title={slide.title} accentColor={accentColor} ar={ar}>
         {body && (
           <div
-            className="absolute overflow-hidden whitespace-pre-wrap text-[10px] leading-snug text-muted-foreground"
-            style={{ left: "5%", top: "26%", width: "44%", height: "67%" }}
+            className="absolute overflow-hidden text-[10px] leading-snug text-muted-foreground"
+            style={{ left: "5%", top: "22%", width: "44%", height: "74%" }}
           >
-            {stripMarkdown(body)}
+            <MiniMarkdown text={body} />
           </div>
         )}
-        {/* Image regions positioned at their fractional x/y/w/h. */}
         {regions.map((r) => (
           <div
             key={r.id}
@@ -776,51 +892,38 @@ function SlidePreview({ pid, slide, aspectRatio }: {
           </div>
         ))}
         {regions.length === 0 && !body && (
-          <div className="flex h-full items-center justify-center text-[10px] text-muted-foreground">
+          <div
+            className="absolute text-[10px] text-muted-foreground"
+            style={{ left: "5%", top: "45%" }}
+          >
             empty hybrid slide
           </div>
         )}
-      </div>
+      </SlideFrame>
     );
   }
 
-  if (slide.image_blob_path) {
-    return (
-      <div
-        className="overflow-hidden rounded-md border bg-muted/20"
-        style={{ aspectRatio: ar }}
-      >
-        <StorageImg
-          pid={pid} blobPath={slide.image_blob_path} alt={slide.title}
-          className="h-full w-full object-contain"
-        />
-      </div>
-    );
-  }
-
-  // text slide, or a slide not yet rendered — a content card approximating
-  // the native text slide. Not pixel-perfect; enough to comment against.
+  // text slide (or not yet rendered) → frame + full-width body. Not
+  // pixel-perfect with the PPTX but emphasis / bullets / accent stripe
+  // all match so review against this is faithful.
   return (
-    <div
-      className="flex flex-col overflow-hidden rounded-md border bg-card"
-      style={{ aspectRatio: ar }}
-    >
-      <div className="h-1.5 w-full shrink-0 bg-primary" />
-      <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden p-3">
-        <div className="text-sm font-bold leading-tight">
-          {slide.title || <span className="text-muted-foreground">untitled</span>}
+    <SlideFrame title={slide.title} accentColor={accentColor} ar={ar}>
+      {slide.body && (
+        <div
+          className="absolute overflow-hidden text-[10px] leading-snug text-muted-foreground"
+          style={{ left: "5%", top: "26%", width: "90%", height: "67%" }}
+        >
+          <MiniMarkdown text={slide.body} />
         </div>
-        {slide.body && (
-          <div className="whitespace-pre-wrap text-[10px] leading-snug text-muted-foreground">
-            {stripMarkdown(slide.body)}
-          </div>
-        )}
-        {mode !== "text" && (
-          <div className="text-[9px] italic text-amber-600">
-            not rendered yet — preview shows the slide content
-          </div>
-        )}
-      </div>
-    </div>
+      )}
+      {mode !== "text" && (
+        <div
+          className="absolute text-[9px] italic text-amber-600"
+          style={{ left: "5%", bottom: "3%" }}
+        >
+          not rendered yet — preview shows the slide content
+        </div>
+      )}
+    </SlideFrame>
   );
 }
