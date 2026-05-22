@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { db } from "@/firebase";
 import { useAuth } from "@/auth";
-import { downloadProjectBlobAsFile } from "@/projectAuth";
+import { downloadProjectBlobAsFile, getProjectStorage } from "@/projectAuth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,8 +30,21 @@ interface Deck {
   concept?: string | null;
   status?: string;
   slide_count?: number;
+  aspect_ratio?: string;
   created_at?: string;
   updated_at?: string;
+}
+
+interface Region {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  fit?: string;
+  render_mode?: string;
+  image_blob_path?: string | null;
+  caption?: string | null;
 }
 
 interface DeckExport {
@@ -55,6 +68,8 @@ interface Slide {
   code?: string;
   render_mode?: string;
   figure_number?: number | null;
+  image_blob_path?: string | null;
+  regions?: Region[];
   status?: string;
 }
 
@@ -179,8 +194,8 @@ export function ProjectPresentations() {
       <p className="text-xs text-muted-foreground">
         {allDecks.length} deck{allDecks.length === 1 ? "" : "s"} across{" "}
         {Object.keys(decksByPaper).filter((s) => (decksByPaper[s]?.length ?? 0) > 0).length}{" "}
-        paper{papers.length === 1 ? "" : "s"}. Rendering (slide PNGs +
-        .pptx export) is Phase 3 — for now decks are content-only.
+        paper{papers.length === 1 ? "" : "s"}. Expand a slide to preview it,
+        comment on it, or reorder it.
       </p>
       {allDecks.map((d) => (
         <DeckCard
@@ -373,6 +388,7 @@ function DeckCard({ pid, deck, open, onToggle }: {
                   pid={pid}
                   paperSlug={deck.paperSlug}
                   deckId={deck.id}
+                  aspectRatio={deck.aspect_ratio || "16:9"}
                   canMoveUp={i > 0}
                   canMoveDown={i < slides.length - 1}
                   onMoveUp={() => moveSlide(i, -1)}
@@ -388,12 +404,14 @@ function DeckCard({ pid, deck, open, onToggle }: {
 }
 
 function SlideRow({
-  slide, pid, paperSlug, deckId, canMoveUp, canMoveDown, onMoveUp, onMoveDown,
+  slide, pid, paperSlug, deckId, aspectRatio,
+  canMoveUp, canMoveDown, onMoveUp, onMoveDown,
 }: {
   slide: Slide;
   pid: string;
   paperSlug: string;
   deckId: string;
+  aspectRatio: string;
   canMoveUp: boolean;
   canMoveDown: boolean;
   onMoveUp: () => void;
@@ -520,6 +538,7 @@ function SlideRow({
       </div>
       {expanded && (
         <div className="mt-2 space-y-2 text-xs">
+          <SlidePreview pid={pid} slide={slide} aspectRatio={aspectRatio} />
           {slide.body && (
             <div>
               <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">Body</div>
@@ -635,6 +654,150 @@ function SlideRow({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+
+// ─── slide preview ──────────────────────────────────────────────────────────
+
+function arCss(aspectRatio: string): string {
+  if (aspectRatio === "4:3") return "4 / 3";
+  if (aspectRatio === "16:10") return "16 / 10";
+  return "16 / 9";
+}
+
+/** Strip common markdown markers for a compact text-slide preview. */
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*|__/g, "")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*]\s+/gm, "•  ")
+    .replace(/`/g, "");
+}
+
+function StorageImg({ pid, blobPath, className, alt }: {
+  pid: string; blobPath: string; className?: string; alt?: string;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { getDownloadURL, ref } = await import("firebase/storage");
+        const storage = await getProjectStorage(pid);
+        const u = await getDownloadURL(ref(storage, blobPath));
+        if (!cancelled) setUrl(u);
+      } catch {
+        if (!cancelled) setErr(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [pid, blobPath]);
+  if (err) {
+    return (
+      <div className="flex h-full w-full items-center justify-center text-[9px] text-destructive">
+        image unavailable
+      </div>
+    );
+  }
+  if (!url) {
+    return (
+      <div className="flex h-full w-full items-center justify-center text-[9px] text-muted-foreground">
+        loading…
+      </div>
+    );
+  }
+  return <img src={url} alt={alt} className={className} />;
+}
+
+/** A visual of the slide, so a reviewer can comment against what they see.
+ *  Rendered image slides show their PNG; hybrid slides show each region in
+ *  its box; text (and not-yet-rendered) slides show a content card. */
+function SlidePreview({ pid, slide, aspectRatio }: {
+  pid: string; slide: Slide; aspectRatio: string;
+}) {
+  const ar = arCss(aspectRatio);
+  const mode = slide.render_mode || "code-shape";
+
+  if (mode === "hybrid") {
+    const regions = slide.regions || [];
+    return (
+      <div
+        className="relative overflow-hidden rounded-md border bg-muted/20"
+        style={{ aspectRatio: ar }}
+      >
+        {regions.length === 0 && (
+          <div className="flex h-full items-center justify-center text-[10px] text-muted-foreground">
+            no regions defined
+          </div>
+        )}
+        {regions.map((r) => (
+          <div
+            key={r.id}
+            className="absolute overflow-hidden"
+            style={{
+              left: `${r.x * 100}%`, top: `${r.y * 100}%`,
+              width: `${r.w * 100}%`, height: `${r.h * 100}%`,
+            }}
+          >
+            {r.image_blob_path ? (
+              <StorageImg
+                pid={pid} blobPath={r.image_blob_path} alt={r.id}
+                className={cn(
+                  "h-full w-full",
+                  r.fit === "cover" ? "object-cover" : "object-contain",
+                )}
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center rounded border border-dashed text-[9px] text-muted-foreground">
+                {r.id} · {r.render_mode}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (slide.image_blob_path) {
+    return (
+      <div
+        className="overflow-hidden rounded-md border bg-muted/20"
+        style={{ aspectRatio: ar }}
+      >
+        <StorageImg
+          pid={pid} blobPath={slide.image_blob_path} alt={slide.title}
+          className="h-full w-full object-contain"
+        />
+      </div>
+    );
+  }
+
+  // text slide, or a slide not yet rendered — a content card approximating
+  // the native text slide. Not pixel-perfect; enough to comment against.
+  return (
+    <div
+      className="flex flex-col overflow-hidden rounded-md border bg-card"
+      style={{ aspectRatio: ar }}
+    >
+      <div className="h-1.5 w-full shrink-0 bg-primary" />
+      <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden p-3">
+        <div className="text-sm font-bold leading-tight">
+          {slide.title || <span className="text-muted-foreground">untitled</span>}
+        </div>
+        {slide.body && (
+          <div className="whitespace-pre-wrap text-[10px] leading-snug text-muted-foreground">
+            {stripMarkdown(slide.body)}
+          </div>
+        )}
+        {mode !== "text" && (
+          <div className="text-[9px] italic text-amber-600">
+            not rendered yet — preview shows the slide content
+          </div>
+        )}
+      </div>
     </div>
   );
 }
