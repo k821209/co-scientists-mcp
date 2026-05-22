@@ -453,3 +453,97 @@ def test_export_cover_region_crops(state, tmp_path, monkeypatch):
     pic = next(sh for sh in prs.slides[0].shapes
                if sh.shape_type == MSO_SHAPE_TYPE.PICTURE)
     assert pic.crop_left > 0   # cover cropped the overflowing edges
+
+
+# ─── export typography: title layout, markdown, fonts ────────
+
+
+def test_font_family_strips_weight_words():
+    assert deck_render._font_family("Inter Bold") == "Inter"
+    assert deck_render._font_family("Source Serif Pro Regular") == "Source Serif Pro"
+    assert deck_render._font_family("Inter") == "Inter"
+    assert deck_render._font_family(None) is None
+    assert deck_render._font_family("   ") is None
+
+
+def test_theme_fonts_from_concept():
+    concept = ("Typography:\n  display: Inter Bold   "
+               "body: Source Serif Regular   mono: JetBrains Mono")
+    f = deck_render._theme_fonts(concept)
+    assert f["display"] == "Inter"
+    assert f["body"] == "Source Serif"
+    assert f["mono"] == "JetBrains Mono"
+
+
+def test_theme_fonts_default_none():
+    assert deck_render._theme_fonts(None) == {
+        "display": None, "body": None, "mono": None,
+    }
+
+
+def test_inline_segments_parses_markdown():
+    segs = deck_render._inline_segments("a **b** c *d* `e`")
+    assert ("b", "bold") in segs
+    assert ("d", "italic") in segs
+    assert ("e", "mono") in segs
+
+
+def test_export_title_slide_is_centered(state, tmp_path, monkeypatch):
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    from pptx.enum.text import PP_ALIGN
+
+    slug = _setup(state)
+    decks.add_slide(state, slug, "d", slide_number=1, role="title",
+                    title="My Big Talk", body="A subtitle line",
+                    notes="n", render_mode="text")
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    prs = Presentation(str(out))
+    tb = next(sh for sh in prs.slides[0].shapes if sh.has_text_frame)
+    # cover layout: the title paragraph is centered, not top-anchored
+    assert tb.text_frame.paragraphs[0].alignment == PP_ALIGN.CENTER
+    assert "My Big Talk" in tb.text_frame.text
+
+
+def test_export_renders_markdown_bold(state, tmp_path, monkeypatch):
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+
+    slug = _setup(state)
+    decks.add_slide(state, slug, "d", slide_number=1, role="background",
+                    title="Background", body="plain and **strong** words",
+                    notes="n", render_mode="text")
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    prs = Presentation(str(out))
+    runs = [r for sh in prs.slides[0].shapes if sh.has_text_frame
+            for para in sh.text_frame.paragraphs for r in para.runs]
+    strong = [r for r in runs if r.text == "strong"]
+    assert strong and strong[0].font.bold is True
+    # the literal ** markers must not survive into the text
+    assert "**" not in "".join(r.text for r in runs)
+
+
+def test_export_applies_concept_fonts(state, tmp_path, monkeypatch):
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+
+    slug = _setup(state)
+    decks.update_deck(
+        state, slug, "d",
+        concept="Typography:\n  display: Inter Bold   body: Lora Regular",
+    )
+    decks.add_slide(state, slug, "d", slide_number=1, role="background",
+                    title="Heading", body="some body text",
+                    notes="n", render_mode="text")
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    prs = Presentation(str(out))
+    names = {r.font.name for sh in prs.slides[0].shapes if sh.has_text_frame
+             for para in sh.text_frame.paragraphs for r in para.runs}
+    assert "Inter" in names   # display font on the title
+    assert "Lora" in names    # body font on the body text

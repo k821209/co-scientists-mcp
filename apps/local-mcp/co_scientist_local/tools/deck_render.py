@@ -481,7 +481,131 @@ def _place_picture(slide, img_path: str, *, left, top, box_w, box_h,
         pic.top = int(top + (box_h - pic.height) / 2)
 
 
-def _add_slide_frame(slide, row, *, sw, sh, accent, fg, bg,
+# Typography defaults for native text. Generous line + paragraph spacing
+# so bullets don't run together (the python-pptx default is cramped).
+_BODY_PT = 20
+_HEAD_PT = 24
+_LINE_SPACING = 1.18
+
+_WEIGHT_WORDS = {
+    "thin", "extralight", "ultralight", "light", "regular", "book", "normal",
+    "medium", "semibold", "demibold", "bold", "extrabold", "ultrabold",
+    "black", "heavy", "italic", "oblique",
+}
+
+
+def _font_family(value: str | None) -> str | None:
+    """'Inter Bold' → 'Inter' — drop trailing weight/style words so the
+    name is a font *family* PowerPoint can resolve."""
+    if not value or not value.strip():
+        return None
+    words = value.strip().split()
+    while len(words) > 1 and words[-1].lower() in _WEIGHT_WORDS:
+        words.pop()
+    return " ".join(words) or None
+
+
+def _theme_fonts(concept: str | None) -> dict[str, str | None]:
+    """Display / body / mono font families from the concept's Typography
+    block. None when unspecified — PowerPoint's default is then kept."""
+    kv = _parse_concept(concept)
+    body = _font_family(kv.get("body") or kv.get("body_font"))
+    display = _font_family(
+        kv.get("display") or kv.get("heading") or kv.get("title_font")
+    )
+    mono = _font_family(kv.get("mono") or kv.get("code_font"))
+    return {"display": display or body, "body": body or display, "mono": mono}
+
+
+# Inline markdown: **bold**, __bold__, *italic*, _italic_, `code`.
+_INLINE_RE = re.compile(
+    r"(\*\*.+?\*\*|__.+?__|\*[^*\n]+?\*|_[^_\n]+?_|`[^`\n]+?`)"
+)
+_HEADING_RE = re.compile(r"^\s*#{1,6}\s+(.*\S)\s*$")
+_BULLET_RE = re.compile(r"^(\s*)[-*]\s+(.*\S)\s*$")
+_NUM_RE = re.compile(r"^(\s*)(\d+)[.)]\s+(.*\S)\s*$")
+
+
+def _inline_segments(text: str) -> list[tuple[str, str]]:
+    """Split a line into (text, style) — style ∈ plain/bold/italic/mono."""
+    segs: list[tuple[str, str]] = []
+    for tok in _INLINE_RE.split(text):
+        if not tok:
+            continue
+        if ((tok.startswith("**") and tok.endswith("**"))
+                or (tok.startswith("__") and tok.endswith("__"))):
+            segs.append((tok[2:-2], "bold"))
+        elif tok.startswith("`") and tok.endswith("`"):
+            segs.append((tok[1:-1], "mono"))
+        elif ((tok.startswith("*") and tok.endswith("*"))
+              or (tok.startswith("_") and tok.endswith("_"))):
+            segs.append((tok[1:-1], "italic"))
+        else:
+            segs.append((tok, "plain"))
+    return segs
+
+
+def _emit_paragraph(p, text, *, size, fg, fonts, Pt, bold=False, prefix="",
+                    line_spacing=_LINE_SPACING, space_before=0,
+                    space_after=6) -> None:
+    """Fill paragraph `p` with `text` (inline markdown parsed into runs)
+    and set its line / paragraph spacing."""
+    p.line_spacing = line_spacing
+    if space_before:
+        p.space_before = Pt(space_before)
+    p.space_after = Pt(space_after)
+    if prefix:
+        run = p.add_run()
+        run.text = prefix
+        run.font.size = Pt(size)
+        run.font.bold = bold
+        run.font.color.rgb = fg
+        if fonts.get("body"):
+            run.font.name = fonts["body"]
+    for chunk, style in _inline_segments(text):
+        run = p.add_run()
+        run.text = chunk
+        run.font.size = Pt(size)
+        run.font.bold = bold or style == "bold"
+        run.font.italic = style == "italic"
+        run.font.color.rgb = fg
+        name = fonts.get("mono") if style == "mono" else fonts.get("body")
+        if name:
+            run.font.name = name
+
+
+def _render_markdown_into(tf, body, *, fg, fonts, Pt) -> None:
+    """Render a slide body's markdown into text frame `tf` — headings,
+    bullet / numbered lists, inline **bold** / *italic* / `code`."""
+    tf.word_wrap = True
+    first = True
+    for raw in body.splitlines():
+        if not raw.strip():
+            continue
+        p = tf.paragraphs[0] if first else tf.add_paragraph()
+        first = False
+        m = _HEADING_RE.match(raw)
+        if m:
+            _emit_paragraph(p, m.group(1), size=_HEAD_PT, fg=fg, fonts=fonts,
+                            Pt=Pt, bold=True, space_before=10, space_after=4)
+            continue
+        m = _BULLET_RE.match(raw)
+        if m:
+            depth = min(len(m.group(1)) // 2, 3)
+            _emit_paragraph(p, m.group(2), size=_BODY_PT, fg=fg, fonts=fonts,
+                            Pt=Pt, prefix="   " * depth + "•  ", space_after=5)
+            continue
+        m = _NUM_RE.match(raw)
+        if m:
+            depth = min(len(m.group(1)) // 2, 3)
+            _emit_paragraph(p, m.group(3), size=_BODY_PT, fg=fg, fonts=fonts,
+                            Pt=Pt, prefix="   " * depth + m.group(2) + ".  ",
+                            space_after=5)
+            continue
+        _emit_paragraph(p, raw.strip(), size=_BODY_PT, fg=fg, fonts=fonts, Pt=Pt)
+
+
+def _add_slide_frame(slide, row, *, sw, sh, accent, fg, bg, fonts,
                      Inches, Pt, MSO_SHAPE) -> None:
     """Themed background + accent stripe + native title — the shared shell
     of native text slides and hybrid (multi-region) slides."""
@@ -501,45 +625,86 @@ def _add_slide_frame(slide, row, *, sw, sh, accent, fg, bg,
     )
     tf = title_box.text_frame
     tf.word_wrap = True
-    tf.text = row.get("title") or ""
-    for run in tf.paragraphs[0].runs:
-        run.font.size = Pt(32)
-        run.font.bold = True
-        run.font.color.rgb = fg
+    p = tf.paragraphs[0]
+    p.line_spacing = 1.05
+    run = p.add_run()
+    run.text = row.get("title") or ""
+    run.font.size = Pt(32)
+    run.font.bold = True
+    run.font.color.rgb = fg
+    if fonts.get("display"):
+        run.font.name = fonts["display"]
 
 
-def _add_text_slide(slide, row, *, sw, sh, accent, fg, bg,
+def _add_text_slide(slide, row, *, sw, sh, accent, fg, bg, fonts,
                     Inches, Pt, MSO_SHAPE) -> None:
-    """A native (editable) title + bullet layout, palette-themed."""
+    """A native (editable) title + markdown body, palette-themed."""
     _add_slide_frame(slide, row, sw=sw, sh=sh, accent=accent, fg=fg, bg=bg,
-                     Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE)
+                     fonts=fonts, Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE)
     body = (row.get("body") or "").strip()
     if body:
         body_box = slide.shapes.add_textbox(
-            Inches(0.6), Inches(1.7), sw - Inches(1.2), sh - Inches(2.3),
+            Inches(0.7), Inches(1.7), sw - Inches(1.4), sh - Inches(2.3),
         )
-        bf = body_box.text_frame
-        bf.word_wrap = True
-        first = True
-        for raw in body.splitlines():
-            line = raw.strip().lstrip("-*•#> ").strip()
-            if not line:
-                continue
-            para = bf.paragraphs[0] if first else bf.add_paragraph()
-            first = False
-            para.text = "•  " + line
-            for run in para.runs:
-                run.font.size = Pt(20)
-                run.font.color.rgb = fg
+        _render_markdown_into(body_box.text_frame, body, fg=fg, fonts=fonts,
+                              Pt=Pt)
+
+
+def _add_title_slide(slide, row, *, sw, sh, accent, fg, bg, fonts,
+                     Inches, Pt, MSO_SHAPE, PP_ALIGN, MSO_ANCHOR) -> None:
+    """A cover layout for role='title' slides — the title large and
+    centered (vertically + horizontally), the body as a centered
+    subtitle. Distinct from the top-anchored content-slide frame."""
+    try:
+        slide.background.fill.solid()
+        slide.background.fill.fore_color.rgb = bg
+    except Exception:
+        pass
+    box = slide.shapes.add_textbox(
+        Inches(1.0), Inches(0.5), sw - Inches(2.0), sh - Inches(1.0),
+    )
+    tf = box.text_frame
+    tf.word_wrap = True
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+
+    p = tf.paragraphs[0]
+    p.alignment = PP_ALIGN.CENTER
+    p.line_spacing = 1.08
+    run = p.add_run()
+    run.text = row.get("title") or ""
+    run.font.size = Pt(46)
+    run.font.bold = True
+    run.font.color.rgb = fg
+    if fonts.get("display"):
+        run.font.name = fonts["display"]
+
+    body = (row.get("body") or "").strip()
+    first_sub = True
+    for raw in body.splitlines():
+        line = raw.strip().lstrip("#-*•> ").strip()
+        if not line:
+            continue
+        sp = tf.add_paragraph()
+        sp.alignment = PP_ALIGN.CENTER
+        sp.line_spacing = 1.2
+        if first_sub:
+            sp.space_before = Pt(18)
+            first_sub = False
+        run = sp.add_run()
+        run.text = line
+        run.font.size = Pt(22)
+        run.font.color.rgb = fg
+        if fonts.get("body"):
+            run.font.name = fonts["body"]
 
 
 def _add_hybrid_slide(slide, row, state, tmpd, *, sw, sh, accent, fg, bg,
-                      Inches, Pt, MSO_SHAPE) -> int:
+                      fonts, Inches, Pt, MSO_SHAPE) -> int:
     """A themed title frame + each region placed as its own picture (or a
     placeholder box if unrendered). Returns the count of unrendered regions.
     Region x/y/w/h are fractions of the slide."""
     _add_slide_frame(slide, row, sw=sw, sh=sh, accent=accent, fg=fg, bg=bg,
-                     Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE)
+                     fonts=fonts, Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE)
     unrendered = 0
     for r in row.get("regions") or []:
         left = int(r["x"] * sw)
@@ -570,10 +735,12 @@ def _add_hybrid_slide(slide, row, state, tmpd, *, sw, sh, accent, fg, bg,
             cap = slide.shapes.add_textbox(left, top + img_h, box_w, cap_h)
             cf = cap.text_frame
             cf.word_wrap = True
-            cf.text = caption
-            for run in cf.paragraphs[0].runs:
-                run.font.size = Pt(12)
-                run.font.color.rgb = fg
+            run = cf.paragraphs[0].add_run()
+            run.text = caption
+            run.font.size = Pt(12)
+            run.font.color.rgb = fg
+            if fonts.get("body"):
+                run.font.name = fonts["body"]
     return unrendered
 
 
@@ -618,9 +785,10 @@ def export_deck_to_pptx(
     The slide size follows the deck's `aspect_ratio`.
     """
     try:
-        from pptx import Presentation              # type: ignore
-        from pptx.util import Inches, Pt           # type: ignore
-        from pptx.enum.shapes import MSO_SHAPE     # type: ignore
+        from pptx import Presentation                       # type: ignore
+        from pptx.util import Inches, Pt                    # type: ignore
+        from pptx.enum.shapes import MSO_SHAPE              # type: ignore
+        from pptx.enum.text import PP_ALIGN, MSO_ANCHOR    # type: ignore
     except ImportError as e:
         raise RuntimeError(
             "python-pptx not installed — reinstall the package: "
@@ -638,6 +806,7 @@ def export_deck_to_pptx(
     accent = _hex_to_rgb(colors["accent"], "#2E7D32")
     fg = _hex_to_rgb(colors["foreground"], "#1A1A1A")
     bg = _hex_to_rgb(colors["background"], "#FFFFFF")
+    fonts = _theme_fonts(deck.get("concept"))
 
     prs = Presentation()
     sw, sh = Inches(w_in), Inches(h_in)
@@ -655,7 +824,7 @@ def export_deck_to_pptx(
             if mode == "hybrid":
                 n_missing = _add_hybrid_slide(
                     slide, s, state, tmpd, sw=sw, sh=sh,
-                    accent=accent, fg=fg, bg=bg,
+                    accent=accent, fg=fg, bg=bg, fonts=fonts,
                     Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE,
                 )
                 hybrid_slides += 1
@@ -674,12 +843,23 @@ def export_deck_to_pptx(
                     _place_picture(slide, str(tmp),
                                    left=0, top=0, box_w=sw, box_h=sh)
                     image_slides += 1
+                elif (s.get("role") or "") == "title":
+                    # Cover slide — centered hero layout, not the
+                    # top-anchored content frame.
+                    _add_title_slide(
+                        slide, s, sw=sw, sh=sh, accent=accent, fg=fg, bg=bg,
+                        fonts=fonts, Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE,
+                        PP_ALIGN=PP_ALIGN, MSO_ANCHOR=MSO_ANCHOR,
+                    )
+                    text_slides += 1
+                    if mode != "text":
+                        missing_renders.append(s.get("slide_number") or 0)
                 else:
                     # Native editable text slide — a `text` slide by design,
                     # or a not-yet-rendered slide degraded gracefully.
                     _add_text_slide(
                         slide, s, sw=sw, sh=sh, accent=accent, fg=fg, bg=bg,
-                        Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE,
+                        fonts=fonts, Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE,
                     )
                     text_slides += 1
                     if mode != "text":
