@@ -138,7 +138,9 @@ For each slide, decide the **render_mode**:
 - `code-shape` — KPI table, Gantt, org chart, schematic with structured data
 - `paper-figure` — re-use a figure from the manuscript (set `figure_number`)
 - `ai-image` — eyecatch (cover, closing), abstract concept
-- `hybrid` — diagram + numeric table overlay
+- `hybrid` — **several images on one slide** (e.g. a generated schematic
+  + a data plot + a manuscript figure). Don't set this via `add_slide`
+  — build it with `set_slide_regions` (see "Multi-image slides" below).
 
 ### 5. Add slides one by one
 
@@ -170,6 +172,39 @@ header using placeholders. Example:
 
 Never hardcode `"navy blue"` or `"Inter"` — write `{accent}` /
 `{display_font}` so theme switching is a no-op rebuild.
+
+### 5b. Multi-image slides (regions)
+
+When ONE slide needs several images of mixed types — say a generated
+schematic next to a data plot next to a manuscript figure — add the
+slide normally, then define its **regions**:
+
+```
+mcp__co_scientist__set_slide_regions(
+  slug, deck_id, slide_id,
+  regions=[
+    { "render_mode": "paper-figure", "figure_number": 2,
+      "x": 0.05, "y": 0.22, "w": 0.42, "h": 0.62,
+      "caption": "Fig 2 — measured response" },
+    { "render_mode": "ai-image", "prompt": "{accent} pathway schematic …",
+      "x": 0.52, "y": 0.22, "w": 0.43, "h": 0.62,
+      "caption": "Proposed mechanism" },
+  ],
+)
+```
+
+- This forces the slide to `render_mode="hybrid"`. Regions get ids
+  `r1..rN` in order.
+- `x/y/w/h` are **fractions of the slide** (0–1) — keep `y ≥ ~0.2` so
+  regions clear the title. Useful layouts:
+  - **2-up**: `r1` x=0.05 w=0.42, `r2` x=0.52 w=0.43 (both y=0.22 h=0.62)
+  - **big-left + 2 stacked right**: `r1` x=0.05 y=0.22 w=0.55 h=0.62;
+    `r2` x=0.64 y=0.22 w=0.31 h=0.29; `r3` x=0.64 y=0.55 w=0.31 h=0.29
+  - **2×2**: four 0.42×0.34 boxes at x∈{0.05,0.52}, y∈{0.22,0.60}
+- Each region has its own `render_mode` (`ai-image` / `code-shape` /
+  `paper-figure`) and source. A region can't itself be `hybrid`/`text`.
+- At export each region becomes a **separate, individually editable
+  PPTX picture** — the user can nudge them in PowerPoint.
 
 ### 6. Renumber once at the end
 
@@ -233,11 +268,13 @@ This walks every slide and:
 - `paper-figure` → copies the existing figure blob into a slide image
 - `ai-image`     → substitutes `{accent}` etc. from `deck.concept`,
                    calls `generate_image`
-- `code-shape` / `hybrid` → returned in `skipped[]` because the MCP
-                   can't safely exec arbitrary Python. You're expected
-                   to run the slide's `code` block yourself locally
-                   (matplotlib/seaborn/etc. into a PNG), then pass
-                   that path back:
+- `hybrid`       → renders every region it can (`paper-figure` /
+                   `ai-image` regions); `code-shape` regions land in
+                   `skipped[]` for you to do via `render_region`.
+- `code-shape`   → returned in `skipped[]` because the MCP can't safely
+                   exec arbitrary Python. Run the slide's `code` block
+                   yourself locally (matplotlib/seaborn/etc. into a
+                   PNG), then pass that path back:
 
 ```
 mcp__co_scientist__render_slide(
@@ -245,6 +282,19 @@ mcp__co_scientist__render_slide(
   local_path="/abs/path/to/slide-3.png",
 )
 ```
+
+For a **hybrid** slide's `code-shape` region, render that one region:
+
+```
+mcp__co_scientist__render_region(
+  slug, deck_id, slide_id, region_id,   # e.g. region_id="r2"
+  local_path="/abs/path/to/region.png",
+)
+```
+
+`paper-figure` / `ai-image` regions need no `local_path` — the MCP
+renders them (an ai-image region's aspect ratio is matched to its
+box). A hybrid slide is "done" when every region has an image.
 
 Once every non-`text` slide has an `image_blob_path`, the deck's
 `status` flips to `"rendered"`. To export from Claude Code:
@@ -258,6 +308,9 @@ mcp__co_scientist__export_deck_to_pptx(
 
 Export behavior:
 - **Image slides** embed the rendered PNG, aspect-fitted and centered.
+- **`hybrid` slides** get a themed title frame plus each region placed
+  as its own separately-editable PPTX picture at its `x/y/w/h` box,
+  with an optional caption.
 - **`text` slides** (and any slide still missing a render) become
   NATIVE editable text — title + bullets — themed from the concept's
   `accent` / `bg` / `text` colors. Not a picture: the user can edit
@@ -269,7 +322,7 @@ Export behavior:
 
 Returns `{ local_path, blob_path, pdf_local_path, pdf_blob_path,
 pdf_skipped, aspect_ratio, slide_count, image_slides, text_slides,
-missing_renders }`. `missing_renders[]` is the non-text slides that
+hybrid_slides, missing_renders }`. `missing_renders[]` is the non-text slides that
 came out as text fallbacks because they weren't rendered yet — render
 those and re-export. If `pdf_skipped` is true, tell the user to
 install LibreOffice if they want the PDF.

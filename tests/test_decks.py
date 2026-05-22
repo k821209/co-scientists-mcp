@@ -52,6 +52,80 @@ def test_slide_accepts_text_render_mode(state):
     assert s["render_mode"] == "text"
 
 
+# ─── set_slide_regions (multi-image slides) ──────────────────
+
+def _region_slide(state):
+    slug = _setup(state)
+    decks.create_deck(state, slug, title="d", deck_id="d")
+    s = decks.add_slide(state, slug, "d", slide_number=1, role="result", title="R")
+    return slug, s["id"]
+
+
+def test_set_slide_regions_makes_hybrid(state):
+    slug, sid = _region_slide(state)
+    upd = decks.set_slide_regions(state, slug, "d", sid, regions=[
+        {"render_mode": "paper-figure", "figure_number": 1,
+         "x": 0.05, "y": 0.2, "w": 0.42, "h": 0.6},
+        {"render_mode": "ai-image", "prompt": "a schematic",
+         "x": 0.52, "y": 0.2, "w": 0.42, "h": 0.6, "caption": "concept"},
+    ])
+    assert upd["render_mode"] == "hybrid"
+    assert [r["id"] for r in upd["regions"]] == ["r1", "r2"]
+    assert upd["regions"][1]["caption"] == "concept"
+    assert upd["regions"][0]["image_blob_path"] is None
+
+
+def test_set_slide_regions_rejects_empty(state):
+    slug, sid = _region_slide(state)
+    with pytest.raises(ValueError, match="non-empty"):
+        decks.set_slide_regions(state, slug, "d", sid, regions=[])
+
+
+def test_set_slide_regions_rejects_nested_mode(state):
+    slug, sid = _region_slide(state)
+    with pytest.raises(ValueError, match="render_mode"):
+        decks.set_slide_regions(state, slug, "d", sid, regions=[
+            {"render_mode": "hybrid", "x": 0, "y": 0, "w": 1, "h": 1},
+        ])
+
+
+def test_set_slide_regions_rejects_out_of_bounds(state):
+    slug, sid = _region_slide(state)
+    with pytest.raises(ValueError, match="past the slide edge"):
+        decks.set_slide_regions(state, slug, "d", sid, regions=[
+            {"render_mode": "ai-image", "prompt": "x",
+             "x": 0.7, "y": 0.2, "w": 0.5, "h": 0.5},
+        ])
+
+
+def test_set_slide_regions_requires_type_source(state):
+    slug, sid = _region_slide(state)
+    with pytest.raises(ValueError, match="figure_number"):
+        decks.set_slide_regions(state, slug, "d", sid, regions=[
+            {"render_mode": "paper-figure",
+             "x": 0, "y": 0.2, "w": 0.5, "h": 0.5},
+        ])
+
+
+def test_set_slide_regions_keeps_render_on_unchanged_source(state):
+    slug, sid = _region_slide(state)
+    decks.set_slide_regions(state, slug, "d", sid, regions=[
+        {"render_mode": "ai-image", "prompt": "keep me",
+         "x": 0.05, "y": 0.2, "w": 0.4, "h": 0.6},
+    ])
+    # simulate a render having happened
+    path = decks._slide_path(state, slug, "d", sid)
+    doc = state.backend.get_doc(path)
+    doc["regions"][0]["image_blob_path"] = "some/blob.png"
+    state.backend.set_doc(path, doc)
+    # re-layout the same region (moved box) — the render should survive
+    upd = decks.set_slide_regions(state, slug, "d", sid, regions=[
+        {"render_mode": "ai-image", "prompt": "keep me",
+         "x": 0.30, "y": 0.10, "w": 0.5, "h": 0.7},
+    ])
+    assert upd["regions"][0]["image_blob_path"] == "some/blob.png"
+
+
 def test_create_deck_idempotent(state):
     slug = _setup(state)
     a = decks.create_deck(state, slug, title="Seminar", deck_id="d1")

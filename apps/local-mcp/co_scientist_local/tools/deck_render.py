@@ -97,11 +97,60 @@ def resolve_placeholders(text: str, concept: str | None) -> str:
 
 # ─── slide rendering ────────────────────────────────────────────────────────
 
+# Deck aspect ratio → (width_in, height_in) for the PPTX page.
+_ASPECT_TO_SIZE = {
+    "16:9": (13.333, 7.5),
+    "16:10": (12.0, 7.5),
+    "4:3": (10.0, 7.5),
+}
+
+# Standard aspect ratios an image generator accepts — used to match a
+# region's box shape (the original co-scientist's todo 052: pass the
+# region aspect to the generator, not the deck aspect).
+_STD_ASPECTS = {"1:1": 1.0, "4:3": 4 / 3, "3:4": 3 / 4, "16:9": 16 / 9, "9:16": 9 / 16}
+
+
+def _nearest_aspect(width: float, height: float) -> str:
+    """Pick the standard aspect-ratio string closest to width:height."""
+    if height <= 0:
+        return "1:1"
+    ratio = width / height
+    return min(_STD_ASPECTS, key=lambda k: abs(_STD_ASPECTS[k] - ratio))
+
+
+def _deck_aspect_size(deck: dict) -> tuple[float, float]:
+    """The deck's slide dimensions in inches."""
+    return _ASPECT_TO_SIZE.get(
+        deck.get("aspect_ratio") or "16:9", _ASPECT_TO_SIZE["16:9"],
+    )
+
 
 def _slide_blob_path(state: State, slug: str, deck_id: str, slide_number: int) -> str:
     return state.project_path(
         "papers", slug, "decks", deck_id, "slides", f"{slide_number:04d}.png",
     )
+
+
+def _region_blob_path(
+    state: State, slug: str, deck_id: str, slide_number: int, region_id: str,
+) -> str:
+    return state.project_path(
+        "papers", slug, "decks", deck_id, "slides",
+        f"{slide_number:04d}", "regions", f"{region_id}.png",
+    )
+
+
+def _figure_png(state: State, slug: str, figure_number) -> bytes:
+    """Fetch a paper figure's image bytes, or raise NotFound."""
+    fig = _figures.get_figure(state, slug, int(figure_number))
+    if not fig or not fig.get("blob_path"):
+        raise NotFound(
+            f"figure {figure_number!r} has no blob_path on paper {slug!r}"
+        )
+    blob = state.backend.get_blob(fig["blob_path"])
+    if blob is None:
+        raise NotFound(f"figure {figure_number!r} blob is empty")
+    return blob
 
 
 def render_slide(
@@ -112,12 +161,14 @@ def render_slide(
     *,
     local_path: str | None = None,
 ) -> dict:
-    """Materialize a slide's image and upload to Storage.
+    """Materialize a slide's image(s) and upload to Storage.
 
-    For paper-figure / ai-image modes, the MCP does the work. For
-    code-shape / hybrid, the caller (agent) must supply `local_path`
-    pointing at a PNG produced locally — running arbitrary Python in
-    the MCP would be unsafe.
+    paper-figure / ai-image : the MCP renders it.
+    code-shape              : the agent supplies `local_path` (a PNG it
+                              produced locally — the MCP won't exec code).
+    hybrid                  : renders every region it can; returns a
+                              per-region summary (see render_region).
+    text                    : nothing to render — native text at export.
     """
     deck = _decks.get_deck(state, slug, deck_id)
     slide = state.backend.get_doc(_decks._slide_path(state, slug, deck_id, slide_id))
@@ -126,34 +177,30 @@ def render_slide(
     mode = slide.get("render_mode", "code-shape")
     slide_number = slide.get("slide_number") or 0
 
-    png: bytes
     if mode == "text":
         raise ValueError(
             "text slides carry no image — they render as native PPTX "
             "text on export; nothing to render here"
         )
+    if mode == "hybrid":
+        return _render_hybrid_slide(state, slug, deck_id, slide, deck)
+
+    png: bytes
     if mode == "paper-figure":
         fig_num = slide.get("figure_number")
         if fig_num is None:
             raise ValueError("paper-figure slide has no figure_number")
-        fig = _figures.get_figure(state, slug, int(fig_num))
-        if not fig or not fig.get("blob_path"):
-            raise NotFound(f"figure {fig_num!r} has no blob_path on paper {slug!r}")
-        blob = state.backend.get_blob(fig["blob_path"])
-        if blob is None:
-            raise NotFound(f"figure {fig_num!r} blob is empty at {fig['blob_path']!r}")
-        png = blob
+        png = _figure_png(state, slug, fig_num)
     elif mode == "ai-image":
         prompt = resolve_placeholders(slide.get("prompt") or "", deck.get("concept"))
         if not prompt.strip():
             raise ValueError("ai-image slide has no prompt")
-        gen = state.require_image_gen()
-        png = gen.generate(prompt=prompt, aspect_ratio="16:9")
-    elif mode in ("code-shape", "hybrid"):
+        png = state.require_image_gen().generate(prompt=prompt, aspect_ratio="16:9")
+    elif mode == "code-shape":
         if not local_path:
             raise ValueError(
-                f"{mode} slide requires local_path — produce the PNG yourself "
-                "(matplotlib, python-pptx shapes, etc.) and pass it in."
+                "code-shape slide requires local_path — produce the PNG "
+                "yourself (matplotlib, python-pptx shapes, etc.) and pass it in."
             )
         png = pathlib.Path(local_path).expanduser().read_bytes()
     else:
@@ -180,54 +227,189 @@ def render_slide(
     }
 
 
-def render_deck(state: State, slug: str, deck_id: str) -> dict:
-    """Render every slide that has enough info. Skips code-shape/hybrid
-    slides without a `local_path` queued — those are agent-side work."""
-    slides = _decks.list_slides(state, slug, deck_id)
-    results = {"rendered": [], "skipped": [], "errors": []}
-    for s in slides:
-        mode = s.get("render_mode") or "code-shape"
-        if mode == "text":
-            results["skipped"].append({
-                "slide_id": s["id"], "slide_number": s.get("slide_number"),
-                "reason": "text slide — native PPTX text on export",
-            })
-            continue
-        if mode in ("code-shape", "hybrid"):
-            results["skipped"].append({
-                "slide_id": s["id"], "slide_number": s.get("slide_number"),
-                "reason": "needs local PNG from agent",
+# ─── hybrid (multi-region) slides ───────────────────────────────────────────
+
+
+def _update_region(
+    state: State, slug: str, deck_id: str, slide_id: str,
+    region_id: str, fields: dict,
+) -> None:
+    """Patch one region (matched by id) inside a slide's `regions` array."""
+    path = _decks._slide_path(state, slug, deck_id, slide_id)
+    slide = state.backend.get_doc(path)
+    regions = list(slide.get("regions") or [])
+    for r in regions:
+        if r.get("id") == region_id:
+            r.update(fields)
+            break
+    state.backend.update_doc(path, {"regions": regions, "updated_at": now_iso()})
+
+
+def _render_one_region(
+    state: State, slug: str, deck_id: str, slide: dict, deck: dict,
+    region: dict, *, local_path: str | None = None,
+) -> dict:
+    """Render a single region's image, store it, stamp the region doc."""
+    rmode = region.get("render_mode")
+    region_id = region.get("id")
+    slide_number = slide.get("slide_number") or 0
+
+    if rmode == "paper-figure":
+        if region.get("figure_number") is None:
+            raise ValueError(f"region {region_id}: paper-figure needs figure_number")
+        png = _figure_png(state, slug, region["figure_number"])
+    elif rmode == "ai-image":
+        prompt = resolve_placeholders(region.get("prompt") or "", deck.get("concept"))
+        if not prompt.strip():
+            raise ValueError(f"region {region_id}: ai-image needs a prompt")
+        w_in, h_in = _deck_aspect_size(deck)
+        aspect = _nearest_aspect(
+            (region.get("w") or 1.0) * w_in, (region.get("h") or 1.0) * h_in,
+        )
+        png = state.require_image_gen().generate(prompt=prompt, aspect_ratio=aspect)
+    elif rmode == "code-shape":
+        if not local_path:
+            raise ValueError(
+                f"region {region_id}: code-shape needs local_path — render the "
+                "PNG yourself and pass it to render_region."
+            )
+        png = pathlib.Path(local_path).expanduser().read_bytes()
+    else:
+        raise ValueError(f"region {region_id}: unknown render_mode {rmode!r}")
+
+    blob_path = _region_blob_path(state, slug, deck_id, slide_number, region_id)
+    state.backend.put_blob(blob_path, png)
+    _update_region(state, slug, deck_id, slide["id"], region_id, {
+        "image_blob_path": blob_path,
+        "rendered_at": now_iso(),
+    })
+    return {
+        "region_id": region_id,
+        "mode": rmode,
+        "blob_path": blob_path,
+        "size_bytes": len(png),
+    }
+
+
+def _render_hybrid_slide(
+    state: State, slug: str, deck_id: str, slide: dict, deck: dict,
+) -> dict:
+    """Render every auto-renderable region of a hybrid slide. code-shape
+    regions land in `skipped[]` for the agent to do via render_region."""
+    regions = slide.get("regions") or []
+    if not regions:
+        raise ValueError(
+            "hybrid slide has no regions — call set_slide_regions first"
+        )
+    rendered: list[dict] = []
+    skipped: list[dict] = []
+    errors: list[dict] = []
+    for r in regions:
+        tag = {
+            "slide_id": slide["id"], "slide_number": slide.get("slide_number"),
+            "region_id": r.get("id"),
+        }
+        if r.get("render_mode") == "code-shape":
+            skipped.append({
+                **tag,
+                "reason": "code-shape region — render_region with local_path",
             })
             continue
         try:
-            r = render_slide(state, slug, deck_id, s["id"])
-            results["rendered"].append(r)
+            rendered.append({**tag, **_render_one_region(
+                state, slug, deck_id, slide, deck, r,
+            )})
         except Exception as e:
-            results["errors"].append({
-                "slide_id": s["id"], "slide_number": s.get("slide_number"),
-                "error": str(e),
-            })
-    # Deck is "rendered" once every non-text slide has an image_blob_path —
-    # text slides never get one (they're native text at export time).
-    refreshed = _decks.list_slides(state, slug, deck_id)
-    all_rendered = all(
-        s.get("image_blob_path")
-        for s in refreshed
-        if (s.get("render_mode") or "code-shape") != "text"
+            errors.append({**tag, "error": str(e)})
+    return {
+        "slide_id": slide["id"],
+        "slide_number": slide.get("slide_number"),
+        "mode": "hybrid",
+        "rendered": rendered,
+        "skipped": skipped,
+        "errors": errors,
+    }
+
+
+def render_region(
+    state: State,
+    slug: str,
+    deck_id: str,
+    slide_id: str,
+    region_id: str,
+    *,
+    local_path: str | None = None,
+) -> dict:
+    """Render one region of a hybrid slide. paper-figure / ai-image are
+    done by the MCP; a code-shape region needs `local_path` — a PNG you
+    produced locally."""
+    slide = state.backend.get_doc(_decks._slide_path(state, slug, deck_id, slide_id))
+    if slide is None:
+        raise NotFound(f"slide not found: {slide_id!r}")
+    deck = _decks.get_deck(state, slug, deck_id)
+    region = next(
+        (r for r in (slide.get("regions") or []) if r.get("id") == region_id),
+        None,
     )
-    if all_rendered:
+    if region is None:
+        raise NotFound(f"region not found: {region_id!r} on slide {slide_id!r}")
+    return _render_one_region(
+        state, slug, deck_id, slide, deck, region, local_path=local_path,
+    )
+
+
+def _slide_is_rendered(s: dict) -> bool:
+    """A slide is 'done' when its image(s) exist: text → always; hybrid →
+    every region has an image; else → has image_blob_path."""
+    mode = s.get("render_mode") or "code-shape"
+    if mode == "text":
+        return True
+    if mode == "hybrid":
+        regions = s.get("regions") or []
+        return bool(regions) and all(r.get("image_blob_path") for r in regions)
+    return bool(s.get("image_blob_path"))
+
+
+def render_deck(state: State, slug: str, deck_id: str) -> dict:
+    """Render every slide we can do automatically. code-shape slides and
+    code-shape regions land in `skipped[]` for agent follow-up. When every
+    non-text slide (and every region) is rendered, deck.status → 'rendered'."""
+    slides = _decks.list_slides(state, slug, deck_id)
+    results: dict[str, list] = {"rendered": [], "skipped": [], "errors": []}
+    for s in slides:
+        mode = s.get("render_mode") or "code-shape"
+        tag = {"slide_id": s["id"], "slide_number": s.get("slide_number")}
+        if mode == "text":
+            results["skipped"].append({
+                **tag, "reason": "text slide — native PPTX text on export",
+            })
+            continue
+        if mode == "code-shape":
+            results["skipped"].append({
+                **tag, "reason": "needs local PNG from agent",
+            })
+            continue
+        if mode == "hybrid":
+            try:
+                hr = render_slide(state, slug, deck_id, s["id"])
+                results["rendered"].extend(hr["rendered"])
+                results["skipped"].extend(hr["skipped"])
+                results["errors"].extend(hr["errors"])
+            except Exception as e:
+                results["errors"].append({**tag, "error": str(e)})
+            continue
+        try:
+            results["rendered"].append(render_slide(state, slug, deck_id, s["id"]))
+        except Exception as e:
+            results["errors"].append({**tag, "error": str(e)})
+
+    refreshed = _decks.list_slides(state, slug, deck_id)
+    if all(_slide_is_rendered(s) for s in refreshed):
         _decks.update_deck(state, slug, deck_id, status="rendered")
     return results
 
 
 # ─── PPTX export ─────────────────────────────────────────────────────────────
-
-# Deck aspect ratio → (width_in, height_in) for the PPTX page.
-_ASPECT_TO_SIZE = {
-    "16:9": (13.333, 7.5),
-    "16:10": (12.0, 7.5),
-    "4:3": (10.0, 7.5),
-}
 
 
 def _theme_colors(concept: str | None) -> dict[str, str]:
@@ -254,19 +436,21 @@ def _hex_to_rgb(value: str, fallback: str):
         return RGBColor(int(fb[0:2], 16), int(fb[2:4], 16), int(fb[4:6], 16))
 
 
-def _add_fitted_picture(slide, img_path: str, sw, sh) -> None:
-    """Place an image scaled to fit the slide (aspect preserved), centered."""
-    pic = slide.shapes.add_picture(img_path, 0, 0)
-    scale = min(sw / pic.width, sh / pic.height)
+def _add_fitted_picture(slide, img_path: str, *, left, top, box_w, box_h) -> None:
+    """Place an image scaled to fit within (box_w × box_h), centered in the
+    box at (left, top). Aspect ratio preserved."""
+    pic = slide.shapes.add_picture(img_path, left, top)
+    scale = min(box_w / pic.width, box_h / pic.height)
     pic.width = int(pic.width * scale)
     pic.height = int(pic.height * scale)
-    pic.left = int((sw - pic.width) / 2)
-    pic.top = int((sh - pic.height) / 2)
+    pic.left = int(left + (box_w - pic.width) / 2)
+    pic.top = int(top + (box_h - pic.height) / 2)
 
 
-def _add_text_slide(slide, row, *, sw, sh, accent, fg, bg,
-                    Inches, Pt, MSO_SHAPE) -> None:
-    """Draw a native (editable) title + bullet layout, palette-themed."""
+def _add_slide_frame(slide, row, *, sw, sh, accent, fg, bg,
+                     Inches, Pt, MSO_SHAPE) -> None:
+    """Themed background + accent stripe + native title — the shared shell
+    of native text slides and hybrid (multi-region) slides."""
     try:
         slide.background.fill.solid()
         slide.background.fill.fore_color.rgb = bg
@@ -279,20 +463,26 @@ def _add_text_slide(slide, row, *, sw, sh, accent, fg, bg,
     stripe.shadow.inherit = False
 
     title_box = slide.shapes.add_textbox(
-        Inches(0.6), Inches(0.55), sw - Inches(1.2), Inches(1.1),
+        Inches(0.6), Inches(0.4), sw - Inches(1.2), Inches(0.95),
     )
     tf = title_box.text_frame
     tf.word_wrap = True
     tf.text = row.get("title") or ""
     for run in tf.paragraphs[0].runs:
-        run.font.size = Pt(34)
+        run.font.size = Pt(32)
         run.font.bold = True
         run.font.color.rgb = fg
 
+
+def _add_text_slide(slide, row, *, sw, sh, accent, fg, bg,
+                    Inches, Pt, MSO_SHAPE) -> None:
+    """A native (editable) title + bullet layout, palette-themed."""
+    _add_slide_frame(slide, row, sw=sw, sh=sh, accent=accent, fg=fg, bg=bg,
+                     Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE)
     body = (row.get("body") or "").strip()
     if body:
         body_box = slide.shapes.add_textbox(
-            Inches(0.6), Inches(1.9), sw - Inches(1.2), sh - Inches(2.5),
+            Inches(0.6), Inches(1.7), sw - Inches(1.2), sh - Inches(2.3),
         )
         bf = body_box.text_frame
         bf.word_wrap = True
@@ -307,6 +497,49 @@ def _add_text_slide(slide, row, *, sw, sh, accent, fg, bg,
             for run in para.runs:
                 run.font.size = Pt(20)
                 run.font.color.rgb = fg
+
+
+def _add_hybrid_slide(slide, row, state, tmpd, *, sw, sh, accent, fg, bg,
+                      Inches, Pt, MSO_SHAPE) -> int:
+    """A themed title frame + each region placed as its own picture (or a
+    placeholder box if unrendered). Returns the count of unrendered regions.
+    Region x/y/w/h are fractions of the slide."""
+    _add_slide_frame(slide, row, sw=sw, sh=sh, accent=accent, fg=fg, bg=bg,
+                     Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE)
+    unrendered = 0
+    for r in row.get("regions") or []:
+        left = int(r["x"] * sw)
+        top = int(r["y"] * sh)
+        box_w = int(r["w"] * sw)
+        box_h = int(r["h"] * sh)
+        caption = r.get("caption")
+        cap_h = Inches(0.34) if caption else 0
+        img_h = box_h - cap_h
+        blob = (
+            state.backend.get_blob(r["image_blob_path"])
+            if r.get("image_blob_path") else None
+        )
+        if blob:
+            tmp = pathlib.Path(tmpd) / f"region_{row['id']}_{r['id']}.png"
+            tmp.write_bytes(blob)
+            _add_fitted_picture(slide, str(tmp),
+                                left=left, top=top, box_w=box_w, box_h=img_h)
+        else:
+            unrendered += 1
+            box = slide.shapes.add_textbox(left, top, box_w, img_h)
+            box.text_frame.word_wrap = True
+            box.text_frame.text = (
+                f"[region {r.get('id')}: {r.get('render_mode')} — not rendered]"
+            )
+        if caption:
+            cap = slide.shapes.add_textbox(left, top + img_h, box_w, cap_h)
+            cf = cap.text_frame
+            cf.word_wrap = True
+            cf.text = caption
+            for run in cf.paragraphs[0].runs:
+                run.font.size = Pt(12)
+                run.font.color.rgb = fg
+    return unrendered
 
 
 def _pdf_via_soffice(pptx_path: pathlib.Path) -> pathlib.Path | None:
@@ -339,10 +572,15 @@ def export_deck_to_pptx(
 ) -> dict:
     """Build a .pptx — and, when LibreOffice is available, a sibling .pdf.
 
-    Image slides embed the rendered PNG, aspect-fitted and centered.
-    `text` slides — and any slide still missing a render — become NATIVE
-    editable text (title + bullets) themed from the deck concept's
-    palette. The slide size follows the deck's `aspect_ratio`.
+    Per slide render_mode:
+      - image slides (paper-figure / ai-image / code-shape) embed the
+        rendered PNG, aspect-fitted and centered.
+      - `hybrid` slides get a themed title frame plus each region placed
+        as its own picture at its x/y/w/h box.
+      - `text` slides — and any slide still missing a render — become
+        NATIVE editable text (title + bullets) themed from the deck
+        concept's palette.
+    The slide size follows the deck's `aspect_ratio`.
     """
     try:
         from pptx import Presentation              # type: ignore
@@ -374,29 +612,41 @@ def export_deck_to_pptx(
     missing_renders: list[int] = []
     image_slides = 0
     text_slides = 0
+    hybrid_slides = 0
     with tempfile.TemporaryDirectory() as tmpd:
         for s in slides:
             slide = prs.slides.add_slide(blank_layout)
             mode = s.get("render_mode") or "code-shape"
-            blob = (
-                state.backend.get_blob(s["image_blob_path"])
-                if s.get("image_blob_path") else None
-            )
-            if blob:
-                tmp = pathlib.Path(tmpd) / f"slide_{s['id']}.png"
-                tmp.write_bytes(blob)
-                _add_fitted_picture(slide, str(tmp), sw, sh)
-                image_slides += 1
-            else:
-                # Native editable text slide — either a `text` slide by
-                # design, or a not-yet-rendered slide degraded gracefully.
-                _add_text_slide(
-                    slide, s, sw=sw, sh=sh, accent=accent, fg=fg, bg=bg,
+            if mode == "hybrid":
+                n_missing = _add_hybrid_slide(
+                    slide, s, state, tmpd, sw=sw, sh=sh,
+                    accent=accent, fg=fg, bg=bg,
                     Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE,
                 )
-                text_slides += 1
-                if mode != "text":
+                hybrid_slides += 1
+                if n_missing:
                     missing_renders.append(s.get("slide_number") or 0)
+            else:
+                blob = (
+                    state.backend.get_blob(s["image_blob_path"])
+                    if s.get("image_blob_path") else None
+                )
+                if blob:
+                    tmp = pathlib.Path(tmpd) / f"slide_{s['id']}.png"
+                    tmp.write_bytes(blob)
+                    _add_fitted_picture(slide, str(tmp),
+                                        left=0, top=0, box_w=sw, box_h=sh)
+                    image_slides += 1
+                else:
+                    # Native editable text slide — a `text` slide by design,
+                    # or a not-yet-rendered slide degraded gracefully.
+                    _add_text_slide(
+                        slide, s, sw=sw, sh=sh, accent=accent, fg=fg, bg=bg,
+                        Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE,
+                    )
+                    text_slides += 1
+                    if mode != "text":
+                        missing_renders.append(s.get("slide_number") or 0)
             if s.get("notes"):
                 slide.notes_slide.notes_text_frame.text = s["notes"]
 
@@ -436,6 +686,7 @@ def export_deck_to_pptx(
         "slide_count": len(slides),
         "image_slides": image_slides,
         "text_slides": text_slides,
+        "hybrid_slides": hybrid_slides,
         "missing_renders": missing_renders,
         "local_path": str(out),
         "blob_path": pptx_blob,

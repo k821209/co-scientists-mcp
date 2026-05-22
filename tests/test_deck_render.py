@@ -258,3 +258,142 @@ def test_export_deck_to_pptx_smoke(state, tmp_path, monkeypatch):
     assert res["missing_renders"] == []     # the text slide is not "missing"
     assert res["aspect_ratio"] == "4:3"
     assert res["pdf_skipped"] is True
+
+
+# ─── regions: hybrid multi-image slides ──────────────────────
+
+
+def _hybrid_setup(state, tmp_path):
+    """paper + deck "d" + figure 1 + a hybrid slide with two regions
+    (one paper-figure, one ai-image)."""
+    slug = _setup(state)
+    p = tmp_path / "fig.png"
+    p.write_bytes(_PNG_1x1)
+    figures.add_figure(state, slug, figure_number=1, title="F", local_path=str(p))
+    s = decks.add_slide(state, slug, "d", slide_number=1, role="result", title="R")
+    decks.set_slide_regions(state, slug, "d", s["id"], regions=[
+        {"render_mode": "paper-figure", "figure_number": 1,
+         "x": 0.05, "y": 0.25, "w": 0.42, "h": 0.6},
+        {"render_mode": "ai-image", "prompt": "{accent} schematic",
+         "x": 0.52, "y": 0.25, "w": 0.42, "h": 0.6},
+    ])
+    return slug, s["id"]
+
+
+def test_nearest_aspect():
+    assert deck_render._nearest_aspect(1920, 1080) == "16:9"
+    assert deck_render._nearest_aspect(100, 100) == "1:1"
+    assert deck_render._nearest_aspect(1080, 1920) == "9:16"
+    assert deck_render._nearest_aspect(400, 300) == "4:3"
+
+
+def test_render_region_paper_figure(state, tmp_path):
+    slug, sid = _hybrid_setup(state, tmp_path)
+    r = deck_render.render_region(state, slug, "d", sid, "r1")
+    assert r["region_id"] == "r1" and r["mode"] == "paper-figure"
+    slide = decks.list_slides(state, slug, "d")[0]
+    assert slide["regions"][0]["image_blob_path"]
+
+
+def test_render_region_ai_image_matches_box_aspect(state, tmp_path):
+    slug, sid = _hybrid_setup(state, tmp_path)
+    captured: dict = {}
+
+    class FakeGen:
+        def generate(self, *, prompt, aspect_ratio="1:1", model="gpt-image-2"):
+            captured["prompt"] = prompt
+            captured["aspect"] = aspect_ratio
+            return b"ai-png"
+
+    state.image_gen = FakeGen()
+    decks.update_deck(state, slug, "d", concept="accent: #abc")
+    r = deck_render.render_region(state, slug, "d", sid, "r2")
+    assert r["mode"] == "ai-image"
+    assert captured["prompt"] == "#abc schematic"   # placeholder resolved
+    # region box 0.42w × 0.6h on a 16:9 deck is portrait-ish → "4:3",
+    # NOT the deck's 16:9 (the original's todo 052).
+    assert captured["aspect"] == "4:3"
+
+
+def test_render_region_code_shape_needs_local_path(state, tmp_path):
+    slug = _setup(state)
+    s = decks.add_slide(state, slug, "d", slide_number=1, role="result", title="R")
+    decks.set_slide_regions(state, slug, "d", s["id"], regions=[
+        {"render_mode": "code-shape", "code": "plt...",
+         "x": 0.1, "y": 0.2, "w": 0.8, "h": 0.6},
+    ])
+    with pytest.raises(ValueError, match="local_path"):
+        deck_render.render_region(state, slug, "d", s["id"], "r1")
+    p = tmp_path / "r.png"
+    p.write_bytes(b"region-png")
+    out = deck_render.render_region(state, slug, "d", s["id"], "r1",
+                                   local_path=str(p))
+    assert out["size_bytes"] == len(b"region-png")
+
+
+def test_render_region_missing_raises(state, tmp_path):
+    slug, sid = _hybrid_setup(state, tmp_path)
+    with pytest.raises(NotFound):
+        deck_render.render_region(state, slug, "d", sid, "r99")
+
+
+def test_render_slide_hybrid_renders_all_regions(state, tmp_path):
+    slug, sid = _hybrid_setup(state, tmp_path)
+
+    class FakeGen:
+        def generate(self, *, prompt, aspect_ratio="1:1", model="gpt-image-2"):
+            return b"ai-png"
+
+    state.image_gen = FakeGen()
+    res = deck_render.render_slide(state, slug, "d", sid)
+    assert res["mode"] == "hybrid"
+    assert len(res["rendered"]) == 2
+    assert res["skipped"] == [] and res["errors"] == []
+    slide = decks.list_slides(state, slug, "d")[0]
+    assert all(r["image_blob_path"] for r in slide["regions"])
+
+
+def test_render_deck_hybrid_code_shape_region_skipped(state, tmp_path):
+    slug = _setup(state)
+    p = tmp_path / "fig.png"
+    p.write_bytes(_PNG_1x1)
+    figures.add_figure(state, slug, figure_number=1, title="F", local_path=str(p))
+    s = decks.add_slide(state, slug, "d", slide_number=1, role="result", title="R")
+    decks.set_slide_regions(state, slug, "d", s["id"], regions=[
+        {"render_mode": "paper-figure", "figure_number": 1,
+         "x": 0.05, "y": 0.2, "w": 0.4, "h": 0.6},
+        {"render_mode": "code-shape", "code": "x",
+         "x": 0.5, "y": 0.2, "w": 0.4, "h": 0.6},
+    ])
+    result = deck_render.render_deck(state, slug, "d")
+    assert len(result["rendered"]) == 1                 # paper-figure region
+    assert len(result["skipped"]) == 1                  # code-shape region
+    assert "code-shape region" in result["skipped"][0]["reason"]
+    # one region still unrendered → deck not flipped to 'rendered'
+    assert decks.get_deck(state, slug, "d")["status"] != "rendered"
+
+
+def test_export_hybrid_slide_smoke(state, tmp_path, monkeypatch):
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    slug, sid = _hybrid_setup(state, tmp_path)
+
+    class FakeGen:
+        def generate(self, *, prompt, aspect_ratio="1:1", model="gpt-image-2"):
+            return _PNG_1x1
+
+    state.image_gen = FakeGen()
+    deck_render.render_slide(state, slug, "d", sid)      # render both regions
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    assert out.is_file()
+    assert res["hybrid_slides"] == 1
+    assert res["missing_renders"] == []
+    prs = Presentation(str(out))
+    pics = [sh for sh in prs.slides[0].shapes
+            if sh.shape_type == MSO_SHAPE_TYPE.PICTURE]
+    assert len(pics) == 2   # two region images placed as separate shapes

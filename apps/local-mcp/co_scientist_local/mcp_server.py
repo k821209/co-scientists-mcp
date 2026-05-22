@@ -972,6 +972,27 @@ def build_mcp(state: State) -> FastMCP:
         Call after bulk add/delete. Returns {count, old_to_new}."""
         return _decks.renumber_deck(state, slug, deck_id)
 
+    @mcp.tool()
+    def set_slide_regions(
+        slug: str,
+        deck_id: str,
+        slide_id: str,
+        regions: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Lay out SEVERAL images on one slide — forces the slide to
+        render_mode='hybrid'. Each region is a dict:
+          {render_mode: "ai-image" | "code-shape" | "paper-figure",
+           x, y, w, h: floats 0..1 — fractions of the slide,
+           figure_number | prompt | code: type-specific source,
+           caption: optional text under the image}
+        Regions are assigned ids r1..rN in order; render each with
+        render_region. Re-calling replaces the layout but keeps the
+        rendered image of any region whose source is unchanged.
+        """
+        return _decks.set_slide_regions(
+            state, slug, deck_id, slide_id, regions=regions,
+        )
+
     # ─── deck rendering + PPTX export (Phase 3) ──────────────────────────────
     @mcp.tool()
     def render_slide(
@@ -987,13 +1008,37 @@ def build_mcp(state: State) -> FastMCP:
           - paper-figure : copies the existing figure blob
           - ai-image     : substitutes {accent}/{display_font} etc.
                            from deck.concept, calls generate_image
+          - hybrid       : renders every region it can; returns a
+                           per-region summary (code-shape regions land
+                           in skipped[] — do those via render_region)
 
-        Modes that need agent help (run the code yourself, then pass the
+        Mode that needs agent help (run the code yourself, then pass the
         resulting PNG path here):
-          - code-shape, hybrid : pass `local_path="path/to/slide.png"`
+          - code-shape : pass `local_path="path/to/slide.png"`
+
+        `text` slides carry no image — nothing to render.
         """
         return _deck_render.render_slide(
             state, slug, deck_id, slide_id, local_path=local_path,
+        )
+
+    @mcp.tool()
+    def render_region(
+        slug: str,
+        deck_id: str,
+        slide_id: str,
+        region_id: str,
+        local_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Render ONE region of a hybrid (multi-image) slide into Storage.
+
+        paper-figure / ai-image regions: the MCP renders them — an
+        ai-image region's aspect ratio is matched to its box, not the
+        whole slide. code-shape regions: pass `local_path` to a PNG you
+        produced locally.
+        """
+        return _deck_render.render_region(
+            state, slug, deck_id, slide_id, region_id, local_path=local_path,
         )
 
     @mcp.tool()

@@ -24,8 +24,14 @@ Each slide doc carries:
   - `render_mode`   "code-shape" | "paper-figure" | "ai-image" |
                     "hybrid" | "text". A `text` slide carries no image —
                     it becomes a native (editable) PPTX text slide at
-                    export, styled from the deck concept's palette.
+                    export, styled from the deck concept's palette. A
+                    `hybrid` slide carries `regions[]` — several images
+                    of mixed types on one slide.
   - `figure_number` if render_mode == paper-figure
+  - `regions`       if render_mode == hybrid: a list of positioned image
+                    regions, each {id, render_mode, x/y/w/h fractions,
+                    figure_number|prompt|code, caption, image_blob_path}.
+                    Set via set_slide_regions; rendered via render_region.
   - `status`        "draft" | "rendered"
 
 Render + PPTX export are Phase 3 — not implemented here. This module
@@ -48,6 +54,8 @@ _VALID_RENDER_MODES = {"code-shape", "paper-figure", "ai-image", "hybrid", "text
 _VALID_DECK_STATUS = {"draft", "drafted", "rendered"}
 _VALID_SLIDE_STATUS = {"draft", "rendered"}
 _VALID_ASPECT = {"16:9", "16:10", "4:3"}
+# A region is a leaf image — it cannot itself be `hybrid` or `text`.
+_VALID_REGION_MODES = {"ai-image", "code-shape", "paper-figure"}
 
 
 def _ensure_paper(state: State, slug: str) -> None:
@@ -295,6 +303,99 @@ def update_slide(
     if figure_number is not None: fields["figure_number"] = figure_number
     if status is not None: fields["status"] = status
     state.backend.update_doc(path, fields)
+    return state.backend.get_doc(path)
+
+
+def _validate_region(r: dict, index: int) -> dict:
+    """Validate one region spec; return a normalized region dict (no id,
+    no render fields — those are added by set_slide_regions)."""
+    mode = r.get("render_mode")
+    if mode not in _VALID_REGION_MODES:
+        raise ValueError(
+            f"region {index}: render_mode must be one of "
+            f"{sorted(_VALID_REGION_MODES)}, got {mode!r}"
+        )
+    box: dict[str, float] = {}
+    for k in ("x", "y", "w", "h"):
+        v = r.get(k)
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            raise ValueError(f"region {index}: {k} must be a number in [0,1]")
+        v = float(v)
+        if not (0.0 <= v <= 1.0):
+            raise ValueError(f"region {index}: {k}={v} is outside [0,1]")
+        box[k] = v
+    if box["w"] <= 0 or box["h"] <= 0:
+        raise ValueError(f"region {index}: w and h must be > 0")
+    if box["x"] + box["w"] > 1.0 + 1e-6 or box["y"] + box["h"] > 1.0 + 1e-6:
+        raise ValueError(f"region {index}: box extends past the slide edge")
+    fig = r.get("figure_number")
+    prompt = r.get("prompt")
+    if mode == "paper-figure" and fig is None:
+        raise ValueError(f"region {index}: paper-figure region needs figure_number")
+    if mode == "ai-image" and not (prompt and str(prompt).strip()):
+        raise ValueError(f"region {index}: ai-image region needs a prompt")
+    return {
+        "render_mode": mode,
+        "x": box["x"], "y": box["y"], "w": box["w"], "h": box["h"],
+        "figure_number": fig,
+        "prompt": prompt,
+        "code": r.get("code"),
+        "caption": r.get("caption"),
+    }
+
+
+def set_slide_regions(
+    state: State,
+    slug: str,
+    deck_id: str,
+    slide_id: str,
+    *,
+    regions: list[dict],
+) -> dict:
+    """Define the multi-image region layout for a slide. Forces the slide's
+    render_mode to 'hybrid'. Each region is one positioned image with its
+    own render_mode (ai-image / code-shape / paper-figure); x/y/w/h are
+    fractions (0..1) of the slide so the layout is aspect-independent.
+
+    Replaces any existing regions. A region whose *source* (render_mode +
+    figure_number / prompt / code) is unchanged keeps its rendered image,
+    so re-positioning a region doesn't force a re-render.
+    """
+    _ensure_paper(state, slug)
+    path = _slide_path(state, slug, deck_id, slide_id)
+    cur = state.backend.get_doc(path)
+    if cur is None:
+        raise NotFound(f"slide not found: {slide_id!r}")
+    if not regions:
+        raise ValueError("regions must be a non-empty list")
+
+    def _source_key(r: dict) -> tuple:
+        return (
+            r.get("render_mode"), r.get("figure_number"),
+            (r.get("prompt") or "").strip(), (r.get("code") or "").strip(),
+        )
+
+    # Carry rendered images across when a region's source is unchanged.
+    prior = {
+        _source_key(r): r
+        for r in (cur.get("regions") or [])
+        if r.get("image_blob_path")
+    }
+
+    normalized: list[dict] = []
+    for i, raw in enumerate(regions):
+        reg = _validate_region(raw, i)
+        reg["id"] = f"r{i + 1}"
+        old = prior.get(_source_key(reg))
+        reg["image_blob_path"] = old.get("image_blob_path") if old else None
+        reg["rendered_at"] = old.get("rendered_at") if old else None
+        normalized.append(reg)
+
+    state.backend.update_doc(path, {
+        "regions": normalized,
+        "render_mode": "hybrid",
+        "updated_at": now_iso(),
+    })
     return state.backend.get_doc(path)
 
 
