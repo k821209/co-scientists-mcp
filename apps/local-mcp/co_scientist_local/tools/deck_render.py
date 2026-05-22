@@ -454,6 +454,38 @@ def _hex_to_rgb(value: str, fallback: str):
         return RGBColor(int(fb[0:2], 16), int(fb[2:4], 16), int(fb[4:6], 16))
 
 
+def _rel_luminance(hexstr: str) -> float:
+    """WCAG relative luminance of an '#rrggbb' color."""
+    raw = (hexstr or "").lstrip("#")
+    if len(raw) != 6:
+        raw = "000000"
+
+    def _chan(v: int) -> float:
+        c = v / 255
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    try:
+        r, g, b = (int(raw[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return 0.0
+    return 0.2126 * _chan(r) + 0.7152 * _chan(g) + 0.0722 * _chan(b)
+
+
+def _contrast_ratio(hex1: str, hex2: str) -> float:
+    """WCAG contrast ratio between two colors (1.0 … 21.0)."""
+    lo, hi = sorted((_rel_luminance(hex1), _rel_luminance(hex2)))
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _ensure_contrast(fg_hex: str, bg_hex: str) -> str:
+    """Guarantee legible text: if `fg` on `bg` fails WCAG AA (4.5:1),
+    snap it to black or white — whichever reads better on `bg`."""
+    if _contrast_ratio(fg_hex, bg_hex) >= 4.5:
+        return fg_hex
+    return ("#000000" if _contrast_ratio("#000000", bg_hex)
+            >= _contrast_ratio("#FFFFFF", bg_hex) else "#FFFFFF")
+
+
 def _place_picture(slide, img_path: str, *, left, top, box_w, box_h,
                    fit: str = "contain") -> None:
     """Place an image inside the box at (left, top, box_w, box_h).
@@ -481,11 +513,13 @@ def _place_picture(slide, img_path: str, *, left, top, box_w, box_h,
         pic.top = int(top + (box_h - pic.height) / 2)
 
 
-# Typography defaults for native text. Generous line + paragraph spacing
-# so bullets don't run together (the python-pptx default is cramped).
-_BODY_PT = 20
-_HEAD_PT = 24
-_LINE_SPACING = 1.18
+# Typography for native text. Presentation-scale type — readable from the
+# back of a room, not document-scale — with generous line + paragraph
+# spacing so bullets don't run together.
+_BODY_PT = 24
+_HEAD_PT = 30
+_TITLE_PT = 38
+_LINE_SPACING = 1.22
 
 _WEIGHT_WORDS = {
     "thin", "extralight", "ultralight", "light", "regular", "book", "normal",
@@ -614,14 +648,14 @@ def _add_slide_frame(slide, row, *, sw, sh, accent, fg, bg, fonts,
         slide.background.fill.fore_color.rgb = bg
     except Exception:
         pass  # leave the default background if this build won't set it
-    stripe = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, sw, Inches(0.14))
+    stripe = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, sw, Inches(0.16))
     stripe.line.fill.background()
     stripe.fill.solid()
     stripe.fill.fore_color.rgb = accent
     stripe.shadow.inherit = False
 
     title_box = slide.shapes.add_textbox(
-        Inches(0.6), Inches(0.4), sw - Inches(1.2), Inches(0.95),
+        Inches(0.7), Inches(0.45), sw - Inches(1.4), Inches(1.0),
     )
     tf = title_box.text_frame
     tf.word_wrap = True
@@ -629,11 +663,20 @@ def _add_slide_frame(slide, row, *, sw, sh, accent, fg, bg, fonts,
     p.line_spacing = 1.05
     run = p.add_run()
     run.text = row.get("title") or ""
-    run.font.size = Pt(32)
+    run.font.size = Pt(_TITLE_PT)
     run.font.bold = True
     run.font.color.rgb = fg
     if fonts.get("display"):
         run.font.name = fonts["display"]
+
+    # Short accent rule under the title — a visual anchor for the slide.
+    rule = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE, Inches(0.72), Inches(1.52), Inches(2.2), Pt(4),
+    )
+    rule.line.fill.background()
+    rule.fill.solid()
+    rule.fill.fore_color.rgb = accent
+    rule.shadow.inherit = False
 
 
 def _add_text_slide(slide, row, *, sw, sh, accent, fg, bg, fonts,
@@ -644,7 +687,7 @@ def _add_text_slide(slide, row, *, sw, sh, accent, fg, bg, fonts,
     body = (row.get("body") or "").strip()
     if body:
         body_box = slide.shapes.add_textbox(
-            Inches(0.7), Inches(1.7), sw - Inches(1.4), sh - Inches(2.3),
+            Inches(0.7), Inches(1.95), sw - Inches(1.4), sh - Inches(2.5),
         )
         _render_markdown_into(body_box.text_frame, body, fg=fg, fonts=fonts,
                               Pt=Pt)
@@ -669,10 +712,10 @@ def _add_title_slide(slide, row, *, sw, sh, accent, fg, bg, fonts,
 
     p = tf.paragraphs[0]
     p.alignment = PP_ALIGN.CENTER
-    p.line_spacing = 1.08
+    p.line_spacing = 1.1
     run = p.add_run()
     run.text = row.get("title") or ""
-    run.font.size = Pt(46)
+    run.font.size = Pt(48)
     run.font.bold = True
     run.font.color.rgb = fg
     if fonts.get("display"):
@@ -688,11 +731,11 @@ def _add_title_slide(slide, row, *, sw, sh, accent, fg, bg, fonts,
         sp.alignment = PP_ALIGN.CENTER
         sp.line_spacing = 1.2
         if first_sub:
-            sp.space_before = Pt(18)
+            sp.space_before = Pt(20)
             first_sub = False
         run = sp.add_run()
         run.text = line
-        run.font.size = Pt(22)
+        run.font.size = Pt(24)
         run.font.color.rgb = fg
         if fonts.get("body"):
             run.font.name = fonts["body"]
@@ -803,8 +846,11 @@ def export_deck_to_pptx(
     aspect = deck.get("aspect_ratio") or "16:9"
     w_in, h_in = _ASPECT_TO_SIZE.get(aspect, _ASPECT_TO_SIZE["16:9"])
     colors = _theme_colors(deck.get("concept"))
+    # Guarantee the body text is legible even if the concept's palette
+    # pairs low-contrast colors.
+    fg_hex = _ensure_contrast(colors["foreground"], colors["background"])
     accent = _hex_to_rgb(colors["accent"], "#2E7D32")
-    fg = _hex_to_rgb(colors["foreground"], "#1A1A1A")
+    fg = _hex_to_rgb(fg_hex, "#1A1A1A")
     bg = _hex_to_rgb(colors["background"], "#FFFFFF")
     fonts = _theme_fonts(deck.get("concept"))
 

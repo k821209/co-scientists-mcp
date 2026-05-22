@@ -130,17 +130,32 @@ Standard role sequence, scaled to duration:
 
 Adjust to duration: each slide ≈ 1–2 minutes; 20 min ≈ 12–15 slides.
 
-For each slide, decide the **render_mode**:
-- `text` — a pure title + bullets slide (agenda, section divider,
-  take-homes). No image — it becomes NATIVE editable PPTX text,
-  themed from the concept palette. Prefer this over an `ai-image`
-  for slides that are really just words.
-- `code-shape` — KPI table, Gantt, org chart, schematic with structured data
-- `paper-figure` — re-use a figure from the manuscript (set `figure_number`)
-- `ai-image` — eyecatch (cover, closing), abstract concept
-- `hybrid` — **several images on one slide** (e.g. a generated schematic
-  + a data plot + a manuscript figure). Don't set this via `add_slide`
-  — build it with `set_slide_regions` (see "Multi-image slides" below).
+For each slide, decide the **render_mode**. This decides whether the
+slide's text stays editable in the exported .pptx — choose carefully:
+
+- `text` — title + bullet body rendered as **NATIVE, editable
+  PowerPoint text**, themed with the concept's fonts / colours /
+  spacing. **This is the default for any slide that is mostly words** —
+  background, methods narrative, takeaways, agenda, section dividers.
+  The reviewer can edit it in PowerPoint and it inherits the deck design.
+- `paper-figure` — re-use a manuscript figure full-bleed (set `figure_number`).
+- `ai-image` — a generated image: an eyecatch (cover / closing) or an
+  abstract concept slide that is image-led, not text-led.
+- `code-shape` — a single PNG you draw with code, embedded **full-bleed**.
+  ⚠ The WHOLE slide becomes a flat picture — any text in it is baked
+  into the bitmap, NOT editable in the .pptx, and ignores the deck's
+  fonts/theme. Use it **only** for a genuine code-drawn data visual
+  (a real plot / chart). **Never** make a prose- or bullet-heavy slide
+  `code-shape` — that is the #1 way to ship an ugly, unreadable,
+  uneditable slide. Text-heavy slide → `text`.
+- `hybrid` — several images on one slide, set via `set_slide_regions`
+  (see "Multi-image slides"). For "title + bullets + one figure", a
+  plain `text` slide is usually better; use `hybrid` only when multiple
+  images genuinely share the slide.
+
+Rule of thumb: **if you'd write more than a few words of text on the
+slide, it is a `text` slide.** `code-shape` / `ai-image` are for slides
+that are fundamentally a picture.
 
 ### 5. Add slides one by one
 
