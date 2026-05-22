@@ -399,6 +399,52 @@ def test_export_hybrid_slide_smoke(state, tmp_path, monkeypatch):
     assert len(pics) == 2   # two region images placed as separate shapes
 
 
+def test_export_hybrid_slide_with_body_renders_native_bullets(
+        state, tmp_path, monkeypatch):
+    """A hybrid slide with `body` renders the bullets as NATIVE editable
+    text in the LEFT half, alongside an image region on the right — the
+    'title + bullets + figure' layout."""
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    slug = _setup(state)
+    p = tmp_path / "fig.png"
+    p.write_bytes(_PNG_1x1)
+    figures.add_figure(state, slug, figure_number=1, title="F", local_path=str(p))
+    s = decks.add_slide(
+        state, slug, "d", slide_number=1, role="background",
+        title="Pipeline vs MCP",
+        body="- two-week bespoke pipeline\n- 30-second MCP query",
+        notes="n",
+    )
+    decks.set_slide_regions(state, slug, "d", s["id"], regions=[
+        {"render_mode": "paper-figure", "figure_number": 1,
+         "x": 0.54, "y": 0.22, "w": 0.42, "h": 0.65},
+    ])
+    deck_render.render_slide(state, slug, "d", s["id"])
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+
+    out = tmp_path / "deck.pptx"
+    deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    prs = Presentation(str(out))
+    slide = prs.slides[0]
+
+    # one image region on the right
+    pics = [sh for sh in slide.shapes if sh.shape_type == MSO_SHAPE_TYPE.PICTURE]
+    assert len(pics) == 1
+
+    # native body text present and on the LEFT half of the slide
+    body_tbs = [
+        sh for sh in slide.shapes
+        if sh.has_text_frame and "two-week bespoke pipeline" in sh.text_frame.text
+    ]
+    assert body_tbs, "body bullets must render as native text"
+    btb = body_tbs[0]
+    assert btb.left + btb.width <= prs.slide_width / 2 + 1
+    assert "30-second MCP query" in btb.text_frame.text
+
+
 # ─── placeholder metadata: fit mode + captured image size ────
 
 

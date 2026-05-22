@@ -148,10 +148,13 @@ slide's text stays editable in the exported .pptx — choose carefully:
   (a real plot / chart). **Never** make a prose- or bullet-heavy slide
   `code-shape` — that is the #1 way to ship an ugly, unreadable,
   uneditable slide. Text-heavy slide → `text`.
-- `hybrid` — several images on one slide, set via `set_slide_regions`
-  (see "Multi-image slides"). For "title + bullets + one figure", a
-  plain `text` slide is usually better; use `hybrid` only when multiple
-  images genuinely share the slide.
+- `hybrid` — **title + native body bullets (rendered in the LEFT half)
+  + one or more image regions** (positioned by you, typically on the
+  right). This is the right mode for "title + bullets + a figure /
+  diagram" — the bullets stay editable native text, the figure is an
+  image region. Also for multi-image slides. Set with
+  `set_slide_regions` (see "Multi-image slides"). Don't set this in
+  `add_slide`'s render_mode — let `set_slide_regions` flip it.
 
 Rule of thumb: **if you'd write more than a few words of text on the
 slide, it is a `text` slide.** `code-shape` / `ai-image` are for slides
@@ -188,11 +191,32 @@ header using placeholders. Example:
 Never hardcode `"navy blue"` or `"Inter"` — write `{accent}` /
 `{display_font}` so theme switching is a no-op rebuild.
 
-### 5b. Multi-image slides (regions)
+### 5b. Hybrid slides — bullets + figure, or several images (regions)
 
-When ONE slide needs several images of mixed types — say a generated
-schematic next to a data plot next to a manuscript figure — add the
-slide normally, then define its **regions**:
+Two distinct uses of `set_slide_regions` / hybrid:
+
+**(a) Title + bullets + one figure** — the most common mixed slide.
+Put the bullets in `body` (markdown) on `add_slide`, then set ONE
+image region for the figure on the right:
+
+```
+mcp__co_scientist__set_slide_regions(
+  slug, deck_id, slide_id,
+  regions=[
+    { "render_mode": "ai-image",
+      "prompt": "{accent} schematic of 2-week pipeline vs 30-sec MCP query",
+      "x": 0.54, "y": 0.22, "w": 0.42, "h": 0.65,
+      "fit": "contain" },
+  ],
+)
+```
+
+The slide's `body` renders as native bullets in the LEFT half; the
+image region renders in its box on the right. The bullets stay
+editable text in the .pptx; only the figure is an image.
+
+**(b) Several images on one slide** — a generated schematic next to a
+data plot next to a manuscript figure:
 
 ```
 mcp__co_scientist__set_slide_regions(

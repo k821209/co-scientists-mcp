@@ -743,11 +743,21 @@ def _add_title_slide(slide, row, *, sw, sh, accent, fg, bg, fonts,
 
 def _add_hybrid_slide(slide, row, state, tmpd, *, sw, sh, accent, fg, bg,
                       fonts, Inches, Pt, MSO_SHAPE) -> int:
-    """A themed title frame + each region placed as its own picture (or a
-    placeholder box if unrendered). Returns the count of unrendered regions.
-    Region x/y/w/h are fractions of the slide."""
+    """Themed title frame + native body bullets (left half, when body is
+    set) + each region placed as its own picture. The body-on-the-left
+    convention gives the "title + bullets + figure-on-the-right" layout
+    natively; agents position image regions (typically on the right)
+    accordingly. Returns the count of unrendered regions."""
     _add_slide_frame(slide, row, sw=sw, sh=sh, accent=accent, fg=fg, bg=bg,
                      fonts=fonts, Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE)
+    body = (row.get("body") or "").strip()
+    if body:
+        body_box = slide.shapes.add_textbox(
+            Inches(0.7), Inches(1.95),
+            int(sw / 2) - Inches(0.8), sh - Inches(2.5),
+        )
+        _render_markdown_into(body_box.text_frame, body, fg=fg, fonts=fonts,
+                              Pt=Pt)
     unrendered = 0
     for r in row.get("regions") or []:
         left = int(r["x"] * sw)
