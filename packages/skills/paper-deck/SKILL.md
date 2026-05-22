@@ -62,6 +62,7 @@ deck = mcp__co_scientist__create_deck(
   audience="<lab seminar | Nature poster | conference plenary | …>",
   duration_min=<minutes>,
   theme="<theme_slug>" or None,
+  aspect_ratio="16:9",   # "16:9" (default) | "16:10" | "4:3"
   deck_id="<short-slug>" or None,   # auto-derived from title if omitted
 )
 ```
@@ -130,6 +131,10 @@ Standard role sequence, scaled to duration:
 Adjust to duration: each slide ≈ 1–2 minutes; 20 min ≈ 12–15 slides.
 
 For each slide, decide the **render_mode**:
+- `text` — a pure title + bullets slide (agenda, section divider,
+  take-homes). No image — it becomes NATIVE editable PPTX text,
+  themed from the concept palette. Prefer this over an `ai-image`
+  for slides that are really just words.
 - `code-shape` — KPI table, Gantt, org chart, schematic with structured data
 - `paper-figure` — re-use a figure from the manuscript (set `figure_number`)
 - `ai-image` — eyecatch (cover, closing), abstract concept
@@ -152,7 +157,7 @@ mcp__co_scientist__add_slide(
   code="""```python
     # if render_mode == code-shape, the code that defines the slide
   ```""",
-  render_mode="code-shape" | "paper-figure" | "ai-image" | "hybrid",
+  render_mode="text" | "code-shape" | "paper-figure" | "ai-image" | "hybrid",
   figure_number=<N>,   # if render_mode == paper-figure
 )
 ```
@@ -223,6 +228,8 @@ mcp__co_scientist__render_deck(slug, deck_id)
 ```
 
 This walks every slide and:
+- `text`         → nothing to render; it becomes native PPTX text at
+                   export. Returned in `skipped[]` with that reason.
 - `paper-figure` → copies the existing figure blob into a slide image
 - `ai-image`     → substitutes `{accent}` etc. from `deck.concept`,
                    calls `generate_image`
@@ -239,9 +246,8 @@ mcp__co_scientist__render_slide(
 )
 ```
 
-Once every slide has an `image_blob_path`, the deck's `status` flips
-to `"rendered"` and the dashboard's Presentation tab will offer the
-PPTX export. To trigger from Claude Code directly:
+Once every non-`text` slide has an `image_blob_path`, the deck's
+`status` flips to `"rendered"`. To export from Claude Code:
 
 ```
 mcp__co_scientist__export_deck_to_pptx(
@@ -250,12 +256,23 @@ mcp__co_scientist__export_deck_to_pptx(
 )
 ```
 
-Returns `{ local_path, blob_path, slide_count, missing_renders }`.
-`missing_renders[]` is the slide numbers that came out as text-only
-placeholders because they hadn't been rendered yet — those should
-go back through `render_slide` and the PPTX re-exported.
+Export behavior:
+- **Image slides** embed the rendered PNG, aspect-fitted and centered.
+- **`text` slides** (and any slide still missing a render) become
+  NATIVE editable text — title + bullets — themed from the concept's
+  `accent` / `bg` / `text` colors. Not a picture: the user can edit
+  the words in PowerPoint.
+- Page size follows the deck's `aspect_ratio`.
+- A sibling **`.pdf`** is produced when LibreOffice (`soffice`) is
+  installed — the portable fallback, since Keynote sometimes rejects
+  python-pptx's PPTX.
 
-PPTX layout: 16:9, one slide per deck slide, title at top, image
-centered (12.3" × 6"), speaker notes on the notes pane.
+Returns `{ local_path, blob_path, pdf_local_path, pdf_blob_path,
+pdf_skipped, aspect_ratio, slide_count, image_slides, text_slides,
+missing_renders }`. `missing_renders[]` is the non-text slides that
+came out as text fallbacks because they weren't rendered yet — render
+those and re-export. If `pdf_skipped` is true, tell the user to
+install LibreOffice if they want the PDF.
 
-python-pptx ships with the base install — nothing extra to install.
+python-pptx ships with the base install. LibreOffice is the only
+optional extra (PDF sibling only).

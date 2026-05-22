@@ -860,15 +860,18 @@ def build_mcp(state: State) -> FastMCP:
         audience: str | None = None,
         duration_min: int | None = None,
         theme: str | None = None,
+        aspect_ratio: str = "16:9",
         deck_id: str | None = None,
     ) -> dict[str, Any]:
         """Create or retrieve a presentation deck attached to a paper.
         Idempotent: returns the existing deck unchanged if `deck_id` is
-        provided and already exists.
+        provided and already exists. `aspect_ratio` ('16:9' | '16:10' |
+        '4:3') sets the exported PPTX page size.
         """
         return _decks.create_deck(
             state, slug, title=title, audience=audience,
-            duration_min=duration_min, theme=theme, deck_id=deck_id,
+            duration_min=duration_min, theme=theme,
+            aspect_ratio=aspect_ratio, deck_id=deck_id,
         )
 
     @mcp.tool()
@@ -887,16 +890,19 @@ def build_mcp(state: State) -> FastMCP:
         audience: str | None = None,
         duration_min: int | None = None,
         theme: str | None = None,
+        aspect_ratio: str | None = None,
         concept: str | None = None,
         status: str | None = None,
     ) -> dict[str, Any]:
         """Patch deck-level fields. `concept` is the unity header
         (palette / typography / motif) inherited by every slide's
-        prompt."""
+        prompt — the PPTX export also harvests accent/bg/text colors
+        from it to theme native text slides. `aspect_ratio` is
+        '16:9' | '16:10' | '4:3'."""
         return _decks.update_deck(
             state, slug, deck_id, title=title, audience=audience,
-            duration_min=duration_min, theme=theme, concept=concept,
-            status=status,
+            duration_min=duration_min, theme=theme,
+            aspect_ratio=aspect_ratio, concept=concept, status=status,
         )
 
     @mcp.tool()
@@ -1004,13 +1010,16 @@ def build_mcp(state: State) -> FastMCP:
         deck_id: str,
         output_path: str,
     ) -> dict[str, Any]:
-        """Emit a .pptx from a (mostly) rendered deck. One slide per
-        deck slide; embedded PNG + title + speaker notes. Slides without
-        an `image_blob_path` get a text-only placeholder so the deck
-        isn't blocked by one missing render. Uploads a copy to
-        Storage at papers/{slug}/decks/{deck_id}/exports/{name}.pptx.
+        """Emit a .pptx from a deck — and a sibling .pdf when LibreOffice
+        is installed (the portable fallback; Keynote sometimes rejects
+        python-pptx output).
 
-        python-pptx ships with the base install — no extra needed.
+        Image slides embed the rendered PNG, aspect-fitted. `text` slides
+        (and any slide still missing a render) become NATIVE editable
+        text — title + bullets — themed from the deck concept's palette.
+        Page size follows the deck's `aspect_ratio`. Both files upload to
+        papers/{slug}/decks/{deck_id}/exports/. python-pptx ships in the
+        base install.
         """
         return _deck_render.export_deck_to_pptx(
             state, slug, deck_id, output_path=output_path,

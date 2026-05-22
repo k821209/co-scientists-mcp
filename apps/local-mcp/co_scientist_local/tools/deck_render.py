@@ -13,15 +13,21 @@ The rendered PNG is uploaded to Storage at
   papers/{slug}/decks/{deck_id}/slides/{slide_number}.png
 and the slide doc's `image_blob_path` field is updated.
 
-`export_deck_to_pptx` collects every rendered slide and emits a .pptx
-via python-pptx — one slide per deck slide, embedded PNG + title + speaker
-notes. Lazy-imports python-pptx so the optional dep stays optional.
+`export_deck_to_pptx` emits a .pptx via python-pptx:
+  - image slides   : the rendered PNG, aspect-fitted and centered
+  - `text` slides  : a NATIVE (editable) title + bullet layout, themed
+                     from the deck concept's palette — not a picture
+The slide size follows the deck's `aspect_ratio`. A sibling .pdf is
+produced via LibreOffice (`soffice`) when available — python-pptx's
+PPTX is occasionally rejected by Keynote, so the PDF is the portable
+fallback. python-pptx ships in the base install.
 """
 from __future__ import annotations
 
 import os
 import pathlib
 import re
+import subprocess
 import tempfile
 
 from ..backends.base import NotFound
@@ -121,6 +127,11 @@ def render_slide(
     slide_number = slide.get("slide_number") or 0
 
     png: bytes
+    if mode == "text":
+        raise ValueError(
+            "text slides carry no image — they render as native PPTX "
+            "text on export; nothing to render here"
+        )
     if mode == "paper-figure":
         fig_num = slide.get("figure_number")
         if fig_num is None:
@@ -176,6 +187,12 @@ def render_deck(state: State, slug: str, deck_id: str) -> dict:
     results = {"rendered": [], "skipped": [], "errors": []}
     for s in slides:
         mode = s.get("render_mode") or "code-shape"
+        if mode == "text":
+            results["skipped"].append({
+                "slide_id": s["id"], "slide_number": s.get("slide_number"),
+                "reason": "text slide — native PPTX text on export",
+            })
+            continue
         if mode in ("code-shape", "hybrid"):
             results["skipped"].append({
                 "slide_id": s["id"], "slide_number": s.get("slide_number"),
@@ -190,15 +207,127 @@ def render_deck(state: State, slug: str, deck_id: str) -> dict:
                 "slide_id": s["id"], "slide_number": s.get("slide_number"),
                 "error": str(e),
             })
-    # Mark deck rendered when every slide has an image_blob_path.
+    # Deck is "rendered" once every non-text slide has an image_blob_path —
+    # text slides never get one (they're native text at export time).
     refreshed = _decks.list_slides(state, slug, deck_id)
-    all_rendered = all(s.get("image_blob_path") for s in refreshed)
+    all_rendered = all(
+        s.get("image_blob_path")
+        for s in refreshed
+        if (s.get("render_mode") or "code-shape") != "text"
+    )
     if all_rendered:
         _decks.update_deck(state, slug, deck_id, status="rendered")
     return results
 
 
 # ─── PPTX export ─────────────────────────────────────────────────────────────
+
+# Deck aspect ratio → (width_in, height_in) for the PPTX page.
+_ASPECT_TO_SIZE = {
+    "16:9": (13.333, 7.5),
+    "16:10": (12.0, 7.5),
+    "4:3": (10.0, 7.5),
+}
+
+
+def _theme_colors(concept: str | None) -> dict[str, str]:
+    """Harvest accent / background / foreground hex colors from the deck
+    concept — the skill writes a `Palette:` block with bg / text / accent."""
+    kv = _parse_concept(concept)
+    return {
+        "accent": kv.get("accent") or "#2E7D32",
+        "background": kv.get("bg") or kv.get("background") or "#FFFFFF",
+        "foreground": kv.get("text") or kv.get("foreground") or "#1A1A1A",
+    }
+
+
+def _hex_to_rgb(value: str, fallback: str):
+    """Parse '#rrggbb' into a python-pptx RGBColor, tolerating junk."""
+    from pptx.dml.color import RGBColor  # type: ignore
+    raw = (value or "").lstrip("#")
+    if len(raw) != 6:
+        raw = fallback.lstrip("#")
+    try:
+        return RGBColor(int(raw[0:2], 16), int(raw[2:4], 16), int(raw[4:6], 16))
+    except ValueError:
+        fb = fallback.lstrip("#")
+        return RGBColor(int(fb[0:2], 16), int(fb[2:4], 16), int(fb[4:6], 16))
+
+
+def _add_fitted_picture(slide, img_path: str, sw, sh) -> None:
+    """Place an image scaled to fit the slide (aspect preserved), centered."""
+    pic = slide.shapes.add_picture(img_path, 0, 0)
+    scale = min(sw / pic.width, sh / pic.height)
+    pic.width = int(pic.width * scale)
+    pic.height = int(pic.height * scale)
+    pic.left = int((sw - pic.width) / 2)
+    pic.top = int((sh - pic.height) / 2)
+
+
+def _add_text_slide(slide, row, *, sw, sh, accent, fg, bg,
+                    Inches, Pt, MSO_SHAPE) -> None:
+    """Draw a native (editable) title + bullet layout, palette-themed."""
+    try:
+        slide.background.fill.solid()
+        slide.background.fill.fore_color.rgb = bg
+    except Exception:
+        pass  # leave the default background if this build won't set it
+    stripe = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, sw, Inches(0.14))
+    stripe.line.fill.background()
+    stripe.fill.solid()
+    stripe.fill.fore_color.rgb = accent
+    stripe.shadow.inherit = False
+
+    title_box = slide.shapes.add_textbox(
+        Inches(0.6), Inches(0.55), sw - Inches(1.2), Inches(1.1),
+    )
+    tf = title_box.text_frame
+    tf.word_wrap = True
+    tf.text = row.get("title") or ""
+    for run in tf.paragraphs[0].runs:
+        run.font.size = Pt(34)
+        run.font.bold = True
+        run.font.color.rgb = fg
+
+    body = (row.get("body") or "").strip()
+    if body:
+        body_box = slide.shapes.add_textbox(
+            Inches(0.6), Inches(1.9), sw - Inches(1.2), sh - Inches(2.5),
+        )
+        bf = body_box.text_frame
+        bf.word_wrap = True
+        first = True
+        for raw in body.splitlines():
+            line = raw.strip().lstrip("-*•#> ").strip()
+            if not line:
+                continue
+            para = bf.paragraphs[0] if first else bf.add_paragraph()
+            first = False
+            para.text = "•  " + line
+            for run in para.runs:
+                run.font.size = Pt(20)
+                run.font.color.rgb = fg
+
+
+def _pdf_via_soffice(pptx_path: pathlib.Path) -> pathlib.Path | None:
+    """Convert the .pptx to a sibling .pdf via LibreOffice. Returns the PDF
+    path, or None if soffice/libreoffice is missing or the conversion fails.
+    python-pptx output is occasionally rejected by Keynote — the PDF is the
+    portable fallback."""
+    for binary in ("soffice", "libreoffice"):
+        try:
+            proc = subprocess.run(
+                [binary, "--headless", "--convert-to", "pdf",
+                 "--outdir", str(pptx_path.parent), str(pptx_path)],
+                capture_output=True, text=True, timeout=180,
+            )
+        except FileNotFoundError:
+            continue  # try the next binary name
+        except subprocess.TimeoutExpired:
+            return None
+        pdf = pptx_path.with_suffix(".pdf")
+        return pdf if (proc.returncode == 0 and pdf.is_file()) else None
+    return None
 
 
 def export_deck_to_pptx(
@@ -208,15 +337,17 @@ def export_deck_to_pptx(
     *,
     output_path: str,
 ) -> dict:
-    """Build a .pptx from every slide that has a rendered image.
+    """Build a .pptx — and, when LibreOffice is available, a sibling .pdf.
 
-    Layout: one PPTX slide per deck slide, blank background with the
-    image centered + the slide title in a top text box + speaker notes
-    on the notes pane. python-pptx ships in the base install.
+    Image slides embed the rendered PNG, aspect-fitted and centered.
+    `text` slides — and any slide still missing a render — become NATIVE
+    editable text (title + bullets) themed from the deck concept's
+    palette. The slide size follows the deck's `aspect_ratio`.
     """
     try:
-        from pptx import Presentation         # type: ignore
-        from pptx.util import Inches, Pt      # type: ignore
+        from pptx import Presentation              # type: ignore
+        from pptx.util import Inches, Pt           # type: ignore
+        from pptx.enum.shapes import MSO_SHAPE     # type: ignore
     except ImportError as e:
         raise RuntimeError(
             "python-pptx not installed — reinstall the package: "
@@ -228,76 +359,88 @@ def export_deck_to_pptx(
     if not slides:
         raise ValueError(f"deck {deck_id!r} has no slides")
 
+    aspect = deck.get("aspect_ratio") or "16:9"
+    w_in, h_in = _ASPECT_TO_SIZE.get(aspect, _ASPECT_TO_SIZE["16:9"])
+    colors = _theme_colors(deck.get("concept"))
+    accent = _hex_to_rgb(colors["accent"], "#2E7D32")
+    fg = _hex_to_rgb(colors["foreground"], "#1A1A1A")
+    bg = _hex_to_rgb(colors["background"], "#FFFFFF")
+
     prs = Presentation()
-    prs.slide_width = Inches(13.333)   # 16:9 widescreen
-    prs.slide_height = Inches(7.5)
+    sw, sh = Inches(w_in), Inches(h_in)
+    prs.slide_width, prs.slide_height = sw, sh
     blank_layout = prs.slide_layouts[6]
 
     missing_renders: list[int] = []
+    image_slides = 0
+    text_slides = 0
     with tempfile.TemporaryDirectory() as tmpd:
         for s in slides:
             slide = prs.slides.add_slide(blank_layout)
-            # Title box (top center)
-            if s.get("title"):
-                tx = slide.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(12.3), Inches(0.7))
-                tx.text_frame.text = s["title"]
-                for para in tx.text_frame.paragraphs:
-                    for run in para.runs:
-                        run.font.size = Pt(28)
-                        run.font.bold = True
-            # Image (centered, below title)
-            blob = state.backend.get_blob(s["image_blob_path"]) if s.get("image_blob_path") else None
+            mode = s.get("render_mode") or "code-shape"
+            blob = (
+                state.backend.get_blob(s["image_blob_path"])
+                if s.get("image_blob_path") else None
+            )
             if blob:
                 tmp = pathlib.Path(tmpd) / f"slide_{s['id']}.png"
                 tmp.write_bytes(blob)
-                slide.shapes.add_picture(
-                    str(tmp),
-                    Inches(0.5), Inches(1.0),
-                    width=Inches(12.3), height=Inches(6.0),
-                )
+                _add_fitted_picture(slide, str(tmp), sw, sh)
+                image_slides += 1
             else:
-                missing_renders.append(s.get("slide_number") or 0)
-                placeholder = slide.shapes.add_textbox(
-                    Inches(0.5), Inches(3.0), Inches(12.3), Inches(2.0)
+                # Native editable text slide — either a `text` slide by
+                # design, or a not-yet-rendered slide degraded gracefully.
+                _add_text_slide(
+                    slide, s, sw=sw, sh=sh, accent=accent, fg=fg, bg=bg,
+                    Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE,
                 )
-                placeholder.text_frame.text = (
-                    f"[unrendered slide — body:]\n\n{s.get('body') or '(empty)'}"
-                )
-            # Speaker notes
+                text_slides += 1
+                if mode != "text":
+                    missing_renders.append(s.get("slide_number") or 0)
             if s.get("notes"):
                 slide.notes_slide.notes_text_frame.text = s["notes"]
 
     out = pathlib.Path(output_path).expanduser()
     out.parent.mkdir(parents=True, exist_ok=True)
     prs.save(str(out))
+    pdf_path = _pdf_via_soffice(out)
 
-    blob_path = state.project_path(
-        "papers", slug, "decks", deck_id, "exports", out.name,
-    )
-    with open(out, "rb") as f:
-        data = f.read()
-    state.backend.put_blob(blob_path, data)
-
-    # Index the export so the dashboard's Presentation tab can list it.
-    export_doc_path = state.project_path(
-        "papers", slug, "decks", deck_id, "exports", out.name,
-    )
+    # Upload + index each artifact so the dashboard's Presentation tab
+    # lists them.
     now = now_iso()
-    state.backend.set_doc(export_doc_path, {
-        "filename": out.name,
-        "blob_path": blob_path,
-        "size_bytes": len(data),
-        "slide_count": len(slides),
-        "missing_renders": missing_renders,
-        "created_at": now,
-    })
+
+    def _publish(path: pathlib.Path, fmt: str) -> str:
+        blob_path = state.project_path(
+            "papers", slug, "decks", deck_id, "exports", path.name,
+        )
+        data = path.read_bytes()
+        state.backend.put_blob(blob_path, data)
+        state.backend.set_doc(blob_path, {
+            "filename": path.name,
+            "format": fmt,
+            "blob_path": blob_path,
+            "size_bytes": len(data),
+            "slide_count": len(slides),
+            "missing_renders": missing_renders,
+            "created_at": now,
+        })
+        return blob_path
+
+    pptx_blob = _publish(out, "pptx")
+    pdf_blob = _publish(pdf_path, "pdf") if pdf_path else None
 
     return {
         "deck_id": deck_id,
         "deck_title": deck.get("title"),
+        "aspect_ratio": aspect,
         "slide_count": len(slides),
+        "image_slides": image_slides,
+        "text_slides": text_slides,
         "missing_renders": missing_renders,
         "local_path": str(out),
-        "blob_path": blob_path,
+        "blob_path": pptx_blob,
+        "pdf_local_path": str(pdf_path) if pdf_path else None,
+        "pdf_blob_path": pdf_blob,
+        "pdf_skipped": pdf_path is None,
         "size_bytes": os.path.getsize(out),
     }

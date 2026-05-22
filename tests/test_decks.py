@@ -19,6 +19,37 @@ def test_create_deck_seeds_defaults(state):
     assert d["status"] == "draft"
     assert d["slide_count"] == 0
     assert d["concept"] is None
+    assert d["aspect_ratio"] == "16:9"   # default
+
+
+def test_create_deck_with_aspect_ratio(state):
+    slug = _setup(state)
+    d = decks.create_deck(state, slug, title="Poster", aspect_ratio="4:3")
+    assert d["aspect_ratio"] == "4:3"
+
+
+def test_create_deck_rejects_bad_aspect_ratio(state):
+    slug = _setup(state)
+    with pytest.raises(ValueError, match="aspect_ratio"):
+        decks.create_deck(state, slug, title="d", aspect_ratio="21:9")
+
+
+def test_update_deck_aspect_ratio(state):
+    slug = _setup(state)
+    decks.create_deck(state, slug, title="d", deck_id="d")
+    upd = decks.update_deck(state, slug, "d", aspect_ratio="16:10")
+    assert upd["aspect_ratio"] == "16:10"
+    with pytest.raises(ValueError, match="aspect_ratio"):
+        decks.update_deck(state, slug, "d", aspect_ratio="bogus")
+
+
+def test_slide_accepts_text_render_mode(state):
+    slug = _setup(state)
+    decks.create_deck(state, slug, title="d", deck_id="d")
+    s = decks.add_slide(state, slug, "d", slide_number=1, role="outline",
+                        title="Agenda", body="- one\n- two",
+                        render_mode="text")
+    assert s["render_mode"] == "text"
 
 
 def test_create_deck_idempotent(state):

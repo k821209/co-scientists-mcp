@@ -2,8 +2,11 @@
 
 A deck attaches to a paper and holds:
   - `concept`     — palette / typography / motif strings the slides
-                    inherit (the "single source of visual unity")
+                    inherit (the "single source of visual unity"). The
+                    PPTX export harvests `accent` / `bg` / `text` colors
+                    from here to theme native text slides.
   - `theme`       — optional theme slug (e.g. "minimal-modern-academic")
+  - `aspect_ratio` — "16:9" (default) | "16:10" | "4:3"; sets PPTX size
   - `audience`    — free text ("lab seminar", "Nature poster", …)
   - `duration_min` — target talk length in minutes
   - slides as a subcollection
@@ -18,7 +21,10 @@ Each slide doc carries:
                     generate_image (starts with the deck's unity header)
   - `notes`         MANDATORY speaker notes
   - `code`          optional code block (for shape-code render mode)
-  - `render_mode`   "code-shape" | "paper-figure" | "ai-image" | "hybrid"
+  - `render_mode`   "code-shape" | "paper-figure" | "ai-image" |
+                    "hybrid" | "text". A `text` slide carries no image —
+                    it becomes a native (editable) PPTX text slide at
+                    export, styled from the deck concept's palette.
   - `figure_number` if render_mode == paper-figure
   - `status`        "draft" | "rendered"
 
@@ -38,9 +44,10 @@ _VALID_ROLES = {
     "title", "outline", "background", "method", "result",
     "discussion", "conclusion", "qa", "custom",
 }
-_VALID_RENDER_MODES = {"code-shape", "paper-figure", "ai-image", "hybrid"}
+_VALID_RENDER_MODES = {"code-shape", "paper-figure", "ai-image", "hybrid", "text"}
 _VALID_DECK_STATUS = {"draft", "drafted", "rendered"}
 _VALID_SLIDE_STATUS = {"draft", "rendered"}
+_VALID_ASPECT = {"16:9", "16:10", "4:3"}
 
 
 def _ensure_paper(state: State, slug: str) -> None:
@@ -71,6 +78,7 @@ def create_deck(
     audience: str | None = None,
     duration_min: int | None = None,
     theme: str | None = None,
+    aspect_ratio: str = "16:9",
     deck_id: str | None = None,
 ) -> dict:
     """Create a deck attached to `slug`. Idempotent on (slug, deck_id) — if
@@ -80,6 +88,11 @@ def create_deck(
     _ensure_paper(state, slug)
     if not title or not title.strip():
         raise ValueError("title is required")
+    if aspect_ratio not in _VALID_ASPECT:
+        raise ValueError(
+            f"invalid aspect_ratio: {aspect_ratio!r}; "
+            f"choose from {sorted(_VALID_ASPECT)}"
+        )
     deck_id = deck_id or slugify(title)
     path = _deck_path(state, slug, deck_id)
     existing = state.backend.get_doc(path)
@@ -92,6 +105,7 @@ def create_deck(
         "audience": audience,
         "duration_min": duration_min,
         "theme": theme,
+        "aspect_ratio": aspect_ratio,
         "concept": None,            # set later via update_deck
         "status": "draft",
         "slide_count": 0,
@@ -132,6 +146,7 @@ def update_deck(
     audience: str | None = None,
     duration_min: int | None = None,
     theme: str | None = None,
+    aspect_ratio: str | None = None,
     concept: str | None = None,
     status: str | None = None,
 ) -> dict:
@@ -145,6 +160,13 @@ def update_deck(
     if audience is not None: fields["audience"] = audience
     if duration_min is not None: fields["duration_min"] = duration_min
     if theme is not None: fields["theme"] = theme
+    if aspect_ratio is not None:
+        if aspect_ratio not in _VALID_ASPECT:
+            raise ValueError(
+                f"invalid aspect_ratio: {aspect_ratio!r}; "
+                f"choose from {sorted(_VALID_ASPECT)}"
+            )
+        fields["aspect_ratio"] = aspect_ratio
     if concept is not None: fields["concept"] = concept
     if status is not None:
         if status not in _VALID_DECK_STATUS:

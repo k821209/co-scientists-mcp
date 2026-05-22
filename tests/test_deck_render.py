@@ -164,3 +164,97 @@ def test_render_missing_slide_raises(state):
     slug = _setup(state)
     with pytest.raises(NotFound):
         deck_render.render_slide(state, slug, "d", "ghost-id")
+
+
+# ─── text slides + theme ─────────────────────────────────────────────────
+
+
+def test_theme_colors_from_concept():
+    concept = "Palette:\n  bg: #101010  text: #fafafa  accent: #ff8800"
+    c = deck_render._theme_colors(concept)
+    assert c == {
+        "accent": "#ff8800", "background": "#101010", "foreground": "#fafafa",
+    }
+
+
+def test_theme_colors_defaults_when_absent():
+    c = deck_render._theme_colors(None)
+    assert c["accent"] == "#2E7D32"
+    assert c["background"] == "#FFFFFF"
+    assert c["foreground"] == "#1A1A1A"
+
+
+def test_render_slide_text_mode_raises(state):
+    slug = _setup(state)
+    s = decks.add_slide(state, slug, "d", slide_number=1, role="outline",
+                        title="Agenda", body="- a\n- b", render_mode="text")
+    with pytest.raises(ValueError, match="text slides"):
+        deck_render.render_slide(state, slug, "d", s["id"])
+
+
+def test_render_deck_skips_text_slides(state):
+    slug = _setup(state)
+    decks.add_slide(state, slug, "d", slide_number=1, role="outline",
+                    title="Agenda", body="x", render_mode="text")
+    result = deck_render.render_deck(state, slug, "d")
+    assert len(result["skipped"]) == 1
+    assert result["skipped"][0]["reason"] == \
+        "text slide — native PPTX text on export"
+
+
+def test_render_deck_all_text_marks_rendered(state):
+    """A deck of only text slides is fully rendered — text slides never
+    get an image_blob_path, so they must not block the status flip."""
+    slug = _setup(state)
+    decks.add_slide(state, slug, "d", slide_number=1, role="title",
+                    title="t", body="x", render_mode="text")
+    deck_render.render_deck(state, slug, "d")
+    assert decks.get_deck(state, slug, "d")["status"] == "rendered"
+
+
+def test_pdf_via_soffice_missing_returns_none(state, tmp_path, monkeypatch):
+    def _no_soffice(*a, **k):
+        raise FileNotFoundError("soffice")
+    monkeypatch.setattr(deck_render.subprocess, "run", _no_soffice)
+    assert deck_render._pdf_via_soffice(tmp_path / "deck.pptx") is None
+
+
+# ─── PPTX export smoke test (needs the optional python-pptx dep) ─────────
+
+# A valid 1×1 transparent PNG — python-pptx parses the header for sizing.
+import base64 as _b64  # noqa: E402
+_PNG_1x1 = _b64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk"
+    "YAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+)
+
+
+def test_export_deck_to_pptx_smoke(state, tmp_path, monkeypatch):
+    pytest.importorskip("pptx")
+    slug = _setup(state)
+    decks.update_deck(state, slug, "d", concept="accent: #b58900",
+                      aspect_ratio="4:3")
+    # one image slide (paper-figure, rendered)
+    p = tmp_path / "fig.png"
+    p.write_bytes(_PNG_1x1)
+    figures.add_figure(state, slug, figure_number=1, title="F", local_path=str(p))
+    img = decks.add_slide(state, slug, "d", slide_number=1, role="result",
+                          title="Result", notes="n",
+                          render_mode="paper-figure", figure_number=1)
+    deck_render.render_slide(state, slug, "d", img["id"])
+    # one native text slide
+    decks.add_slide(state, slug, "d", slide_number=2, role="outline",
+                    title="Agenda", body="- point one\n- point two",
+                    notes="n2", render_mode="text")
+    # keep the test offline + deterministic — skip the LibreOffice step
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    assert out.is_file()
+    assert res["slide_count"] == 2
+    assert res["image_slides"] == 1
+    assert res["text_slides"] == 1
+    assert res["missing_renders"] == []     # the text slide is not "missing"
+    assert res["aspect_ratio"] == "4:3"
+    assert res["pdf_skipped"] is True
