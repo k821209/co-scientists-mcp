@@ -1,0 +1,18 @@
+[
+  {
+    "origin": [
+      "https://co-scientist-5af1a.web.app",
+      "https://co-scientist-5af1a.firebaseapp.com",
+      "http://localhost:5173",
+      "http://localhost:5000"
+    ],
+    "method": ["GET"],
+    "responseHeader": [
+      "Content-Type",
+      "Content-Disposition",
+      "Content-Length",
+      "Authorization"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]
