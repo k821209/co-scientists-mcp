@@ -337,3 +337,19 @@ install LibreOffice if they want the PDF.
 
 python-pptx ships with the base install. LibreOffice is the only
 optional extra (PDF sibling only).
+
+## Addressing slide comments
+
+Reviewers leave comments on individual slides from the dashboard's
+Presentations tab — the deck analogue of manuscript review comments.
+
+- `list_deck_comments(slug, deck_id)` — open slide comments, each tagged
+  with `slide_number` / `slide_id` / `slide_title` (and an optional
+  `region_id` pointing at one region of a hybrid slide). This is the
+  deck's revision to-do list; check it at session start.
+- For each comment: read it, revise that slide (`update_slide` /
+  `set_slide_regions`), re-render if needed, then
+  `resolve_deck_comment(slug, deck_id, slide_id, comment_id)` —
+  `status="resolved"` if addressed, `"rejected"` if you and the user
+  decide not to act on it.
+- Re-export the deck once the slides are revised.

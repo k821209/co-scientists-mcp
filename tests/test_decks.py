@@ -153,6 +153,69 @@ def test_set_slide_regions_rejects_bad_fit(state):
         ])
 
 
+# ─── slide comments ──────────────────────────────────────────
+
+def _seed_comment(state, slug, deck_id, slide_id, comment_id, **fields):
+    """Simulate the dashboard posting a comment on a slide."""
+    state.backend.set_doc(
+        decks._comment_path(state, slug, deck_id, slide_id, comment_id),
+        {"text": "x", "author": "alice", "status": "open", "source": "user",
+         "region_id": None, "created_at": "2026-01-01", **fields},
+    )
+
+
+def test_list_deck_comments_open_only(state):
+    slug, sid = _region_slide(state)
+    _seed_comment(state, slug, "d", sid, "c1", text="fix it", status="open")
+    _seed_comment(state, slug, "d", sid, "c2", text="done", status="resolved")
+    open_ = decks.list_deck_comments(state, slug, "d")
+    assert [c["comment_id"] for c in open_] == ["c1"]
+    assert open_[0]["slide_id"] == sid
+    assert open_[0]["slide_number"] == 1
+    assert open_[0]["text"] == "fix it"
+    assert len(decks.list_deck_comments(state, slug, "d", status=None)) == 2
+
+
+def test_list_deck_comments_sorted_by_slide(state):
+    slug = _setup(state)
+    decks.create_deck(state, slug, title="d", deck_id="d")
+    s1 = decks.add_slide(state, slug, "d", slide_number=1, role="title", title="A")
+    s2 = decks.add_slide(state, slug, "d", slide_number=2, role="result", title="B")
+    _seed_comment(state, slug, "d", s2["id"], "c2")
+    _seed_comment(state, slug, "d", s1["id"], "c1")
+    assert [c["slide_number"] for c in decks.list_deck_comments(state, slug, "d")] \
+        == [1, 2]
+
+
+def test_resolve_deck_comment(state):
+    slug, sid = _region_slide(state)
+    _seed_comment(state, slug, "d", sid, "c1")
+    upd = decks.resolve_deck_comment(state, slug, "d", sid, "c1")
+    assert upd["status"] == "resolved" and upd["resolved_at"] is not None
+    reopened = decks.resolve_deck_comment(state, slug, "d", sid, "c1",
+                                          status="open")
+    assert reopened["status"] == "open" and reopened["resolved_at"] is None
+
+
+def test_resolve_deck_comment_rejects_bad_status(state):
+    slug, sid = _region_slide(state)
+    _seed_comment(state, slug, "d", sid, "c1")
+    with pytest.raises(ValueError, match="status must be"):
+        decks.resolve_deck_comment(state, slug, "d", sid, "c1", status="maybe")
+
+
+def test_resolve_missing_comment_raises(state):
+    slug, sid = _region_slide(state)
+    with pytest.raises(NotFound):
+        decks.resolve_deck_comment(state, slug, "d", sid, "ghost")
+
+
+def test_list_deck_comments_missing_deck_raises(state):
+    slug = _setup(state)
+    with pytest.raises(NotFound):
+        decks.list_deck_comments(state, slug, "ghost")
+
+
 def test_create_deck_idempotent(state):
     slug = _setup(state)
     a = decks.create_deck(state, slug, title="Seminar", deck_id="d1")

@@ -1002,6 +1002,30 @@ def build_mcp(state: State) -> FastMCP:
         return _decks.renumber_deck(state, slug, deck_id)
 
     @mcp.tool()
+    def list_deck_comments(
+        slug: str, deck_id: str, status: str | None = "open",
+    ) -> list[dict[str, Any]]:
+        """Comments reviewers left on the deck's slides from the dashboard,
+        each tagged with slide_number / slide_id / slide_title (and an
+        optional region_id). `status='open'` (default) is the agent's
+        to-do list — revise those slides, then `resolve_deck_comment`.
+        The deck analogue of the manuscript review loop.
+        """
+        return _decks.list_deck_comments(state, slug, deck_id, status=status)
+
+    @mcp.tool()
+    def resolve_deck_comment(
+        slug: str, deck_id: str, slide_id: str, comment_id: str,
+        status: str = "resolved",
+    ) -> dict[str, Any]:
+        """Close a slide comment once addressed: status 'resolved'
+        (done) or 'rejected' (declined), or 'open' to reopen.
+        """
+        return _decks.resolve_deck_comment(
+            state, slug, deck_id, slide_id, comment_id, status=status,
+        )
+
+    @mcp.tool()
     def set_slide_regions(
         slug: str,
         deck_id: str,

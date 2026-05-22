@@ -1,14 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
-import { collection, onSnapshot } from "firebase/firestore";
+import {
+  addDoc, collection, doc, onSnapshot, updateDoc,
+} from "firebase/firestore";
 import {
   Presentation, FileText, ArrowRight, ChevronDown, ChevronRight, Download,
+  MessageSquare, ArrowUp, ArrowDown, Check, Loader2,
 } from "lucide-react";
 import { db } from "@/firebase";
+import { useAuth } from "@/auth";
 import { downloadProjectBlobAsFile } from "@/projectAuth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import { type ProjectContext } from "./ProjectShell";
 
 interface Paper { id: string; slug: string; title: string }
@@ -50,6 +56,17 @@ interface Slide {
   render_mode?: string;
   figure_number?: number | null;
   status?: string;
+}
+
+interface SlideComment {
+  id: string;
+  text: string;
+  author?: string;
+  status?: string;          // open | resolved | rejected
+  source?: string;          // user | ai
+  region_id?: string | null;
+  created_at?: string;
+  resolved_at?: string | null;
 }
 
 export function ProjectPresentations() {
@@ -239,6 +256,22 @@ function DeckCard({ pid, deck, open, onToggle }: {
     }
   };
 
+  // Reorder: swap a slide's slide_number with its display neighbour.
+  const moveSlide = async (index: number, dir: -1 | 1) => {
+    const a = slides[index];
+    const b = slides[index + dir];
+    if (!a || !b) return;
+    const base = ["projects", pid, "papers", deck.paperSlug,
+                  "decks", deck.id, "slides"] as const;
+    const now = new Date().toISOString();
+    await Promise.all([
+      updateDoc(doc(db, ...base, a.id),
+                { slide_number: b.slide_number ?? 0, updated_at: now }),
+      updateDoc(doc(db, ...base, b.id),
+                { slide_number: a.slide_number ?? 0, updated_at: now }),
+    ]);
+  };
+
   return (
     <Card>
       <CardHeader
@@ -333,7 +366,19 @@ function DeckCard({ pid, deck, open, onToggle }: {
             </p>
           ) : (
             <div className="space-y-2">
-              {slides.map((s) => <SlideRow key={s.id} slide={s} />)}
+              {slides.map((s, i) => (
+                <SlideRow
+                  key={s.id}
+                  slide={s}
+                  pid={pid}
+                  paperSlug={deck.paperSlug}
+                  deckId={deck.id}
+                  canMoveUp={i > 0}
+                  canMoveDown={i < slides.length - 1}
+                  onMoveUp={() => moveSlide(i, -1)}
+                  onMoveDown={() => moveSlide(i, 1)}
+                />
+              ))}
             </div>
           )}
         </CardContent>
@@ -342,35 +387,137 @@ function DeckCard({ pid, deck, open, onToggle }: {
   );
 }
 
-function SlideRow({ slide }: { slide: Slide }) {
+function SlideRow({
+  slide, pid, paperSlug, deckId, canMoveUp, canMoveDown, onMoveUp, onMoveDown,
+}: {
+  slide: Slide;
+  pid: string;
+  paperSlug: string;
+  deckId: string;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+}) {
+  const { user } = useAuth();
   const [expanded, setExpanded] = useState(false);
+  const [comments, setComments] = useState<SlideComment[]>([]);
+  const [draft, setDraft] = useState("");
+  const [posting, setPosting] = useState(false);
   const notesMissing = !slide.notes || !slide.notes.trim();
+
+  useEffect(() => {
+    const ref = collection(
+      db, "projects", pid, "papers", paperSlug, "decks", deckId,
+      "slides", slide.id, "comments",
+    );
+    return onSnapshot(
+      ref,
+      (snap) =>
+        setComments(
+          snap.docs
+            .map((d) => ({ id: d.id, ...(d.data() as Omit<SlideComment, "id">) }))
+            .sort((a, b) => (a.created_at || "").localeCompare(b.created_at || "")),
+        ),
+      () => setComments([]),
+    );
+  }, [pid, paperSlug, deckId, slide.id]);
+
+  const openCount = comments.filter((c) => (c.status ?? "open") === "open").length;
+
+  const postComment = async () => {
+    const text = draft.trim();
+    if (!text) return;
+    setPosting(true);
+    try {
+      await addDoc(
+        collection(db, "projects", pid, "papers", paperSlug, "decks", deckId,
+                   "slides", slide.id, "comments"),
+        {
+          text,
+          author: user?.displayName || user?.email || "you",
+          status: "open",
+          source: "user",
+          region_id: null,
+          created_at: new Date().toISOString(),
+        },
+      );
+      setDraft("");
+    } catch (e) {
+      alert(`Comment failed: ${(e as Error).message}`);
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  const setCommentStatus = (commentId: string, status: string) =>
+    updateDoc(
+      doc(db, "projects", pid, "papers", paperSlug, "decks", deckId,
+          "slides", slide.id, "comments", commentId),
+      {
+        status,
+        resolved_at: status === "open" ? null : new Date().toISOString(),
+      },
+    );
+
   return (
     <div className="rounded-md border bg-card p-2">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-2 text-left"
-      >
-        <Badge variant="outline" className="font-mono text-[10px]">
-          {slide.slide_number ?? "?"}
-        </Badge>
-        {slide.role && (
-          <Badge variant="secondary" className="text-[10px]">{slide.role}</Badge>
-        )}
-        <span className="flex-1 truncate text-sm font-medium">
-          {slide.title || <em className="text-muted-foreground">untitled</em>}
-        </span>
-        {slide.render_mode && (
-          <Badge variant="outline" className="text-[10px]">{slide.render_mode}</Badge>
-        )}
-        {notesMissing && (
-          <Badge variant="outline" className="border-amber-300 text-[10px] text-amber-700">
-            no notes
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        >
+          <Badge variant="outline" className="shrink-0 font-mono text-[10px]">
+            {slide.slide_number ?? "?"}
           </Badge>
-        )}
-        {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-      </button>
+          {slide.role && (
+            <Badge variant="secondary" className="shrink-0 text-[10px]">
+              {slide.role}
+            </Badge>
+          )}
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">
+            {slide.title || <em className="text-muted-foreground">untitled</em>}
+          </span>
+          {openCount > 0 && (
+            <Badge
+              variant="outline"
+              className="shrink-0 gap-1 border-primary/40 text-[10px] text-primary"
+            >
+              <MessageSquare className="h-3 w-3" /> {openCount}
+            </Badge>
+          )}
+          {slide.render_mode && (
+            <Badge variant="outline" className="hidden shrink-0 text-[10px] sm:inline-flex">
+              {slide.render_mode}
+            </Badge>
+          )}
+          {notesMissing && (
+            <Badge variant="outline" className="shrink-0 border-amber-300 text-[10px] text-amber-700">
+              no notes
+            </Badge>
+          )}
+          {expanded
+            ? <ChevronDown className="h-3 w-3 shrink-0" />
+            : <ChevronRight className="h-3 w-3 shrink-0" />}
+        </button>
+        <div className="flex shrink-0">
+          <button
+            type="button" aria-label="move slide up" disabled={!canMoveUp}
+            onClick={onMoveUp}
+            className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
+          >
+            <ArrowUp className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button" aria-label="move slide down" disabled={!canMoveDown}
+            onClick={onMoveDown}
+            className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
+          >
+            <ArrowDown className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
       {expanded && (
         <div className="mt-2 space-y-2 text-xs">
           {slide.body && (
@@ -411,6 +558,81 @@ function SlideRow({ slide }: { slide: Slide }) {
               References paper figure {slide.figure_number}
             </a>
           )}
+
+          {/* Per-slide comments — reviewers leave feedback here; Claude
+              Code reads the open ones with list_deck_comments. */}
+          <div>
+            <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+              Comments
+            </div>
+            {comments.length === 0 ? (
+              <p className="italic text-muted-foreground">
+                No comments on this slide yet.
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                {comments.map((c) => (
+                  <div key={c.id} className="rounded border bg-muted/30 p-2">
+                    <div className="whitespace-pre-wrap break-words">{c.text}</div>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground">
+                      <span>{c.author || "anon"}</span>
+                      {c.created_at && (
+                        <span>· {new Date(c.created_at).toLocaleString()}</span>
+                      )}
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "text-[9px]",
+                          (c.status ?? "open") === "open"
+                            ? "border-primary/40 text-primary"
+                            : "text-muted-foreground",
+                        )}
+                      >
+                        {c.status ?? "open"}
+                      </Badge>
+                      {(c.status ?? "open") === "open" ? (
+                        <button
+                          type="button"
+                          onClick={() => setCommentStatus(c.id, "resolved")}
+                          className="inline-flex items-center gap-0.5 text-primary hover:underline"
+                        >
+                          <Check className="h-3 w-3" /> Resolve
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setCommentStatus(c.id, "open")}
+                          className="hover:underline"
+                        >
+                          Reopen
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="mt-2 space-y-1.5">
+              <Textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                rows={2}
+                placeholder="Comment on this slide…"
+                className="text-xs"
+              />
+              <Button
+                size="sm"
+                className="h-7 gap-1 text-xs"
+                disabled={posting || !draft.trim()}
+                onClick={postComment}
+              >
+                {posting
+                  ? <Loader2 className="h-3 w-3 animate-spin" />
+                  : <MessageSquare className="h-3 w-3" />}
+                Comment
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>

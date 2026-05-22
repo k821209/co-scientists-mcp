@@ -10,7 +10,7 @@ only) and refers the agent here on every session start.
 """
 from __future__ import annotations
 
-GUIDE_VERSION = "2026-05-22a"
+GUIDE_VERSION = "2026-05-23a"
 
 
 def render_guide() -> str:
@@ -43,6 +43,10 @@ On every session start:
    the open comments with their `anchor_text` — use that quoted passage
    to locate the exact place in the manuscript the user is pointing at,
    then offer `/paper-revision`.
+   For any deck on the paper, also call
+   `mcp__co_scientist__list_deck_comments(slug, deck_id)` — open slide
+   comments are the deck's revision to-do list; revise the slide, then
+   `resolve_deck_comment`.
 4. For each paper, call `mcp__co_scientist__check_requirements(slug)`.
    If `configured` is true and `violations` is non-empty, surface them
    (e.g. "abstract 178/150 words — over the Short Communication limit")

@@ -449,3 +449,76 @@ def renumber_deck(state: State, slug: str, deck_id: str) -> dict:
             if old is not None:
                 old_to_new[old] = i
     return {"count": len(slides), "old_to_new": old_to_new}
+
+
+# ─── slide comments ─────────────────────────────────────────────────────────
+#
+# A reviewer leaves a comment on a specific slide from the dashboard's
+# Presentations tab. Mirrors the manuscript review loop, slide-scoped:
+# the dashboard writes `source='user'` comments, the agent reads the open
+# ones with list_deck_comments, revises the slide, then resolves them.
+# `region_id` optionally points the comment at one region of a hybrid
+# slide.
+
+_VALID_COMMENT_STATUS = {"open", "resolved", "rejected"}
+
+
+def _comments_path(state: State, slug: str, deck_id: str, slide_id: str) -> str:
+    return state.project_path(
+        "papers", slug, "decks", deck_id, "slides", slide_id, "comments",
+    )
+
+
+def _comment_path(state: State, slug: str, deck_id: str, slide_id: str,
+                  comment_id: str) -> str:
+    return _comments_path(state, slug, deck_id, slide_id) + "/" + comment_id
+
+
+def list_deck_comments(
+    state: State, slug: str, deck_id: str, *, status: str | None = "open",
+) -> list[dict]:
+    """Every comment across the deck's slides, each tagged with its slide.
+
+    `status='open'` (default) returns only unaddressed comments — the
+    agent's to-do list for revising the deck. Pass status=None for all.
+    """
+    _ensure_paper(state, slug)
+    if state.backend.get_doc(_deck_path(state, slug, deck_id)) is None:
+        raise NotFound(f"deck not found: {deck_id!r} on paper {slug!r}")
+    out: list[dict] = []
+    for slide in list_slides(state, slug, deck_id):
+        pairs = state.backend.list_collection(
+            _comments_path(state, slug, deck_id, slide["id"]))
+        for cid, c in pairs:
+            if status is not None and c.get("status") != status:
+                continue
+            out.append({
+                "comment_id": cid,
+                "slide_id": slide["id"],
+                "slide_number": slide.get("slide_number"),
+                "slide_title": slide.get("title"),
+                **c,
+            })
+    out.sort(key=lambda c: (c.get("slide_number") or 0,
+                            c.get("created_at") or ""))
+    return out
+
+
+def resolve_deck_comment(
+    state: State, slug: str, deck_id: str, slide_id: str, comment_id: str,
+    *, status: str = "resolved",
+) -> dict:
+    """Mark a slide comment `resolved` (addressed) or `rejected` (declined)
+    — or `open` to reopen it."""
+    if status not in _VALID_COMMENT_STATUS:
+        raise ValueError(
+            f"status must be one of {sorted(_VALID_COMMENT_STATUS)}"
+        )
+    path = _comment_path(state, slug, deck_id, slide_id, comment_id)
+    if state.backend.get_doc(path) is None:
+        raise NotFound(f"comment not found: {comment_id!r}")
+    state.backend.update_doc(path, {
+        "status": status,
+        "resolved_at": now_iso() if status != "open" else None,
+    })
+    return state.backend.get_doc(path)
