@@ -56,6 +56,10 @@ _VALID_SLIDE_STATUS = {"draft", "rendered"}
 _VALID_ASPECT = {"16:9", "16:10", "4:3"}
 # A region is a leaf image — it cannot itself be `hybrid` or `text`.
 _VALID_REGION_MODES = {"ai-image", "code-shape", "paper-figure"}
+# How a region's image fills its box: contain = letterbox, never crop
+# (figures, charts, tables); cover = fill the box, crop overflow
+# (eyecatch / decorative / photos).
+_VALID_FIT_MODES = {"contain", "cover"}
 
 
 def _ensure_paper(state: State, slug: str) -> None:
@@ -334,9 +338,15 @@ def _validate_region(r: dict, index: int) -> dict:
         raise ValueError(f"region {index}: paper-figure region needs figure_number")
     if mode == "ai-image" and not (prompt and str(prompt).strip()):
         raise ValueError(f"region {index}: ai-image region needs a prompt")
+    fit = r.get("fit") or "contain"
+    if fit not in _VALID_FIT_MODES:
+        raise ValueError(
+            f"region {index}: fit must be 'contain' or 'cover', got {fit!r}"
+        )
     return {
         "render_mode": mode,
         "x": box["x"], "y": box["y"], "w": box["w"], "h": box["h"],
+        "fit": fit,
         "figure_number": fig,
         "prompt": prompt,
         "code": r.get("code"),

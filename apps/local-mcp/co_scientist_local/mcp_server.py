@@ -983,11 +983,16 @@ def build_mcp(state: State) -> FastMCP:
         render_mode='hybrid'. Each region is a dict:
           {render_mode: "ai-image" | "code-shape" | "paper-figure",
            x, y, w, h: floats 0..1 — fractions of the slide,
+           fit: "contain" (default — letterbox, never crop; figures /
+                charts) | "cover" (fill the box, crop overflow;
+                eyecatch / decorative),
            figure_number | prompt | code: type-specific source,
            caption: optional text under the image}
         Regions are assigned ids r1..rN in order; render each with
-        render_region. Re-calling replaces the layout but keeps the
-        rendered image of any region whose source is unchanged.
+        render_region — which also records the rendered image's pixel
+        size (image_width / image_height) on the region. Re-calling
+        replaces the layout but keeps the rendered image of any region
+        whose source is unchanged.
         """
         return _decks.set_slide_regions(
             state, slug, deck_id, slide_id, regions=regions,

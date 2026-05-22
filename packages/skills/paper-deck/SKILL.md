@@ -184,10 +184,10 @@ mcp__co_scientist__set_slide_regions(
   slug, deck_id, slide_id,
   regions=[
     { "render_mode": "paper-figure", "figure_number": 2,
-      "x": 0.05, "y": 0.22, "w": 0.42, "h": 0.62,
+      "x": 0.05, "y": 0.22, "w": 0.42, "h": 0.62, "fit": "contain",
       "caption": "Fig 2 — measured response" },
     { "render_mode": "ai-image", "prompt": "{accent} pathway schematic …",
-      "x": 0.52, "y": 0.22, "w": 0.43, "h": 0.62,
+      "x": 0.52, "y": 0.22, "w": 0.43, "h": 0.62, "fit": "contain",
       "caption": "Proposed mechanism" },
   ],
 )
@@ -203,6 +203,14 @@ mcp__co_scientist__set_slide_regions(
   - **2×2**: four 0.42×0.34 boxes at x∈{0.05,0.52}, y∈{0.22,0.60}
 - Each region has its own `render_mode` (`ai-image` / `code-shape` /
   `paper-figure`) and source. A region can't itself be `hybrid`/`text`.
+- **`fit`** decides how the image fills its box:
+  - `contain` (default) — letterbox, never crop. Use for figures,
+    charts, tables, schematics — anything where cropping loses data.
+  - `cover` — fill the box, crop the overflow. Use for an eyecatch /
+    decorative / photo region where edge loss is fine.
+- `render_region` records the rendered image's real pixel size
+  (`image_width` / `image_height`) on the region — handy if you want
+  to nudge a box to match the image's true aspect on a second pass.
 - At export each region becomes a **separate, individually editable
   PPTX picture** — the user can nudge them in PowerPoint.
 

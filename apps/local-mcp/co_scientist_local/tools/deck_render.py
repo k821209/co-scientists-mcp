@@ -153,6 +153,22 @@ def _figure_png(state: State, slug: str, figure_number) -> bytes:
     return blob
 
 
+def _png_size(data: bytes) -> tuple[int, int] | None:
+    """(width, height) in pixels from a PNG header, or None if not a PNG."""
+    if (len(data) >= 24 and data[:8] == b"\x89PNG\r\n\x1a\n"
+            and data[12:16] == b"IHDR"):
+        import struct
+        return struct.unpack(">II", data[16:24])
+    return None
+
+
+def _image_dims(data: bytes) -> dict:
+    """`{image_width, image_height}` for a PNG, else empty — stored on the
+    placeholder so layout can reconcile the box against the real image."""
+    sz = _png_size(data)
+    return {"image_width": sz[0], "image_height": sz[1]} if sz else {}
+
+
 def render_slide(
     state: State,
     slug: str,
@@ -216,6 +232,7 @@ def render_slide(
             "rendered_at": now,
             "status": "rendered",
             "updated_at": now,
+            **_image_dims(png),
         },
     )
     return {
@@ -282,6 +299,7 @@ def _render_one_region(
     _update_region(state, slug, deck_id, slide["id"], region_id, {
         "image_blob_path": blob_path,
         "rendered_at": now_iso(),
+        **_image_dims(png),
     })
     return {
         "region_id": region_id,
@@ -436,15 +454,31 @@ def _hex_to_rgb(value: str, fallback: str):
         return RGBColor(int(fb[0:2], 16), int(fb[2:4], 16), int(fb[4:6], 16))
 
 
-def _add_fitted_picture(slide, img_path: str, *, left, top, box_w, box_h) -> None:
-    """Place an image scaled to fit within (box_w × box_h), centered in the
-    box at (left, top). Aspect ratio preserved."""
+def _place_picture(slide, img_path: str, *, left, top, box_w, box_h,
+                   fit: str = "contain") -> None:
+    """Place an image inside the box at (left, top, box_w, box_h).
+
+    fit='contain' — scaled to fit entirely, centered, letterboxed; never
+    crops (figures, charts, tables). fit='cover' — fills the box, the
+    overflowing edges cropped (eyecatch, decorative, photos)."""
     pic = slide.shapes.add_picture(img_path, left, top)
-    scale = min(box_w / pic.width, box_h / pic.height)
-    pic.width = int(pic.width * scale)
-    pic.height = int(pic.height * scale)
-    pic.left = int(left + (box_w - pic.width) / 2)
-    pic.top = int(top + (box_h - pic.height) / 2)
+    iw, ih = pic.width, pic.height
+    if fit == "cover" and iw > 0 and ih > 0:
+        image_ar, box_ar = iw / ih, box_w / box_h
+        if image_ar > box_ar:            # too wide → crop left/right
+            crop = (1 - box_ar / image_ar) / 2
+            pic.crop_left = pic.crop_right = crop
+        elif image_ar < box_ar:          # too tall → crop top/bottom
+            crop = (1 - image_ar / box_ar) / 2
+            pic.crop_top = pic.crop_bottom = crop
+        pic.left, pic.top = int(left), int(top)
+        pic.width, pic.height = int(box_w), int(box_h)
+    else:                                # contain
+        scale = min(box_w / iw, box_h / ih)
+        pic.width = int(iw * scale)
+        pic.height = int(ih * scale)
+        pic.left = int(left + (box_w - pic.width) / 2)
+        pic.top = int(top + (box_h - pic.height) / 2)
 
 
 def _add_slide_frame(slide, row, *, sw, sh, accent, fg, bg,
@@ -522,8 +556,9 @@ def _add_hybrid_slide(slide, row, state, tmpd, *, sw, sh, accent, fg, bg,
         if blob:
             tmp = pathlib.Path(tmpd) / f"region_{row['id']}_{r['id']}.png"
             tmp.write_bytes(blob)
-            _add_fitted_picture(slide, str(tmp),
-                                left=left, top=top, box_w=box_w, box_h=img_h)
+            _place_picture(slide, str(tmp),
+                           left=left, top=top, box_w=box_w, box_h=img_h,
+                           fit=r.get("fit") or "contain")
         else:
             unrendered += 1
             box = slide.shapes.add_textbox(left, top, box_w, img_h)
@@ -634,8 +669,10 @@ def export_deck_to_pptx(
                 if blob:
                     tmp = pathlib.Path(tmpd) / f"slide_{s['id']}.png"
                     tmp.write_bytes(blob)
-                    _add_fitted_picture(slide, str(tmp),
-                                        left=0, top=0, box_w=sw, box_h=sh)
+                    # Full-bleed single image — always contain (a bare
+                    # figure must never be cropped to fill the slide).
+                    _place_picture(slide, str(tmp),
+                                   left=0, top=0, box_w=sw, box_h=sh)
                     image_slides += 1
                 else:
                     # Native editable text slide — a `text` slide by design,

@@ -397,3 +397,59 @@ def test_export_hybrid_slide_smoke(state, tmp_path, monkeypatch):
     pics = [sh for sh in prs.slides[0].shapes
             if sh.shape_type == MSO_SHAPE_TYPE.PICTURE]
     assert len(pics) == 2   # two region images placed as separate shapes
+
+
+# ─── placeholder metadata: fit mode + captured image size ────
+
+
+def test_png_size_parses_dimensions():
+    assert deck_render._png_size(_PNG_1x1) == (1, 1)
+    assert deck_render._png_size(b"not a png at all") is None
+    assert deck_render._image_dims(_PNG_1x1) == {
+        "image_width": 1, "image_height": 1,
+    }
+    assert deck_render._image_dims(b"junk") == {}
+
+
+def test_render_region_records_image_dimensions(state, tmp_path):
+    slug, sid = _hybrid_setup(state, tmp_path)
+    deck_render.render_region(state, slug, "d", sid, "r1")
+    region = decks.list_slides(state, slug, "d")[0]["regions"][0]
+    assert region["image_width"] == 1 and region["image_height"] == 1
+
+
+def test_render_slide_records_image_dimensions(state, tmp_path):
+    slug = _setup(state)
+    p = tmp_path / "fig.png"
+    p.write_bytes(_PNG_1x1)
+    figures.add_figure(state, slug, figure_number=1, title="F", local_path=str(p))
+    s = decks.add_slide(state, slug, "d", slide_number=1, role="result",
+                        title="R", render_mode="paper-figure", figure_number=1)
+    deck_render.render_slide(state, slug, "d", s["id"])
+    slide = decks.list_slides(state, slug, "d")[0]
+    assert slide["image_width"] == 1 and slide["image_height"] == 1
+
+
+def test_export_cover_region_crops(state, tmp_path, monkeypatch):
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    slug = _setup(state)
+    p = tmp_path / "fig.png"
+    p.write_bytes(_PNG_1x1)
+    figures.add_figure(state, slug, figure_number=1, title="F", local_path=str(p))
+    s = decks.add_slide(state, slug, "d", slide_number=1, role="result", title="R")
+    # square image (1×1) into a portrait box with fit=cover → crop sides
+    decks.set_slide_regions(state, slug, "d", s["id"], regions=[
+        {"render_mode": "paper-figure", "figure_number": 1, "fit": "cover",
+         "x": 0.1, "y": 0.25, "w": 0.3, "h": 0.6},
+    ])
+    deck_render.render_region(state, slug, "d", s["id"], "r1")
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    prs = Presentation(str(out))
+    pic = next(sh for sh in prs.slides[0].shapes
+               if sh.shape_type == MSO_SHAPE_TYPE.PICTURE)
+    assert pic.crop_left > 0   # cover cropped the overflowing edges

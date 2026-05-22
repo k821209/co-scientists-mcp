@@ -126,6 +126,33 @@ def test_set_slide_regions_keeps_render_on_unchanged_source(state):
     assert upd["regions"][0]["image_blob_path"] == "some/blob.png"
 
 
+def test_set_slide_regions_default_fit_is_contain(state):
+    slug, sid = _region_slide(state)
+    upd = decks.set_slide_regions(state, slug, "d", sid, regions=[
+        {"render_mode": "ai-image", "prompt": "x",
+         "x": 0.05, "y": 0.2, "w": 0.4, "h": 0.6},
+    ])
+    assert upd["regions"][0]["fit"] == "contain"
+
+
+def test_set_slide_regions_accepts_cover_fit(state):
+    slug, sid = _region_slide(state)
+    upd = decks.set_slide_regions(state, slug, "d", sid, regions=[
+        {"render_mode": "ai-image", "prompt": "x", "fit": "cover",
+         "x": 0.05, "y": 0.2, "w": 0.4, "h": 0.6},
+    ])
+    assert upd["regions"][0]["fit"] == "cover"
+
+
+def test_set_slide_regions_rejects_bad_fit(state):
+    slug, sid = _region_slide(state)
+    with pytest.raises(ValueError, match="fit must be"):
+        decks.set_slide_regions(state, slug, "d", sid, regions=[
+            {"render_mode": "ai-image", "prompt": "x", "fit": "stretch",
+             "x": 0.05, "y": 0.2, "w": 0.4, "h": 0.6},
+        ])
+
+
 def test_create_deck_idempotent(state):
     slug = _setup(state)
     a = decks.create_deck(state, slug, title="Seminar", deck_id="d1")
