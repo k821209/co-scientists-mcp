@@ -43,11 +43,46 @@ skill is provider-agnostic.
   manuscript**. Otherwise it sits as an asset (use `figure_number`
   unset; the tool stores it under `papers/{slug}/assets/`).
 
+## References (load these — don't reinvent)
+
+This skill ships with reusable scaffolds. **Read the ones that match
+your task before writing prompts** — the painter LLM produces much
+sharper diagrams when fed exact hex codes, shape conventions, and
+arrow rules from these guides than when given freeform descriptions.
+
+```
+references/
+  index.md                       # type ↔ keyword map (auto-detect)
+  styles/
+    pathway_diagram.md           # metabolic / signaling / biosynthesis
+    network_diagram.md           # PPI / GRN / co-expression
+    workflow_pipeline.md         # protocols / bioinfo pipelines
+    comparison_chart.md          # bar charts / treatment vs control
+    architecture_diagram.md      # system / platform / software stack
+    heatmap_matrix.md            # heatmaps / correlation matrices
+    phylogenetic_tree.md         # cladograms / dendrograms
+templates/
+  color_palettes.md              # 6 palettes, exact hex codes
+  style_guidelines.md            # typography, shapes, arrows, layout
+  critique_checklist.md          # 6-category weighted rubric
+```
+
+Each `styles/*.md` file contains: characteristics, layout patterns
+(ASCII), element conventions table, arrow conventions table, prompt
+keywords, and a ready-to-adapt example prompt fragment. Copy hex codes
+and shape rules verbatim into your generation prompt — never describe
+colors by name alone.
+
 ## Flow
 
 ### 1. Classify diagram type
 
-Quick keyword sniff:
+**Read `references/index.md`** — it has the canonical keyword map and
+auto-detection rules. Pick the type with the most keyword matches; if
+the content spans two types, treat the dominant one as primary and
+note the secondary.
+
+Quick keyword sniff (full rules in `index.md`):
 
 | Type           | Keywords / cue                                       |
 | -------------- | ---------------------------------------------------- |
@@ -56,15 +91,29 @@ Quick keyword sniff:
 | `workflow`     | "pipeline," "flowchart," "steps," "method overview"  |
 | `comparison`   | "vs," "before/after," "wild-type vs mutant"          |
 | `architecture` | "model," "system," "block diagram"                   |
-| `heatmap`      | "expression heatmap" (better produced via `analysis-run` + matplotlib, NOT this skill) |
+| `heatmap`      | conceptual matrix only; for REAL data → `/analysis-run` |
 | `tree`         | "phylogeny," "lineage," "hierarchy"                  |
 
-If the user wants real data plots (heatmap, scatter, bar) — defer to
-`/analysis-run`; this skill is for SCHEMATICS only.
+If the user wants real data plots (heatmap of actual expression
+values, scatter, statistical bar) — defer to `/analysis-run` with
+matplotlib/seaborn. This skill is for SCHEMATICS and conceptual
+figures only.
 
 ### 2. Blueprint
 
-Spell out before generating:
+**Before drafting the blueprint, read three files:**
+
+1. `references/styles/{type}.md` for the classified type — gives you
+   layout patterns, the element/arrow conventions tables, and a
+   reference prompt fragment to anchor against.
+2. `templates/color_palettes.md` — pick the palette that matches the
+   type (the per-type recommendation is in the "Palette Selection
+   Guide" table). Note the exact hex codes you will use.
+3. `templates/style_guidelines.md` — Typography table, node/shape
+   conventions, arrow rules, layout spacing. This is the cross-type
+   baseline.
+
+Now spell out the blueprint, citing the conventions you just loaded:
 
 ```
 Title: <figure title>
@@ -96,6 +145,21 @@ Show this to the user, ask for confirmations / tweaks. THEN generate.
 
 ### 3. Build the prompt + generate
 
+Follow the **7-layer prompt template** in
+`templates/style_guidelines.md` ("Prompt Construction Template"
+section) — STYLE → LAYOUT → ENTITIES → RELATIONSHIPS → GROUPS →
+LABELS → NEGATIVE. The example prompt fragment at the bottom of the
+matching `references/styles/{type}.md` is a good starting point;
+substitute in your blueprint's entities and adapt the layout
+direction.
+
+Rules for the prompt:
+- Always use exact hex codes (`#0066CC`), never color names ("blue").
+- Always include the NEGATIVE layer: "No 3D effects, no drop shadows,
+  no gradients, no decorative elements, no photo-realistic textures".
+- Specify the canvas: "Scientific journal figure, flat design, clean
+  white background, sans-serif".
+
 From the blueprint, write a single prompt for the painter:
 
 ```
@@ -124,17 +188,26 @@ result = mcp__co_scientist__generate_image(
 
 ### 4. Critique + iterate (max 3)
 
-Inspect the output:
-- All entities present? Spelled correctly?
-- Relationships go the right direction?
-- Spatial layout matches blueprint?
-- Labels outside, not inside?
+Score the output against `templates/critique_checklist.md`. The six
+weighted categories (Arrow Correctness 25%, Color Consistency 25%,
+Text Readability 15%, Layout Balance 15%, Academic Style 10%,
+Content Accuracy 10%) cover the failure modes the painter LLM
+introduces.
 
-If something's off, tighten the prompt — call out the SPECIFIC
-problem the painter introduced. E.g., "the previous version put EGFR
-inside the nucleus; instead, put it on the membrane line at the top".
-Re-generate. After 3 attempts, change tactic: simplify the blueprint
-(fewer entities) and start fresh.
+Quick sniff (the checklist has the full check items):
+- All entities present? Spelled correctly?
+- Relationships go the right direction? Inhibition uses flat-bar, not triangle?
+- Spatial layout matches blueprint? No crowded-vs-empty halves?
+- Labels outside, not inside? Adequate contrast?
+- White background, no shadows, no gradients?
+
+**PASS**: overall weighted >= 3.5 AND no category < 2.5. Otherwise
+write targeted edit instructions (max 5, prioritized by weight — fix
+Arrow and Color issues first) using the edit-instruction format in
+the checklist, and re-prompt.
+
+After 3 attempts, change tactic: simplify the blueprint (fewer
+entities) and start fresh — chained edits degrade text fidelity.
 
 ### 5. Save the final version
 
