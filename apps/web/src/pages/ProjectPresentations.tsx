@@ -728,7 +728,11 @@ function MiniMarkdown({ text }: { text: string }) {
         const h = raw.match(/^\s*#{1,6}\s+(.+\S)\s*$/);
         if (h) {
           return (
-            <div key={i} className="mt-1 font-semibold text-foreground">
+            <div
+              key={i}
+              className="mt-1 font-semibold text-foreground"
+              style={{ fontSize: "1.3em" }}
+            >
               {renderInline(h[1])}
             </div>
           );
@@ -802,15 +806,18 @@ function SlideFrame({
   return (
     <div
       className="relative overflow-hidden rounded-md border bg-card"
-      style={{ aspectRatio: ar }}
+      style={{ aspectRatio: ar, containerType: "inline-size" }}
     >
       <div
         className="absolute inset-x-0 top-0 h-1.5"
         style={{ background: accentColor }}
       />
       <div
-        className="absolute line-clamp-2 text-sm font-bold leading-tight"
-        style={{ left: "5%", top: "6%", width: "90%" }}
+        className="absolute line-clamp-2 font-bold leading-tight"
+        style={{
+          left: "5%", top: "6%", width: "90%",
+          fontSize: "max(14px, 3.5cqw)",
+        }}
       >
         {title || <span className="text-muted-foreground">untitled</span>}
       </div>
@@ -861,8 +868,11 @@ function SlidePreview({ pid, slide, aspectRatio, accentColor }: {
       <SlideFrame title={slide.title} accentColor={accentColor} ar={ar}>
         {body && (
           <div
-            className="absolute overflow-hidden text-[10px] leading-snug text-muted-foreground"
-            style={{ left: "5%", top: "22%", width: "44%", height: "74%" }}
+            className="absolute overflow-hidden leading-snug text-muted-foreground"
+            style={{
+              left: "5%", top: "22%", width: "44%", height: "74%",
+              fontSize: "max(10px, 1.9cqw)",
+            }}
           >
             <MiniMarkdown text={body} />
           </div>
@@ -885,7 +895,10 @@ function SlidePreview({ pid, slide, aspectRatio, accentColor }: {
                 )}
               />
             ) : (
-              <div className="flex h-full w-full items-center justify-center rounded border border-dashed text-[9px] text-muted-foreground">
+              <div
+                className="flex h-full w-full items-center justify-center rounded border border-dashed text-muted-foreground"
+                style={{ fontSize: "max(9px, 1.3cqw)" }}
+              >
                 {r.id} · {r.render_mode}
               </div>
             )}
@@ -893,8 +906,10 @@ function SlidePreview({ pid, slide, aspectRatio, accentColor }: {
         ))}
         {regions.length === 0 && !body && (
           <div
-            className="absolute text-[10px] text-muted-foreground"
-            style={{ left: "5%", top: "45%" }}
+            className="absolute text-muted-foreground"
+            style={{
+              left: "5%", top: "45%", fontSize: "max(10px, 1.9cqw)",
+            }}
           >
             empty hybrid slide
           </div>
@@ -910,16 +925,21 @@ function SlidePreview({ pid, slide, aspectRatio, accentColor }: {
     <SlideFrame title={slide.title} accentColor={accentColor} ar={ar}>
       {slide.body && (
         <div
-          className="absolute overflow-hidden text-[10px] leading-snug text-muted-foreground"
-          style={{ left: "5%", top: "26%", width: "90%", height: "67%" }}
+          className="absolute overflow-hidden leading-snug text-muted-foreground"
+          style={{
+            left: "5%", top: "26%", width: "90%", height: "67%",
+            fontSize: "max(11px, 2.1cqw)",
+          }}
         >
           <MiniMarkdown text={slide.body} />
         </div>
       )}
       {mode !== "text" && (
         <div
-          className="absolute text-[9px] italic text-amber-600"
-          style={{ left: "5%", bottom: "3%" }}
+          className="absolute italic text-amber-600"
+          style={{
+            left: "5%", bottom: "3%", fontSize: "max(9px, 1.1cqw)",
+          }}
         >
           not rendered yet — preview shows the slide content
         </div>

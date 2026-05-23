@@ -513,12 +513,11 @@ def _place_picture(slide, img_path: str, *, left, top, box_w, box_h,
         pic.top = int(top + (box_h - pic.height) / 2)
 
 
-# Typography for native text. Presentation-scale type — readable from the
-# back of a room, not document-scale — with generous line + paragraph
-# spacing so bullets don't run together.
-_BODY_PT = 24
-_HEAD_PT = 30
-_TITLE_PT = 38
+# Typography for native text. Presentation-scale but tuned a notch down
+# from "shouty" — readable from a room without dominating dense content.
+_BODY_PT = 20
+_HEAD_PT = 26
+_TITLE_PT = 32
 _LINE_SPACING = 1.22
 
 _WEIGHT_WORDS = {
@@ -738,7 +737,7 @@ def _add_title_slide(slide, row, *, sw, sh, accent, fg, bg, fonts,
     p.line_spacing = 1.1
     run = p.add_run()
     run.text = row.get("title") or ""
-    run.font.size = Pt(48)
+    run.font.size = Pt(40)
     run.font.bold = True
     run.font.color.rgb = fg
     if fonts.get("display"):
@@ -754,11 +753,11 @@ def _add_title_slide(slide, row, *, sw, sh, accent, fg, bg, fonts,
         sp.alignment = PP_ALIGN.CENTER
         sp.line_spacing = 1.2
         if first_sub:
-            sp.space_before = Pt(20)
+            sp.space_before = Pt(18)
             first_sub = False
         run = sp.add_run()
         run.text = line
-        run.font.size = Pt(24)
+        run.font.size = Pt(20)
         run.font.color.rgb = fg
         if fonts.get("body"):
             run.font.name = fonts["body"]
@@ -781,7 +780,7 @@ def _add_hybrid_slide(slide, row, state, tmpd, *, sw, sh, accent, fg, bg,
         )
         # Half-width box wraps more, so smaller body type than a text slide.
         _render_markdown_into(body_box.text_frame, body, fg=fg, fonts=fonts,
-                              Pt=Pt, body_pt=20, head_pt=24)
+                              Pt=Pt, body_pt=18, head_pt=22)
     unrendered = 0
     for r in row.get("regions") or []:
         left = int(r["x"] * sw)
