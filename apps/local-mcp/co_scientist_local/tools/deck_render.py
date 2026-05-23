@@ -670,6 +670,12 @@ def _add_slide_frame(slide, row, *, sw, sh, accent, fg, bg, fonts,
     )
     tf = title_box.text_frame
     tf.word_wrap = True
+    # Auto-shrink the title when it would overflow the box (long titles).
+    try:
+        from pptx.enum.text import MSO_AUTO_SIZE  # type: ignore
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_SHAPE
+    except Exception:
+        pass
     p = tf.paragraphs[0]
     p.line_spacing = 1.05
     run = p.add_run()
@@ -720,6 +726,12 @@ def _add_title_slide(slide, row, *, sw, sh, accent, fg, bg, fonts,
     tf = box.text_frame
     tf.word_wrap = True
     tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    # Auto-shrink for very long cover titles.
+    try:
+        from pptx.enum.text import MSO_AUTO_SIZE  # type: ignore
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_SHAPE
+    except Exception:
+        pass
 
     p = tf.paragraphs[0]
     p.alignment = PP_ALIGN.CENTER

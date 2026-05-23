@@ -809,7 +809,7 @@ function SlideFrame({
         style={{ background: accentColor }}
       />
       <div
-        className="absolute truncate text-sm font-bold leading-tight"
+        className="absolute line-clamp-2 text-sm font-bold leading-tight"
         style={{ left: "5%", top: "6%", width: "90%" }}
       >
         {title || <span className="text-muted-foreground">untitled</span>}
