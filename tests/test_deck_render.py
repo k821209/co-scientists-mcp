@@ -593,3 +593,114 @@ def test_export_applies_concept_fonts(state, tmp_path, monkeypatch):
              for para in sh.text_frame.paragraphs for r in para.runs}
     assert "Inter" in names   # display font on the title
     assert "Lora" in names    # body font on the body text
+
+
+# ─── Keynote-safe image normalization (todo 032) ────────────────────────
+
+
+def test_normalize_image_rgba_becomes_rgb_jpeg(tmp_path):
+    pytest.importorskip("PIL")
+    from PIL import Image
+    src = tmp_path / "rgba.png"
+    Image.new("RGBA", (32, 32), (255, 0, 0, 128)).save(src)
+    out = deck_render._normalize_image_for_pptx(str(src))
+    # Returned as BytesIO; first bytes are the JPEG SOI marker (FFD8).
+    assert hasattr(out, "read")
+    head = out.read(3)
+    assert head[:2] == b"\xff\xd8"
+    out.seek(0)
+    img = Image.open(out)
+    assert img.mode == "RGB"   # alpha flattened against white background
+
+
+def test_normalize_image_downsamples_oversized(tmp_path):
+    pytest.importorskip("PIL")
+    from PIL import Image
+    src = tmp_path / "huge.png"
+    Image.new("RGB", (4000, 2000), (200, 100, 50)).save(src)
+    out = deck_render._normalize_image_for_pptx(str(src), target_width=1920)
+    img = Image.open(out)
+    assert img.width == 1920
+    assert img.height == 960   # proportional
+
+
+def test_normalize_image_keeps_smaller_rgb_at_size(tmp_path):
+    pytest.importorskip("PIL")
+    from PIL import Image
+    src = tmp_path / "small.png"
+    Image.new("RGB", (800, 600), (10, 20, 30)).save(src)
+    out = deck_render._normalize_image_for_pptx(str(src), target_width=1920)
+    img = Image.open(out)
+    assert (img.width, img.height) == (800, 600)
+
+
+def test_normalize_image_falls_back_on_unreadable_input(tmp_path):
+    src = tmp_path / "garbage.png"
+    src.write_bytes(b"not actually an image")
+    # Must not raise — degraded gracefully so the export still produces a PPTX.
+    out = deck_render._normalize_image_for_pptx(str(src))
+    assert out == str(src)   # original path returned as last-ditch fallback
+
+
+# ─── Theme-driven type scale (todo 035) ─────────────────────────────────
+
+
+def test_type_scale_defaults_when_concept_absent():
+    ts = deck_render._theme_type_scale(None)
+    assert ts["title"] == 32
+    assert ts["body"] == 20
+    assert ts["head"] == 26
+    assert ts["cover_title"] == 40
+    assert ts["caption"] == 12
+    assert ts["line_spacing"] == pytest.approx(1.22)
+
+
+def test_type_scale_overrides_from_concept():
+    concept = (
+        "Type scale:\n"
+        "  title: 30  head: 24  body: 18  line_spacing: 1.15\n"
+        "  cover_title: 36"
+    )
+    ts = deck_render._theme_type_scale(concept)
+    assert ts["title"] == 30
+    assert ts["head"] == 24
+    assert ts["body"] == 18
+    assert ts["cover_title"] == 36
+    assert ts["line_spacing"] == pytest.approx(1.15)
+    # Unspecified keys keep defaults.
+    assert ts["caption"] == 12
+
+
+def test_type_scale_ignores_malformed_values():
+    concept = "Type scale:\n  title: huge  body: 22"
+    ts = deck_render._theme_type_scale(concept)
+    assert ts["title"] == 32   # malformed → default
+    assert ts["body"] == 22    # well-formed override applied
+
+
+def test_export_applies_type_scale_to_title(state, tmp_path, monkeypatch):
+    """A concept with `Type scale: title: 30` produces a 30pt title run
+    instead of the default 32pt."""
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+
+    slug = _setup(state)
+    decks.update_deck(
+        state, slug, "d",
+        concept="Type scale:\n  title: 30  body: 18",
+    )
+    decks.add_slide(state, slug, "d", slide_number=1, role="background",
+                    title="Heading", body="some body text",
+                    notes="n", render_mode="text")
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    prs = Presentation(str(out))
+    title_runs = [
+        r for sh in prs.slides[0].shapes if sh.has_text_frame
+        for para in sh.text_frame.paragraphs for r in para.runs
+        if r.text == "Heading"
+    ]
+    assert title_runs
+    # python-pptx font.size is an Emu/Pt object; check via .pt
+    assert title_runs[0].font.size.pt == 30

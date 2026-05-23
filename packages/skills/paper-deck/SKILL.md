@@ -104,6 +104,9 @@ mcp__co_scientist__update_deck(
       bg: #fafaf7  surface: #ffffff  text: #1a1a1a  accent: #b58900
     Typography:
       display: Inter Bold     body: Inter Regular     mono: JetBrains Mono
+    Type scale:
+      title: 32  head: 26  body: 20  line_spacing: 1.22
+      hybrid_body: 18  hybrid_head: 22  cover_title: 40  caption: 12
     Motif:
       a single thin horizontal rule under each title;
       a recurring small icon (#b58900) marking the figure-of-merit line
@@ -112,6 +115,16 @@ mcp__co_scientist__update_deck(
   """,
 )
 ```
+
+The `Type scale:` block is **optional** — unspecified keys fall back to
+defaults (title 32 / head 26 / body 20 / line_spacing 1.22 / cover 40).
+Override any of them per deck:
+- **Smaller body** (16–18pt) when slides are dense and projected close.
+- **Larger title** (36–40pt) when the audience is at the back of a room.
+- **Tighter line_spacing** (1.1–1.15) for code-heavy slides.
+
+Avoid going below 14pt — the export's auto-shrink (TEXT_TO_SHAPE) will
+already step down when individual slides overrun.
 
 ### 4. Outline slides
 
@@ -159,6 +172,36 @@ slide's text stays editable in the exported .pptx — choose carefully:
 Rule of thumb: **if you'd write more than a few words of text on the
 slide, it is a `text` slide.** `code-shape` / `ai-image` are for slides
 that are fundamentally a picture.
+
+**Role → recommended render_mode** (start here; adapt only with a reason):
+
+| Role         | Default mode    | When to deviate                                 |
+| ------------ | --------------- | ----------------------------------------------- |
+| `title`      | `ai-image` or `text` | `text` if you don't want a hero image       |
+| `outline`    | `hybrid`        | `text` if no arc diagram fits                   |
+| `background` | `text` or `hybrid` | `hybrid` when there's prior-state schematic  |
+| `question`   | `text`          | Big-display single sentence, no body bullets    |
+| `method`     | `hybrid`        | Workflow / pipeline diagram on the right        |
+| `result`     | `paper-figure` (full bleed) **or** `hybrid` | `hybrid` if take-home bullets matter too |
+| `discussion` | `text` or `hybrid` | `hybrid` if a comparative grid clarifies    |
+| `conclusion` | `text`          | 3 take-home bullets, large type                 |
+| `qa`         | `text`          | Acknowledgments + contact, plain                |
+
+**Dense-slide layout patterns** — when the content is heavy, pick the
+layout up-front rather than letting auto-shrink rescue an over-stuffed
+slide (it will, but readability suffers):
+
+| Pattern             | When                                            | How                                          |
+| ------------------- | ----------------------------------------------- | -------------------------------------------- |
+| Hero (full-bleed)   | A single decisive figure or eyecatch            | `paper-figure` or `ai-image`, no body        |
+| Banner + bullets    | A take-home one-liner above structured points   | `text` with the H1 used as banner            |
+| 50-50 hybrid        | Title + bullets + one figure on the right       | `hybrid`, one region at `x:0.54 y:0.22 w:0.42 h:0.65` |
+| Quadrant collage    | Two-to-four comparable images, no body          | `hybrid`, regions on a 2×2 grid              |
+| Compact text + caption strip | Lots of small-print explainer + figure | `hybrid`, large image region + thin caption  |
+
+If your `text` slide overflows even at default 20pt body, your first
+move is **drop content** (split into two slides, demote one bullet to
+the speaker notes), not lower the type — going below 16pt is a smell.
 
 ### 5. Add slides one by one
 

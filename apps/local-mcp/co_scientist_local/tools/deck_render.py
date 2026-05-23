@@ -486,14 +486,52 @@ def _ensure_contrast(fg_hex: str, bg_hex: str) -> str:
             >= _contrast_ratio("#FFFFFF", bg_hex) else "#FFFFFF")
 
 
+def _normalize_image_for_pptx(img_path: str, target_width: int = 1920):
+    """RGBA / palette PNGs and oversized images → RGB JPEG ≤ target_width px,
+    returned as a BytesIO. Mirrors the original co-scientist's todo 032
+    normalization: Keynote rejects python-pptx output when slides embed RGBA
+    or huge PNGs, so every picture goes through this guard before
+    `add_picture`. If PIL can't process the source (corrupt, exotic format,
+    Pillow missing), returns the original path so embedding still works."""
+    try:
+        import io
+        from PIL import Image  # type: ignore — python-pptx pulls this in
+        img = Image.open(img_path)
+        img.load()  # surface truncation errors here, not on .split()
+        if img.mode in ("RGBA", "LA", "P"):
+            bg = Image.new("RGB", img.size, "white")
+            if img.mode == "RGBA":
+                bg.paste(img, mask=img.split()[-1])
+            else:
+                rgba = img.convert("RGBA")
+                bg.paste(rgba, mask=rgba.split()[-1])
+            img = bg
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
+        if img.width > target_width:
+            new_h = round(img.height * target_width / img.width)
+            img = img.resize((target_width, new_h), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=92, optimize=True)
+        buf.seek(0)
+        return buf
+    except Exception:
+        # Last-ditch fallback — Keynote-safety is best-effort. Embedding the
+        # original is still strictly better than failing the export.
+        return img_path
+
+
 def _place_picture(slide, img_path: str, *, left, top, box_w, box_h,
                    fit: str = "contain") -> None:
     """Place an image inside the box at (left, top, box_w, box_h).
 
     fit='contain' — scaled to fit entirely, centered, letterboxed; never
     crops (figures, charts, tables). fit='cover' — fills the box, the
-    overflowing edges cropped (eyecatch, decorative, photos)."""
-    pic = slide.shapes.add_picture(img_path, left, top)
+    overflowing edges cropped (eyecatch, decorative, photos).
+
+    Every image is normalized to Keynote-safe RGB JPEG ≤ 1920px (todo 032)
+    before embedding."""
+    pic = slide.shapes.add_picture(_normalize_image_for_pptx(img_path), left, top)
     iw, ih = pic.width, pic.height
     if fit == "cover" and iw > 0 and ih > 0:
         image_ar, box_ar = iw / ih, box_w / box_h
@@ -515,10 +553,46 @@ def _place_picture(slide, img_path: str, *, left, top, box_w, box_h,
 
 # Typography for native text. Presentation-scale but tuned a notch down
 # from "shouty" — readable from a room without dominating dense content.
+# Defaults; the deck concept can override any via a `Type scale:` block.
 _BODY_PT = 20
 _HEAD_PT = 26
 _TITLE_PT = 32
 _LINE_SPACING = 1.22
+
+_DEFAULT_TYPE_SCALE = {
+    "title": _TITLE_PT,        # content-slide title
+    "head": _HEAD_PT,          # body markdown # heading
+    "body": _BODY_PT,          # body bullets / paragraphs
+    "hybrid_body": 18,         # narrower body box → smaller body type
+    "hybrid_head": 22,
+    "cover_title": 40,         # title slide hero
+    "cover_subtitle": 20,
+    "caption": 12,             # region captions
+    "line_spacing": _LINE_SPACING,
+}
+
+
+def _theme_type_scale(concept: str | None) -> dict:
+    """Per-deck typography sizes — title / head / body / cover_* / caption /
+    line_spacing. The concept can override any with a 'Type scale:' block:
+
+        Type scale:
+          title: 30  head: 24  body: 18  line_spacing: 1.2
+
+    Unspecified keys fall back to `_DEFAULT_TYPE_SCALE`. Mirrors the
+    original co-scientist's todo 035 (theme JSON `type_scale`).
+    """
+    kv = _parse_concept(concept)
+    out = dict(_DEFAULT_TYPE_SCALE)
+    for k in out:
+        if k in kv:
+            try:
+                out[k] = (
+                    float(kv[k]) if k == "line_spacing" else int(float(kv[k]))
+                )
+            except (ValueError, TypeError):
+                pass  # malformed value → keep default
+    return out
 
 _WEIGHT_WORDS = {
     "thin", "extralight", "ultralight", "light", "regular", "book", "normal",
@@ -650,7 +724,8 @@ def _render_markdown_into(tf, body, *, fg, fonts, Pt,
 
 
 def _add_slide_frame(slide, row, *, sw, sh, accent, fg, bg, fonts,
-                     Inches, Pt, MSO_SHAPE) -> None:
+                     Inches, Pt, MSO_SHAPE,
+                     type_scale: dict = _DEFAULT_TYPE_SCALE) -> None:
     """Themed background + accent stripe + native title — the shared shell
     of native text slides and hybrid (multi-region) slides."""
     try:
@@ -679,7 +754,7 @@ def _add_slide_frame(slide, row, *, sw, sh, accent, fg, bg, fonts,
     p.line_spacing = 1.05
     run = p.add_run()
     run.text = row.get("title") or ""
-    run.font.size = Pt(_TITLE_PT)
+    run.font.size = Pt(type_scale["title"])
     run.font.bold = True
     run.font.color.rgb = fg
     if fonts.get("display"):
@@ -696,21 +771,26 @@ def _add_slide_frame(slide, row, *, sw, sh, accent, fg, bg, fonts,
 
 
 def _add_text_slide(slide, row, *, sw, sh, accent, fg, bg, fonts,
-                    Inches, Pt, MSO_SHAPE) -> None:
+                    Inches, Pt, MSO_SHAPE,
+                    type_scale: dict = _DEFAULT_TYPE_SCALE) -> None:
     """A native (editable) title + markdown body, palette-themed."""
     _add_slide_frame(slide, row, sw=sw, sh=sh, accent=accent, fg=fg, bg=bg,
-                     fonts=fonts, Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE)
+                     fonts=fonts, Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE,
+                     type_scale=type_scale)
     body = (row.get("body") or "").strip()
     if body:
         body_box = slide.shapes.add_textbox(
             Inches(0.7), Inches(1.95), sw - Inches(1.4), sh - Inches(2.5),
         )
-        _render_markdown_into(body_box.text_frame, body, fg=fg, fonts=fonts,
-                              Pt=Pt)
+        _render_markdown_into(
+            body_box.text_frame, body, fg=fg, fonts=fonts, Pt=Pt,
+            body_pt=type_scale["body"], head_pt=type_scale["head"],
+        )
 
 
 def _add_title_slide(slide, row, *, sw, sh, accent, fg, bg, fonts,
-                     Inches, Pt, MSO_SHAPE, PP_ALIGN, MSO_ANCHOR) -> None:
+                     Inches, Pt, MSO_SHAPE, PP_ALIGN, MSO_ANCHOR,
+                     type_scale: dict = _DEFAULT_TYPE_SCALE) -> None:
     """A cover layout for role='title' slides — the title large and
     centered (vertically + horizontally), the body as a centered
     subtitle. Distinct from the top-anchored content-slide frame."""
@@ -737,7 +817,7 @@ def _add_title_slide(slide, row, *, sw, sh, accent, fg, bg, fonts,
     p.line_spacing = 1.1
     run = p.add_run()
     run.text = row.get("title") or ""
-    run.font.size = Pt(40)
+    run.font.size = Pt(type_scale["cover_title"])
     run.font.bold = True
     run.font.color.rgb = fg
     if fonts.get("display"):
@@ -757,21 +837,23 @@ def _add_title_slide(slide, row, *, sw, sh, accent, fg, bg, fonts,
             first_sub = False
         run = sp.add_run()
         run.text = line
-        run.font.size = Pt(20)
+        run.font.size = Pt(type_scale["cover_subtitle"])
         run.font.color.rgb = fg
         if fonts.get("body"):
             run.font.name = fonts["body"]
 
 
 def _add_hybrid_slide(slide, row, state, tmpd, *, sw, sh, accent, fg, bg,
-                      fonts, Inches, Pt, MSO_SHAPE) -> int:
+                      fonts, Inches, Pt, MSO_SHAPE,
+                      type_scale: dict = _DEFAULT_TYPE_SCALE) -> int:
     """Themed title frame + native body bullets (left half, when body is
     set) + each region placed as its own picture. The body-on-the-left
     convention gives the "title + bullets + figure-on-the-right" layout
     natively; agents position image regions (typically on the right)
     accordingly. Returns the count of unrendered regions."""
     _add_slide_frame(slide, row, sw=sw, sh=sh, accent=accent, fg=fg, bg=bg,
-                     fonts=fonts, Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE)
+                     fonts=fonts, Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE,
+                     type_scale=type_scale)
     body = (row.get("body") or "").strip()
     if body:
         body_box = slide.shapes.add_textbox(
@@ -779,8 +861,10 @@ def _add_hybrid_slide(slide, row, state, tmpd, *, sw, sh, accent, fg, bg,
             int(sw / 2) - Inches(0.8), sh - Inches(1.95),
         )
         # Half-width box wraps more, so smaller body type than a text slide.
-        _render_markdown_into(body_box.text_frame, body, fg=fg, fonts=fonts,
-                              Pt=Pt, body_pt=18, head_pt=22)
+        _render_markdown_into(
+            body_box.text_frame, body, fg=fg, fonts=fonts, Pt=Pt,
+            body_pt=type_scale["hybrid_body"], head_pt=type_scale["hybrid_head"],
+        )
     unrendered = 0
     for r in row.get("regions") or []:
         left = int(r["x"] * sw)
@@ -813,7 +897,7 @@ def _add_hybrid_slide(slide, row, state, tmpd, *, sw, sh, accent, fg, bg,
             cf.word_wrap = True
             run = cf.paragraphs[0].add_run()
             run.text = caption
-            run.font.size = Pt(12)
+            run.font.size = Pt(type_scale["caption"])
             run.font.color.rgb = fg
             if fonts.get("body"):
                 run.font.name = fonts["body"]
@@ -886,6 +970,7 @@ def export_deck_to_pptx(
     fg = _hex_to_rgb(fg_hex, "#1A1A1A")
     bg = _hex_to_rgb(colors["background"], "#FFFFFF")
     fonts = _theme_fonts(deck.get("concept"))
+    type_scale = _theme_type_scale(deck.get("concept"))
 
     prs = Presentation()
     sw, sh = Inches(w_in), Inches(h_in)
@@ -905,6 +990,7 @@ def export_deck_to_pptx(
                     slide, s, state, tmpd, sw=sw, sh=sh,
                     accent=accent, fg=fg, bg=bg, fonts=fonts,
                     Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE,
+                    type_scale=type_scale,
                 )
                 hybrid_slides += 1
                 if n_missing:
@@ -929,6 +1015,7 @@ def export_deck_to_pptx(
                         slide, s, sw=sw, sh=sh, accent=accent, fg=fg, bg=bg,
                         fonts=fonts, Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE,
                         PP_ALIGN=PP_ALIGN, MSO_ANCHOR=MSO_ANCHOR,
+                        type_scale=type_scale,
                     )
                     text_slides += 1
                     if mode != "text":
@@ -939,6 +1026,7 @@ def export_deck_to_pptx(
                     _add_text_slide(
                         slide, s, sw=sw, sh=sh, accent=accent, fg=fg, bg=bg,
                         fonts=fonts, Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE,
+                        type_scale=type_scale,
                     )
                     text_slides += 1
                     if mode != "text":
