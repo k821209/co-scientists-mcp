@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useOutletContext } from "react-router-dom";
 import {
   addDoc, collection, doc, onSnapshot, updateDoc,
 } from "firebase/firestore";
 import {
   Presentation, FileText, ArrowRight, ChevronDown, ChevronRight, Download,
-  MessageSquare, ArrowUp, ArrowDown, Check, Loader2,
+  MessageSquare, ArrowUp, ArrowDown, Check, Loader2, Play, X, ChevronLeft,
+  StickyNote,
 } from "lucide-react";
 import { db } from "@/firebase";
 import { useAuth } from "@/auth";
@@ -225,6 +227,7 @@ function DeckCard({ pid, deck, open, onToggle }: {
   const [slides, setSlides] = useState<Slide[]>([]);
   const [exports, setExports] = useState<DeckExport[]>([]);
   const [downloading, setDownloading] = useState<string | null>(null);
+  const [slideshowAt, setSlideshowAt] = useState<number | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -389,6 +392,18 @@ function DeckCard({ pid, deck, open, onToggle }: {
             </p>
           ) : (
             <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  Slides
+                </span>
+                <Button
+                  size="sm" variant="outline"
+                  className="h-7 gap-1 text-xs"
+                  onClick={() => setSlideshowAt(0)}
+                >
+                  <Play className="h-3 w-3" /> Slideshow
+                </Button>
+              </div>
               {slides.map((s, i) => (
                 <SlideRow
                   key={s.id}
@@ -407,6 +422,16 @@ function DeckCard({ pid, deck, open, onToggle }: {
             </div>
           )}
         </CardContent>
+      )}
+      {slideshowAt !== null && slides.length > 0 && (
+        <SlideshowOverlay
+          pid={pid}
+          slides={slides}
+          aspectRatio={deck.aspect_ratio || "16:9"}
+          accentColor={accentColor}
+          startIndex={slideshowAt}
+          onClose={() => setSlideshowAt(null)}
+        />
       )}
     </Card>
   );
@@ -945,5 +970,210 @@ function SlidePreview({ pid, slide, aspectRatio, accentColor }: {
         </div>
       )}
     </SlideFrame>
+  );
+}
+
+
+// ─── fullscreen slideshow ─────────────────────────────────────────────────
+
+/** A presenter-style slideshow over the deck. One slide at a time, sized
+ *  to fit the viewport while keeping the deck's aspect ratio. Keyboard:
+ *  ←/→/Space (navigate), Esc (close), N (toggle speaker notes). Click the
+ *  left / right half of the slide to navigate too. Rendered into a portal
+ *  so parent overflow / transforms can't clip it. */
+function SlideshowOverlay({
+  pid, slides, aspectRatio, accentColor, startIndex, onClose,
+}: {
+  pid: string;
+  slides: Slide[];
+  aspectRatio: string;
+  accentColor: string;
+  startIndex: number;
+  onClose: () => void;
+}) {
+  const [index, setIndex] = useState(() =>
+    Math.max(0, Math.min(startIndex, slides.length - 1)),
+  );
+  const [showNotes, setShowNotes] = useState(false);
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  // Clamp the index whenever the slide list changes underneath us (e.g.
+  // someone reorders or deletes a slide while the show is open).
+  useEffect(() => {
+    setIndex((i) => Math.max(0, Math.min(i, slides.length - 1)));
+  }, [slides.length]);
+
+  const next = useCallback(() => {
+    setIndex((i) => Math.min(i + 1, slides.length - 1));
+  }, [slides.length]);
+  const prev = useCallback(() => {
+    setIndex((i) => Math.max(i - 1, 0));
+  }, []);
+
+  // Keyboard shortcuts (presenter conventions). Attached to the document
+  // so they fire no matter where focus is, but the early-return on a typing
+  // element keeps text inputs usable inside the overlay if we add any.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tgt = e.target as HTMLElement | null;
+      if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA"
+                  || tgt.isContentEditable)) return;
+      if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown") {
+        e.preventDefault(); next();
+      } else if (e.key === "ArrowLeft" || e.key === "PageUp") {
+        e.preventDefault(); prev();
+      } else if (e.key === "Escape") {
+        e.preventDefault(); onClose();
+      } else if (e.key === "n" || e.key === "N") {
+        e.preventDefault(); setShowNotes((s) => !s);
+      } else if (e.key === "Home") {
+        e.preventDefault(); setIndex(0);
+      } else if (e.key === "End") {
+        e.preventDefault(); setIndex(slides.length - 1);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [next, prev, onClose, slides.length]);
+
+  // Lock background scroll so the slide is the only thing on screen.
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prevOverflow; };
+  }, []);
+
+  const slide = slides[index];
+  if (!slide) return null;
+  const ar = arCss(aspectRatio);
+  // Width factor derived from the deck's aspect ratio — used so the slide
+  // can be as tall as `100vh - chrome` without overrunning the viewport
+  // horizontally for narrow (4:3) decks, or shorter (16:10) ones.
+  const arNumeric = aspectRatio === "4:3"
+    ? 4 / 3 : aspectRatio === "16:10" ? 16 / 10 : 16 / 9;
+
+  return createPortal(
+    <div
+      ref={overlayRef}
+      className="fixed inset-0 z-50 flex flex-col bg-black/95 text-white"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Slideshow"
+    >
+      {/* close + counter bar */}
+      <div className="flex items-center justify-between px-4 py-2 text-xs">
+        <div className="flex items-center gap-3">
+          <span className="font-mono tabular-nums">
+            {index + 1} / {slides.length}
+          </span>
+          {slide.role && (
+            <span className="rounded border border-white/20 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-white/70">
+              {slide.role}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowNotes((s) => !s)}
+            className={cn(
+              "inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] hover:bg-white/10",
+              showNotes && "bg-white/10",
+            )}
+            title="Toggle speaker notes (N)"
+          >
+            <StickyNote className="h-3.5 w-3.5" /> Notes
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] hover:bg-white/10"
+            title="Close (Esc)"
+          >
+            <X className="h-3.5 w-3.5" /> Close
+          </button>
+        </div>
+      </div>
+
+      {/* slide stage — flexes to fill remaining vertical space */}
+      <div className="relative flex flex-1 min-h-0 items-center justify-center px-4 pb-4">
+        {/* click zones for prev / next, behind the slide */}
+        <button
+          type="button"
+          onClick={prev}
+          disabled={index === 0}
+          aria-label="Previous slide"
+          className="absolute inset-y-0 left-0 z-10 w-1/3 cursor-w-resize bg-transparent disabled:cursor-not-allowed"
+        />
+        <button
+          type="button"
+          onClick={next}
+          disabled={index === slides.length - 1}
+          aria-label="Next slide"
+          className="absolute inset-y-0 right-0 z-10 w-1/3 cursor-e-resize bg-transparent disabled:cursor-not-allowed"
+        />
+
+        {/* the actual slide, scaled to fit while keeping its aspect ratio.
+            SlidePreview's root sets aspect-ratio + fills the parent's width
+            (block default), so matching the outer width + aspect-ratio
+            here means the inner preview takes the exact same box. */}
+        <div
+          className="relative z-20 shadow-2xl text-foreground"
+          style={{
+            aspectRatio: ar,
+            width: `min(96vw, calc((100vh - 9rem) * ${arNumeric}))`,
+          }}
+        >
+          <SlidePreview
+            pid={pid} slide={slide}
+            aspectRatio={aspectRatio} accentColor={accentColor}
+          />
+        </div>
+
+        {/* visible nav arrows (also reachable by keyboard) */}
+        <button
+          type="button"
+          onClick={prev}
+          disabled={index === 0}
+          aria-label="Previous slide"
+          className="absolute left-2 top-1/2 z-30 -translate-y-1/2 rounded-full bg-white/10 p-2 text-white hover:bg-white/20 disabled:opacity-30"
+        >
+          <ChevronLeft className="h-5 w-5" />
+        </button>
+        <button
+          type="button"
+          onClick={next}
+          disabled={index === slides.length - 1}
+          aria-label="Next slide"
+          className="absolute right-2 top-1/2 z-30 -translate-y-1/2 rounded-full bg-white/10 p-2 text-white hover:bg-white/20 disabled:opacity-30"
+        >
+          <ChevronRight className="h-5 w-5" />
+        </button>
+      </div>
+
+      {/* speaker notes (toggled via the Notes button or "N") */}
+      {showNotes && (
+        <div className="border-t border-white/10 bg-black/60 px-6 py-3 text-sm">
+          <div className="mb-1 text-[10px] uppercase tracking-wide text-white/50">
+            Speaker notes
+          </div>
+          {slide.notes && slide.notes.trim() ? (
+            <div className="max-h-32 overflow-y-auto whitespace-pre-wrap leading-relaxed">
+              {slide.notes}
+            </div>
+          ) : (
+            <div className="italic text-white/40">
+              No speaker notes on this slide.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* keyboard hint footer */}
+      <div className="border-t border-white/5 px-4 py-1.5 text-[10px] text-white/40">
+        ← / → navigate · Space next · N notes · Esc close
+      </div>
+    </div>,
+    document.body,
   );
 }
