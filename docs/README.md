@@ -12,6 +12,15 @@ Notes for future-me. Optimized for quick re-orientation, not for newcomers.
 - [comments.md](comments.md) — selection-anchored comment flow + inline highlight pipeline
 - [plans.md](plans.md) — free / pro / enterprise gating
 
+### Open work items
+
+User-filed todos go in [todo/](todo/). Numbered sequentially; each is a
+self-contained proposal with TL;DR + concrete observation + approaches +
+acceptance criteria. Closing a todo: move the file to `todo/closed/` and
+reference the commit that shipped it. Currently open:
+- [001 — Native-language prose in the harness](todo/001_native_language_prose_in_harness.md)
+- [002 — Rich slide rendering beyond literal markdown](todo/002_rich_slide_rendering.md)
+
 ### Architecture decisions (ADRs)
 
 - [001-no-cloud-mcp](decisions/001-no-cloud-mcp.md)

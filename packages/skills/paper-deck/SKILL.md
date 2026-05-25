@@ -38,6 +38,22 @@ unity header — ready for rendering.
 4. **`add_slide` then `renumber_deck` once.** Don't renumber by hand —
    the doc IDs encode the original number; renumber updates the
    `slide_number` field, the IDs stay.
+5. **Native-language flow when the audience is non-English** (todo 001).
+   Detect the audience language from `audience`, the user's prompt, or
+   the deck concept. When it's Korean / Japanese / Chinese / etc.:
+   - Draft *natively* in that language. Do **not** write English first
+     and translate — that produces translation-ese a native reader
+     spots immediately.
+   - Keep English **only** for field-standard abbreviations (GWAS,
+     BLUP, MCP, F4, GO, etc.). Translate everyday English nouns to the
+     target language (shortcut → 지름길, process → 과정, …).
+   - Use the target language's own punctuation conventions. In Korean,
+     prefer colons and natural sentence breaks over em-dash chains
+     (`X — Y → Z` reads as machine-translated English).
+   - Keep sentence endings **consistent** within a slide (Korean: all
+     `~합니다` or all `~한다`, not mixed).
+   - Self-check: "Could a native speaker mentally reverse-translate
+     this to English word-for-word?" If yes, rewrite before delivery.
 
 ## Flow
 

@@ -10,7 +10,7 @@ only) and refers the agent here on every session start.
 """
 from __future__ import annotations
 
-GUIDE_VERSION = "2026-05-23a"
+GUIDE_VERSION = "2026-05-25a"
 
 
 def render_guide() -> str:
@@ -183,6 +183,23 @@ title mismatches, errors). If non-empty:
 
 For single-citation spot checks: `verify_doi(doi)` returns metadata
 without writing anything.
+
+## Prose for non-English audiences (todo 001)
+
+When generating prose for a non-English audience — Korean, Japanese,
+Chinese, etc. — draft *natively* in that language. Do not write English
+first and translate; the result reads as translation-ese (em-dash
+chains, mixed sentence endings, English noun + native particle pairs)
+that a native reader spots on first pass. Keep English **only** for
+field-standard abbreviations (GWAS, BLUP, MCP, F4, GO, OTU). Translate
+everyday English nouns (shortcut → 지름길, process → 과정). Keep sentence
+endings consistent within a unit (Korean: all `~합니다` or all `~한다`).
+
+Self-check before delivery: "Could a native speaker mentally reverse-
+translate this word-for-word to English?" If yes, rewrite.
+
+This applies across `/paper-deck`, `/paper-writing`, `/paper-revision`,
+`/paper-export` — any skill generating user-visible text.
 
 ## Math mode (Pandoc)
 
