@@ -631,6 +631,12 @@ _INLINE_RE = re.compile(
 _HEADING_RE = re.compile(r"^\s*#{1,6}\s+(.*\S)\s*$")
 _BULLET_RE = re.compile(r"^(\s*)[-*]\s+(.*\S)\s*$")
 _NUM_RE = re.compile(r"^(\s*)(\d+)[.)]\s+(.*\S)\s*$")
+# Tag-bullet: "- **Tag**: text" or "- **Tag** — text" — common in spec /
+# tech slides. Caught BEFORE the plain bullet so it can render as a pill
+# + body instead of a bullet point with a bold prefix (todo 002 #2).
+_TAG_BULLET_RE = re.compile(
+    r"^(\s*)[-*]\s+\*\*([^*\n]+?)\*\*\s*[:—–-]\s*(.+\S)\s*$"
+)
 
 
 def _inline_segments(text: str) -> list[tuple[str, str]]:
@@ -681,46 +687,314 @@ def _emit_paragraph(p, text, *, size, fg, fonts, Pt, bold=False, prefix="",
             run.font.name = name
 
 
-def _render_markdown_into(tf, body, *, fg, fonts, Pt,
-                          body_pt: int = _BODY_PT,
-                          head_pt: int = _HEAD_PT) -> None:
-    """Render a slide body's markdown into text frame `tf` — headings,
-    bullet / numbered lists, inline **bold** / *italic* / `code`. Auto-
-    shrinks the type when the content overruns the body box (PowerPoint
-    honours `<a:normAutofit/>` reliably; LibreOffice less so, so callers
-    pass a smaller `body_pt` for half-width boxes)."""
-    from pptx.enum.text import MSO_AUTO_SIZE  # type: ignore
-    tf.word_wrap = True
+def _split_markdown_blocks(body: str) -> list[dict]:
+    """Group lines into semantic blocks. Each block is a dict with `kind`
+    plus kind-specific fields. Kinds: heading, code, quote, tag_bullet,
+    bullet, numbered, paragraph. Multi-line blocks (code, quote) collapse
+    consecutive matching lines. Implements the block taxonomy from todo
+    002 so each kind can render as its own shape composition."""
+    blocks: list[dict] = []
+    lines = body.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        if not stripped:
+            i += 1
+            continue
+        # Fenced code (``` … ```). Captures EVERYTHING between fences,
+        # blank lines included, so the panel preserves the user's layout.
+        if stripped.startswith("```"):
+            code_lines: list[str] = []
+            i += 1
+            while i < len(lines) and not lines[i].strip().startswith("```"):
+                code_lines.append(lines[i])
+                i += 1
+            if i < len(lines):
+                i += 1
+            blocks.append({"kind": "code", "lines": code_lines})
+            continue
+        h = _HEADING_RE.match(line)
+        if h:
+            blocks.append({"kind": "heading", "text": h.group(1)})
+            i += 1
+            continue
+        # Blockquote: collapse all consecutive `>` lines into one block.
+        if stripped.startswith(">"):
+            ql: list[str] = []
+            while i < len(lines) and lines[i].strip().startswith(">"):
+                ql.append(lines[i].strip().lstrip(">").strip())
+                i += 1
+            blocks.append({"kind": "quote", "text": "\n".join(ql)})
+            continue
+        tag = _TAG_BULLET_RE.match(line)
+        if tag:
+            blocks.append({
+                "kind": "tag_bullet", "indent": tag.group(1),
+                "tag": tag.group(2), "text": tag.group(3),
+            })
+            i += 1
+            continue
+        b = _BULLET_RE.match(line)
+        if b:
+            blocks.append({
+                "kind": "bullet", "indent": b.group(1), "text": b.group(2),
+            })
+            i += 1
+            continue
+        n = _NUM_RE.match(line)
+        if n:
+            blocks.append({
+                "kind": "numbered", "indent": n.group(1),
+                "num": n.group(2), "text": n.group(3),
+            })
+            i += 1
+            continue
+        blocks.append({"kind": "paragraph", "text": stripped})
+        i += 1
+    return blocks
+
+
+def _estimate_chars_per_line(width_emu: int, font_pt: int) -> int:
+    """Rough chars-per-line in `width_emu` at `font_pt`. Korean-aware:
+    uses ~0.65 of font_pt per char (between ASCII ~0.55 and CJK ~1.0) so
+    estimation is conservative for mixed Korean+English. The textbox
+    auto-shrink absorbs underestimates."""
+    width_pt = width_emu / 12700
+    return max(20, int(width_pt / (font_pt * 0.65)))
+
+
+def _estimate_block_height(blk: dict, width_emu: int, body_pt: int,
+                           head_pt: int, Pt) -> int:
+    """EMU of vertical space the block needs. Textbox auto-shrink will
+    absorb under-estimates by shrinking type; over-estimates leave
+    blank space below. We err generous so Korean content fits without
+    visible shrinking."""
+    kind = blk["kind"]
+    if kind == "heading":
+        return Pt(int(head_pt * 1.7))
+    if kind == "code":
+        mono_pt = max(10, int(body_pt * 0.9))
+        return Pt(int(max(1, len(blk["lines"])) * mono_pt * 1.4 + 14))
+    text = blk.get("text", "")
+    if kind == "quote":
+        cpl = max(15, int(_estimate_chars_per_line(width_emu, body_pt) * 0.9))
+        line_h = body_pt * 1.1 * 1.4
+        lines = max(1, sum(max(1, (len(ln) + cpl - 1) // cpl)
+                           for ln in text.splitlines()))
+        return Pt(int(lines * line_h + 14))
+    if kind == "tag_bullet":
+        cpl = max(15, int(_estimate_chars_per_line(width_emu, body_pt) * 0.7))
+        lines = max(1, (len(text) + cpl - 1) // cpl)
+        return Pt(int(lines * body_pt * 1.4 + 8))
+    cpl = _estimate_chars_per_line(width_emu, body_pt)
+    lines = max(1, (len(text) + cpl - 1) // cpl)
+    return Pt(int(lines * body_pt * 1.4 + 4))
+
+
+def _autoshrink(tf) -> None:
+    """Best-effort TEXT_TO_SHAPE auto-shrink on a textframe."""
     try:
+        from pptx.enum.text import MSO_AUTO_SIZE  # type: ignore
         tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_SHAPE
     except Exception:
-        pass  # very old python-pptx builds may not expose this
+        pass
+
+
+def _emit_heading_block(slide, blk, *, left, top, width, height,
+                        fg, fonts, Pt, head_pt, line_spacing) -> None:
+    tb = slide.shapes.add_textbox(left, top, width, height)
+    tf = tb.text_frame
+    tf.word_wrap = True
+    _autoshrink(tf)
+    _emit_paragraph(tf.paragraphs[0], blk["text"], size=head_pt, fg=fg,
+                    fonts=fonts, Pt=Pt, bold=True,
+                    line_spacing=line_spacing, space_after=2)
+
+
+def _emit_text_block(slide, blk, *, left, top, width, height,
+                     fg, fonts, Pt, body_pt, line_spacing,
+                     prefix: str = "") -> None:
+    """Plain paragraph / bullet / numbered — same textbox layout, only the
+    optional prefix changes."""
+    indent_depth = min(len(blk.get("indent", "")) // 2, 3)
+    full_prefix = "   " * indent_depth + prefix
+    tb = slide.shapes.add_textbox(left, top, width, height)
+    tf = tb.text_frame
+    tf.word_wrap = True
+    _autoshrink(tf)
+    _emit_paragraph(tf.paragraphs[0], blk["text"], size=body_pt, fg=fg,
+                    fonts=fonts, Pt=Pt, prefix=full_prefix,
+                    line_spacing=line_spacing, space_after=3)
+
+
+def _emit_pull_quote(slide, blk, *, left, top, width, height,
+                     fg, accent, fonts, Pt, MSO_SHAPE, body_pt,
+                     line_spacing) -> None:
+    """Vertical accent bar on the left + italic body to the right (todo
+    002 #1). Renders `> ...` lines as a distinct emphasis block, not as
+    another paragraph."""
+    bar_w = Pt(4)
+    gap = Pt(10)
+    bar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, left, top, bar_w, height)
+    bar.line.fill.background()
+    bar.fill.solid()
+    bar.fill.fore_color.rgb = accent
+    bar.shadow.inherit = False
+    tb = slide.shapes.add_textbox(
+        left + bar_w + gap, top, width - bar_w - gap, height,
+    )
+    tf = tb.text_frame
+    tf.word_wrap = True
+    _autoshrink(tf)
+    quote_pt = max(body_pt, int(body_pt * 1.1))
     first = True
-    for raw in body.splitlines():
+    for raw in blk["text"].splitlines():
         if not raw.strip():
             continue
         p = tf.paragraphs[0] if first else tf.add_paragraph()
         first = False
-        m = _HEADING_RE.match(raw)
-        if m:
-            _emit_paragraph(p, m.group(1), size=head_pt, fg=fg, fonts=fonts,
-                            Pt=Pt, bold=True, space_before=10, space_after=4)
-            continue
-        m = _BULLET_RE.match(raw)
-        if m:
-            depth = min(len(m.group(1)) // 2, 3)
-            _emit_paragraph(p, m.group(2), size=body_pt, fg=fg, fonts=fonts,
-                            Pt=Pt, prefix="   " * depth + "•  ", space_after=3)
-            continue
-        m = _NUM_RE.match(raw)
-        if m:
-            depth = min(len(m.group(1)) // 2, 3)
-            _emit_paragraph(p, m.group(3), size=body_pt, fg=fg, fonts=fonts,
-                            Pt=Pt, prefix="   " * depth + m.group(2) + ".  ",
-                            space_after=3)
-            continue
-        _emit_paragraph(p, raw.strip(), size=body_pt, fg=fg, fonts=fonts,
-                        Pt=Pt, space_after=4)
+        _emit_paragraph(p, raw.strip(), size=quote_pt, fg=fg, fonts=fonts,
+                        Pt=Pt, line_spacing=line_spacing, space_after=3)
+        for run in p.runs:
+            run.font.italic = True
+
+
+def _emit_tag_bullet(slide, blk, *, left, top, width, height,
+                     fg, accent, fonts, Pt, MSO_SHAPE,
+                     body_pt, line_spacing) -> None:
+    """Accent-tinted pill on the left + body text to the right (todo 002
+    #2). Detected for the `- **Tag**: text` pattern. The pill text uses
+    white-on-accent — assumes the theme's accent has dark-enough
+    luminance, which our concept guard already enforces elsewhere."""
+    from pptx.dml.color import RGBColor  # type: ignore
+    indent_depth = min(len(blk.get("indent", "")) // 2, 3)
+    indent = Pt(indent_depth * 14)
+    tag = blk["tag"]
+    body = blk["text"]
+    pill_w = Pt(max(40, int(len(tag) * body_pt * 0.7) + 16))
+    pill_h = Pt(int(body_pt * 1.3))
+    pill_top = top + max(0, (height - pill_h) // 2)
+    pill = slide.shapes.add_shape(
+        MSO_SHAPE.ROUNDED_RECTANGLE,
+        left + indent, pill_top, pill_w, pill_h,
+    )
+    pill.line.fill.background()
+    pill.fill.solid()
+    pill.fill.fore_color.rgb = accent
+    pill.shadow.inherit = False
+    pf = pill.text_frame
+    pf.margin_left = Pt(8); pf.margin_right = Pt(8)
+    pf.margin_top = Pt(1); pf.margin_bottom = Pt(1)
+    pf.word_wrap = False
+    pp = pf.paragraphs[0]
+    pp.line_spacing = 1.0
+    pr = pp.add_run()
+    pr.text = tag
+    pr.font.size = Pt(int(body_pt * 0.72))
+    pr.font.bold = True
+    pr.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+    if fonts.get("body"):
+        pr.font.name = fonts["body"]
+    body_left = left + indent + pill_w + Pt(10)
+    body_w = width - (body_left - left)
+    tb = slide.shapes.add_textbox(body_left, top, body_w, height)
+    tf = tb.text_frame
+    tf.word_wrap = True
+    _autoshrink(tf)
+    _emit_paragraph(tf.paragraphs[0], body, size=body_pt, fg=fg, fonts=fonts,
+                    Pt=Pt, line_spacing=line_spacing, space_after=2)
+
+
+def _emit_code_block(slide, blk, *, left, top, width, height,
+                     fg, fonts, Pt, MSO_SHAPE, body_pt) -> None:
+    """Tinted background panel + mono text inside (todo 002 #3)."""
+    from pptx.dml.color import RGBColor  # type: ignore
+    panel = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, left, top, width, height)
+    panel.line.fill.background()
+    panel.fill.solid()
+    panel.fill.fore_color.rgb = RGBColor(0xF3, 0xF3, 0xF3)
+    panel.shadow.inherit = False
+    tb = slide.shapes.add_textbox(
+        left + Pt(10), top + Pt(6), width - Pt(20), height - Pt(12),
+    )
+    tf = tb.text_frame
+    tf.word_wrap = True
+    _autoshrink(tf)
+    mono_pt = max(10, int(body_pt * 0.9))
+    first = True
+    for line in blk["lines"]:
+        p = tf.paragraphs[0] if first else tf.add_paragraph()
+        first = False
+        p.line_spacing = 1.15
+        run = p.add_run()
+        run.text = line
+        run.font.size = Pt(mono_pt)
+        run.font.color.rgb = fg
+        if fonts.get("mono"):
+            run.font.name = fonts["mono"]
+        elif fonts.get("body"):
+            run.font.name = fonts["body"]
+
+
+def _render_markdown_block(slide, body, *, box, fg, accent, fonts,
+                           Pt, MSO_SHAPE, body_pt: int = _BODY_PT,
+                           head_pt: int = _HEAD_PT,
+                           line_spacing: float = _LINE_SPACING) -> int:
+    """Lay out markdown blocks inside `box=(left, top, w, h)`. Each block
+    becomes its own textbox or shape composition so visual structures
+    (accent bars, pill tags, code panels) sit beside the text — see todo
+    002. Returns the final Y cursor so callers know how much of the box
+    was used. Blocks that would overflow `box` are silently dropped."""
+    left, top, w, h = box
+    cursor = top
+    max_y = top + h
+    gap = Pt(2)
+    for blk in _split_markdown_blocks(body):
+        if cursor >= max_y:
+            break
+        block_h = _estimate_block_height(blk, w, body_pt, head_pt, Pt)
+        block_h = min(block_h, max_y - cursor)
+        if block_h <= 0:
+            break
+        kind = blk["kind"]
+        if kind == "heading":
+            _emit_heading_block(slide, blk, left=left, top=cursor,
+                                width=w, height=block_h, fg=fg, fonts=fonts,
+                                Pt=Pt, head_pt=head_pt,
+                                line_spacing=line_spacing)
+        elif kind == "code":
+            _emit_code_block(slide, blk, left=left, top=cursor,
+                             width=w, height=block_h, fg=fg, fonts=fonts,
+                             Pt=Pt, MSO_SHAPE=MSO_SHAPE, body_pt=body_pt)
+        elif kind == "quote":
+            _emit_pull_quote(slide, blk, left=left, top=cursor,
+                             width=w, height=block_h, fg=fg, accent=accent,
+                             fonts=fonts, Pt=Pt, MSO_SHAPE=MSO_SHAPE,
+                             body_pt=body_pt, line_spacing=line_spacing)
+        elif kind == "tag_bullet":
+            _emit_tag_bullet(slide, blk, left=left, top=cursor,
+                             width=w, height=block_h, fg=fg, accent=accent,
+                             fonts=fonts, Pt=Pt, MSO_SHAPE=MSO_SHAPE,
+                             body_pt=body_pt, line_spacing=line_spacing)
+        elif kind == "bullet":
+            _emit_text_block(slide, blk, left=left, top=cursor,
+                             width=w, height=block_h, fg=fg, fonts=fonts,
+                             Pt=Pt, body_pt=body_pt,
+                             line_spacing=line_spacing, prefix="•  ")
+        elif kind == "numbered":
+            _emit_text_block(slide, blk, left=left, top=cursor,
+                             width=w, height=block_h, fg=fg, fonts=fonts,
+                             Pt=Pt, body_pt=body_pt,
+                             line_spacing=line_spacing,
+                             prefix=blk["num"] + ".  ")
+        else:  # paragraph
+            _emit_text_block(slide, blk, left=left, top=cursor,
+                             width=w, height=block_h, fg=fg, fonts=fonts,
+                             Pt=Pt, body_pt=body_pt,
+                             line_spacing=line_spacing)
+        cursor += block_h + gap
+    return cursor
 
 
 def _add_slide_frame(slide, row, *, sw, sh, accent, fg, bg, fonts,
@@ -779,12 +1053,14 @@ def _add_text_slide(slide, row, *, sw, sh, accent, fg, bg, fonts,
                      type_scale=type_scale)
     body = (row.get("body") or "").strip()
     if body:
-        body_box = slide.shapes.add_textbox(
-            Inches(0.7), Inches(1.95), sw - Inches(1.4), sh - Inches(2.5),
-        )
-        _render_markdown_into(
-            body_box.text_frame, body, fg=fg, fonts=fonts, Pt=Pt,
+        _render_markdown_block(
+            slide, body,
+            box=(Inches(0.7), Inches(1.95),
+                 sw - Inches(1.4), sh - Inches(2.5)),
+            fg=fg, accent=accent, fonts=fonts,
+            Pt=Pt, MSO_SHAPE=MSO_SHAPE,
             body_pt=type_scale["body"], head_pt=type_scale["head"],
+            line_spacing=type_scale["line_spacing"],
         )
 
 
@@ -856,14 +1132,16 @@ def _add_hybrid_slide(slide, row, state, tmpd, *, sw, sh, accent, fg, bg,
                      type_scale=type_scale)
     body = (row.get("body") or "").strip()
     if body:
-        body_box = slide.shapes.add_textbox(
-            Inches(0.7), Inches(1.65),
-            int(sw / 2) - Inches(0.8), sh - Inches(1.95),
-        )
         # Half-width box wraps more, so smaller body type than a text slide.
-        _render_markdown_into(
-            body_box.text_frame, body, fg=fg, fonts=fonts, Pt=Pt,
-            body_pt=type_scale["hybrid_body"], head_pt=type_scale["hybrid_head"],
+        _render_markdown_block(
+            slide, body,
+            box=(Inches(0.7), Inches(1.65),
+                 int(sw / 2) - Inches(0.8), sh - Inches(1.95)),
+            fg=fg, accent=accent, fonts=fonts,
+            Pt=Pt, MSO_SHAPE=MSO_SHAPE,
+            body_pt=type_scale["hybrid_body"],
+            head_pt=type_scale["hybrid_head"],
+            line_spacing=type_scale["line_spacing"],
         )
     unrendered = 0
     for r in row.get("regions") or []:

@@ -250,6 +250,40 @@ header using placeholders. Example:
 Never hardcode `"navy blue"` or `"Inter"` — write `{accent}` /
 `{display_font}` so theme switching is a no-op rebuild.
 
+### 5a. Rich body markdown patterns (todo 002)
+
+The body markdown renderer recognises **semantic blocks** and renders
+them as distinct visual compositions in the PPTX (not just bold runs in
+one paragraph). Use them deliberately:
+
+| Markdown pattern | Rendered as | When to use |
+|---|---|---|
+| `> a quoted line` (one or more contiguous `>` lines) | **Pull-quote**: vertical accent bar on the left + italic body, slightly larger type | Punchline / take-home / a single emphatic sentence you want the audience to remember |
+| `- **Tag**: body text` | **Tag pill**: small accent-colored rounded rectangle on the left with the tag in white + body text on the right | A small set (3–6) of named primitives or features, each with a one-line description |
+| Triple-backtick code fence | **Code panel**: tinted background panel + mono font (uses `mono:` from the concept's Typography block) | Showing a command, snippet, or short pseudocode |
+| `# heading` | Larger bold paragraph (own textbox) | Section breaks within a slide |
+| `- item` / `1. item` | Bulleted / numbered paragraph (own textbox) | Standard lists |
+
+So if the slide is "four primitives of the harness, each with a short
+description plus a closing punchline," prefer:
+
+```markdown
+- **Memory**: decisions stack across sessions
+- **Hooks**: run on specific events (export validation, etc.)
+- **Slash commands**: `/literature-review`, `/paper-deck`, …
+- **Context manager**: what the LLM is looking at right now
+
+> Each conversation builds the next version of the AI.
+```
+
+…over four naked `**Bold**: text` bullets followed by a fifth bullet
+that says "remember this." The renderer produces the tag-pill grid +
+pull-quote automatically — no per-slide design work.
+
+**Layout dropping**: blocks that would overflow the body box are
+silently dropped (no error). Keep body content under ~8 blocks per
+slide; split into two slides otherwise.
+
 ### 5b. Hybrid slides — bullets + figure, or several images (regions)
 
 Two distinct uses of `set_slide_regions` / hybrid:

@@ -434,15 +434,22 @@ def test_export_hybrid_slide_with_body_renders_native_bullets(
     pics = [sh for sh in slide.shapes if sh.shape_type == MSO_SHAPE_TYPE.PICTURE]
     assert len(pics) == 1
 
-    # native body text present and on the LEFT half of the slide
+    # native body text present and on the LEFT half of the slide. Each
+    # bullet is its own textbox (block-based renderer — todo 002), so
+    # collect them all and assert (a) both bullets exist as text frames
+    # and (b) every body textbox sits in the left half.
     body_tbs = [
         sh for sh in slide.shapes
-        if sh.has_text_frame and "two-week bespoke pipeline" in sh.text_frame.text
+        if sh.has_text_frame and (
+            "two-week bespoke pipeline" in sh.text_frame.text
+            or "30-second MCP query" in sh.text_frame.text
+        )
+        and sh.left is not None
+        and sh.left + sh.width <= prs.slide_width / 2 + 1
     ]
-    assert body_tbs, "body bullets must render as native text"
-    btb = body_tbs[0]
-    assert btb.left + btb.width <= prs.slide_width / 2 + 1
-    assert "30-second MCP query" in btb.text_frame.text
+    body_text = "".join(b.text_frame.text for b in body_tbs)
+    assert "two-week bespoke pipeline" in body_text
+    assert "30-second MCP query" in body_text
 
 
 # ─── placeholder metadata: fit mode + captured image size ────
@@ -704,3 +711,171 @@ def test_export_applies_type_scale_to_title(state, tmp_path, monkeypatch):
     assert title_runs
     # python-pptx font.size is an Emu/Pt object; check via .pt
     assert title_runs[0].font.size.pt == 30
+
+
+# ─── Rich markdown rendering (todo 002) ─────────────────────────────────
+
+
+def test_split_markdown_blocks_handles_each_kind():
+    body = (
+        "# Heading\n"
+        "- plain bullet\n"
+        "- **Memory**: keeps decisions across sessions\n"
+        "> a pull-quote line\n"
+        "> spanning two\n"
+        "1. first numbered\n"
+        "```\n"
+        "code line 1\n"
+        "code line 2\n"
+        "```\n"
+        "a closing paragraph"
+    )
+    blocks = deck_render._split_markdown_blocks(body)
+    kinds = [b["kind"] for b in blocks]
+    assert kinds == [
+        "heading", "bullet", "tag_bullet", "quote",
+        "numbered", "code", "paragraph",
+    ]
+    # Quote collapses two `> ...` lines into one block
+    assert blocks[3]["text"] == "a pull-quote line\nspanning two"
+    # Tag-bullet pulls tag + body apart
+    assert blocks[2]["tag"] == "Memory"
+    assert blocks[2]["text"] == "keeps decisions across sessions"
+    # Code block keeps every interior line, verbatim
+    assert blocks[5]["lines"] == ["code line 1", "code line 2"]
+
+
+def test_export_renders_pull_quote_with_accent_bar(state, tmp_path, monkeypatch):
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    slug = _setup(state)
+    decks.update_deck(state, slug, "d", concept="accent: #b58900")
+    decks.add_slide(
+        state, slug, "d", slide_number=1, role="background", title="Q",
+        body="> the punchline\n> on a second line",
+        notes="n", render_mode="text",
+    )
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    slide = Presentation(str(out)).slides[0]
+    # Body produces: one accent vertical bar (RECTANGLE auto-shape) +
+    # one textbox carrying the quote, plus the slide-frame chrome
+    # (background, stripe, rule, title). Filter to text frames whose
+    # content matches the quote.
+    quote_tbs = [
+        sh for sh in slide.shapes
+        if sh.has_text_frame and "punchline" in sh.text_frame.text
+    ]
+    assert quote_tbs, "the quote text must render"
+    # Every run in the quote textbox must be italic — that's the
+    # pull-quote signal we layer on top of normal emphasis.
+    runs = [r for p in quote_tbs[0].text_frame.paragraphs for r in p.runs]
+    assert runs and all(r.font.italic for r in runs)
+    # The accent bar is an auto-shape; at least one must exist at the
+    # left of the body box (the slide-frame stripe lives at top=0).
+    bars = [
+        sh for sh in slide.shapes
+        if sh.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE and sh.top > 0
+        and sh.left < quote_tbs[0].left
+    ]
+    assert bars, "pull-quote must have an accent bar to the left of the text"
+
+
+def test_export_renders_tag_bullet_pill(state, tmp_path, monkeypatch):
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    slug = _setup(state)
+    decks.update_deck(state, slug, "d", concept="accent: #b58900")
+    decks.add_slide(
+        state, slug, "d", slide_number=1, role="background", title="Spec",
+        body="- **Memory**: keeps decisions across sessions\n"
+             "- **Hooks**: run on specific events",
+        notes="n", render_mode="text",
+    )
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    slide = Presentation(str(out)).slides[0]
+    # Tag pills are auto-shapes with the tag text inside.
+    pill_shapes = [
+        sh for sh in slide.shapes
+        if sh.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE
+        and sh.has_text_frame
+        and sh.text_frame.text.strip() in {"Memory", "Hooks"}
+    ]
+    assert {sh.text_frame.text.strip() for sh in pill_shapes} == {"Memory", "Hooks"}
+    # And the body text is in *separate* textboxes (not inside the pill).
+    body_text = "".join(
+        sh.text_frame.text for sh in slide.shapes if sh.has_text_frame
+    )
+    assert "keeps decisions across sessions" in body_text
+    assert "run on specific events" in body_text
+
+
+def test_export_renders_code_block_panel(state, tmp_path, monkeypatch):
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    slug = _setup(state)
+    decks.update_deck(
+        state, slug, "d",
+        concept="Typography:\n  mono: JetBrains Mono",
+    )
+    decks.add_slide(
+        state, slug, "d", slide_number=1, role="method", title="Snippet",
+        body="```\nfor i in range(N):\n    process(i)\n```",
+        notes="n", render_mode="text",
+    )
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    slide = Presentation(str(out)).slides[0]
+    # Code text in some textbox, using the mono font we set in the
+    # concept's Typography block.
+    code_tbs = [
+        sh for sh in slide.shapes
+        if sh.has_text_frame and "for i in range(N):" in sh.text_frame.text
+    ]
+    assert code_tbs
+    runs = [r for p in code_tbs[0].text_frame.paragraphs for r in p.runs]
+    assert any(r.font.name == "JetBrains Mono" for r in runs), (
+        "code lines should use the deck's mono font"
+    )
+
+
+def test_export_mixed_rich_blocks_smoke(state, tmp_path, monkeypatch):
+    """One slide carrying every rich block kind exports without error."""
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+
+    slug = _setup(state)
+    decks.update_deck(state, slug, "d", concept="accent: #b58900")
+    body = (
+        "# Setup\n"
+        "- plain bullet for context\n"
+        "- **Tag**: pill body text\n"
+        "> the punchline of the slide\n"
+        "1. first numbered\n"
+        "```\ncode goes here\n```\n"
+        "*a closing slogan*"
+    )
+    decks.add_slide(state, slug, "d", slide_number=1, role="discussion",
+                    title="Mixed", body=body, notes="n", render_mode="text")
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    assert res["text_slides"] == 1
+    # Verify each rich block left a textbox in the deck.
+    flat = "".join(
+        sh.text_frame.text for sh in Presentation(str(out)).slides[0].shapes
+        if sh.has_text_frame
+    )
+    for token in ("Setup", "context", "Tag", "pill body text",
+                  "punchline", "first numbered", "code goes here", "slogan"):
+        assert token in flat, f"missing rich block token: {token}"
