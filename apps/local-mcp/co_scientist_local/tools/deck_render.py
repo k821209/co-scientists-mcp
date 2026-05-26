@@ -931,8 +931,9 @@ def _build_code_namespace(slide, row, state, slug, tmpd, *,
         grid=_h.grid,                       # todo 004 §D — design grid
         SPACING_UNIT_PT=_h.SPACING_UNIT_PT,  # 8pt vertical rhythm
     )
-    # Whole-slide patterns (todo 004 §B) — bound as `p`.
+    # Whole-slide patterns (todo 004 §B, 006) — bound as `p`.
     p = SimpleNamespace(
+        # Intent-axis patterns (todo 004 §B)
         hero_with_trailing_evidence=_p.hero_with_trailing_evidence,
         chapter_divider=_p.chapter_divider,
         metric_tile_row=_p.metric_tile_row,
@@ -943,6 +944,11 @@ def _build_code_namespace(slide, row, state, slug, tmpd, *,
         quadrant_map=_p.quadrant_map,
         numbered_milestone_arc=_p.numbered_milestone_arc,
         zoom_in_callout=_p.zoom_in_callout,
+        # Structural-axis patterns (todo 006 — PowerPoint master layouts)
+        title_slide=_p.title_slide,
+        title_and_body=_p.title_and_body,
+        title_two_content=_p.title_two_content,
+        title_and_image_grid=_p.title_and_image_grid,
     )
 
     return {

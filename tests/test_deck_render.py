@@ -1366,6 +1366,21 @@ _UNDER_TITLE_PATTERNS = [
      "  {'tag':'2024 · Genomic LM','note':'언어모델이 유전체 안으로 진입'},\n"
      "  {'tag':'Now','note':'육종가가 데이터에 말을 거는 시대'}],\n"
      "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"),
+    # Structural patterns (todo 006). title_slide is owns-slide → tested
+    # separately. The 3 under-title structural patterns join the suite:
+    ("title_and_body",
+     "p.title_and_body(slide, title='제목과 본문',\n"
+     "  body=['첫 번째 핵심 포인트', '두 번째 보완 포인트',\n"
+     "        '세 번째 결론적인 한 줄'],\n"
+     "  lead='AI 육종은 데이터에 말을 거는 일.',\n"
+     "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"),
+    ("title_two_content",
+     "p.title_two_content(slide, title='2-column generic',\n"
+     "  left={'heading': '맞춤 파이프라인',\n"
+     "        'bullets': ['컬럼 손으로 조인','플롯 손으로 코딩','쿼리당 2주']},\n"
+     "  right={'heading': 'MCP 쿼리',\n"
+     "         'bullets': ['자연어 입력','provenance trail','쿼리당 30초']},\n"
+     "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"),
 ]
 
 
@@ -1446,6 +1461,79 @@ def test_chapter_divider_owns_whole_slide(state, tmp_path, monkeypatch):
         f"chapter_divider label centered poorly: label_mid={label_mid}, "
         f"slide_center={center_y}"
     )
+
+
+def test_pattern_title_slide_owns_whole_slide(state, tmp_path, monkeypatch):
+    """title_slide is the 'owns whole slide' opener — no preamble.
+    Eyebrow + big title + accent rule + subtitle, all centered."""
+    from pptx.util import Inches as _I
+    slide, sw, sh_total = _build_pattern_slide(
+        state, tmp_path, monkeypatch, with_preamble=False, snippet=(
+            "p.title_slide(slide,\n"
+            "  title='다중 모달 농업 AI',\n"
+            "  subtitle='강양재 · 한국육종학회 2026.06.05',\n"
+            "  eyebrow='Lab seminar',\n"
+            "  palette=palette, fonts=fonts, type_scale=type_scale,\n"
+            "  sw=sw, sh=sh)\n"
+        ),
+    )
+    # No shape leaks into the title-bar zone, since the pattern owns
+    # the canvas — all content lives in a centered block.
+    assert _count_shapes_in_title_zone(slide) == 0
+    # All shapes within bounds.
+    for sh in slide.shapes:
+        assert _shape_in_bounds(sh, sw, sh_total)
+    # The pattern wrote all three text bits.
+    flat = " ".join(s.text_frame.text for s in slide.shapes
+                    if s.has_text_frame)
+    assert "다중 모달 농업 AI" in flat
+    assert "강양재" in flat
+    assert "LAB SEMINAR" in flat   # eyebrow renders upper-case
+
+
+def test_pattern_title_and_image_grid(state, tmp_path, monkeypatch):
+    """4-image grid with captions. Pattern is under-title — runs with
+    the standard preamble; all 4 images embed and captions survive."""
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    # Stage 4 PNGs the pattern will embed
+    paths = []
+    for i in range(4):
+        p = tmp_path / f"tile_{i}.png"
+        p.write_bytes(_PNG_1x1)
+        paths.append(str(p))
+
+    images_repr = ",\n  ".join(
+        f"{{'path': {p!r}, 'caption': '캡션 {i + 1}'}}"
+        for i, p in enumerate(paths)
+    )
+    snippet = (
+        "p.title_and_image_grid(slide, title='이미지 그리드',\n"
+        f"  images=[\n  {images_repr}],\n"
+        "  cols=2,\n"
+        "  palette=palette, fonts=fonts, type_scale=type_scale,\n"
+        "  sw=sw, sh=sh)\n"
+    )
+    slide, sw, sh_total = _build_pattern_slide(
+        state, tmp_path, monkeypatch, snippet=snippet,
+    )
+    # 3 preamble chrome shapes in title zone, none from the grid pattern
+    assert _count_shapes_in_title_zone(slide) == 3
+    # 4 PICTURE shapes embedded
+    pics = [sh for sh in slide.shapes
+            if sh.shape_type == MSO_SHAPE_TYPE.PICTURE]
+    assert len(pics) == 4, f"expected 4 image tiles, got {len(pics)}"
+    # Every shape within slide bounds
+    for sh in slide.shapes:
+        assert _shape_in_bounds(sh, sw, sh_total), \
+            f"out-of-bounds shape at top={sh.top}, left={sh.left}"
+    # All 4 captions survive
+    flat = " ".join(s.text_frame.text for s in slide.shapes
+                    if s.has_text_frame)
+    for i in range(4):
+        assert f"캡션 {i + 1}" in flat
 
 
 def test_pattern_zoom_in_callout(state, tmp_path, monkeypatch):

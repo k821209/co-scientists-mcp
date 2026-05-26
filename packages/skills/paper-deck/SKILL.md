@@ -381,11 +381,39 @@ All under-title patterns take the same theme kwargs (`palette`,
 `fonts`, `type_scale`, `sw`, `sh`) as `h.*` helpers; `chapter_divider`
 likewise.
 
+**Structural patterns** (todo 006) — pick these *first* by content
+shape (the PowerPoint master-layout taxonomy), then optionally swap to
+an intent pattern above if a more loaded design fits:
+
+| Pattern | Contract | PowerPoint base | Use for |
+|---|---|---|---|
+| `p.title_slide(slide, *, title, subtitle="", eyebrow="")` | **owns slide** | (1) Title Slide | Deck opener / cover at slide 1. Centered eyebrow + title + accent rule + subtitle. Distinct from `chapter_divider` (mid-deck). |
+| `p.title_and_body(slide, *, title, body, lead="")` | under title | (2) Title and Content (plain) | The most common slide: title + bulleted body. Body sits in a 60% left column with 40% intentional whitespace on the right (focus discipline). Optional `lead` sentence in display type. |
+| `p.title_two_content(slide, *, title, left, right)` | under title | (4) Two Content | Generic 2-column body, each `{heading?, body?, bullets?}`. Mirrored — for emphasized comparison use `before_after_split`; for pros/cons use `contrast_pair`. |
+| `p.title_and_image_grid(slide, *, title, images, cols=2)` | under title | (4) Two Content extended / (9) Picture with Caption | N images in a `cols`-column grid (1 = half-bleed, 2 = side-by-side, 4 = 2×2). Optional per-image captions. |
+
+**Two-step selection** (todo 006 — the 2D matrix):
+
+1. **Structural type first** — pick by content *shape*. What do you
+   have to put on this slide?
+   - Just a centered title → `p.title_slide` (slide 1) or
+     `p.chapter_divider` (mid-deck) or `h.title_block` alone.
+   - Title + a list / paragraphs → `p.title_and_body`.
+   - Title + 2 paired panels → `p.title_two_content` (generic) or
+     `p.contrast_pair` (pros/cons) or `p.before_after_split` (old/new).
+   - Title + a single figure → `h.image_figure` (full-bleed) or
+     `p.zoom_in_callout` (with ROI).
+   - Title + multiple images → `p.title_and_image_grid`.
+2. **Intent treatment second** — if a more loaded design fits the
+   *message*, swap to one of the intent patterns
+   (`hero_with_trailing_evidence`, `metric_tile_row`, `evidence_stack`,
+   `flow_pipeline`, `quadrant_map`, `numbered_milestone_arc`).
+
 **Pattern selection — role → recommended pattern**:
 
 | Role | First-pick pattern | Backup |
 |---|---|---|
-| `title` (chapter open) | `chapter_divider` | `hero_with_trailing_evidence` |
+| `title` (deck opener) | `title_slide` | `chapter_divider` (mid-deck) |
 | `outline` | `flow_pipeline` (steps) | `numbered_milestone_arc` |
 | `background` | `evidence_stack` (claim + 2-3 facts) | `metric_tile_row` |
 | `question` | `hero_with_trailing_evidence` (single line + supporting evidence) | `chapter_divider` |
@@ -462,6 +490,48 @@ need. Drop to raw `slide.shapes.add_textbox(...)` only when no helper
 fits. Keep snippets **declarative** (helper calls + a few coordinates),
 not procedural (don't write loops that compute positions when
 `card_grid(cols=N)` already does).
+
+### 5c. Compositional effects — why arrangement matters (todo 006)
+
+Same content lands differently depending on arrangement. The patterns
+encode these rules; when you build a custom layout, mirror them.
+
+**Left vs right placement.** Western reading is L→R; the right side is
+where the audience arrives — the natural "this is the conclusion"
+position. Place the **subject** on the right when it's the destination;
+on the left when it's the starting fact.
+- `p.before_after_split` deliberately puts BEFORE on the left
+  (history) and AFTER on the right (where you arrive).
+
+**Image emphasis — full-bleed vs caption strip.**
+- Full-bleed image, no caption = "the image **IS** the message". Use
+  when the image self-explains and you want emotional weight.
+- Image + caption strip = "the image is supporting **evidence**".
+  Caption stays in body type, never display.
+
+**Multi-image arrangement — grid vs row.**
+- 2×2 grid = COMPARISON (items are peers; no order).
+- 3- or 4-image single row = PROGRESSION (left→right reads as sequence).
+- 1 hero + N small supporting = FOCUS + context.
+
+**Title position — hierarchy.**
+- Title at top (default): content-first. The audience reads the title
+  briefly and dwells on the body. Most slides.
+- Title centered, no body (`title_slide` / `chapter_divider`): the
+  title **is** the content. Use for openers and section breaks.
+
+**Whitespace as design.**
+- Filled body box = density. Defensible for dense reference data.
+- 60% column with 40% whitespace = focus. Use for theses, hero
+  statements, KPI tiles. `p.title_and_body` does this by default.
+
+**The 4-color / 4-type-size discipline** (from the deck concept's
+`Design language` block, todo 004 §G). Per slide:
+- ≤ 3 colors (accent + foreground + one neutral).
+- ≤ 4 distinct type sizes (read from `type_scale`, never ad-hoc).
+
+When you author a layout that breaks one of these, ask whether the
+break earns its keep — and if not, fall back to the rule.
 
 ### 5b. Hybrid slides — bullets + figure, or several images (regions)
 

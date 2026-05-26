@@ -943,3 +943,286 @@ def _normalize_for_helper(path: str):
     normalization)."""
     from . import deck_render
     return deck_render._normalize_image_for_pptx(path)
+
+
+# ─── Structural patterns (todo 006) ──────────────────────────────────────
+#
+# Where the 10 patterns above are organized by design *intent* (thesis,
+# comparison, timeline, …), these are organized by content *shape* —
+# the PowerPoint master-layout taxonomy. The agent picks the structural
+# pattern first (do I have a body? images? how many?) and may then opt
+# into a more design-loaded intent pattern instead.
+
+
+def title_slide(slide, *, title: str, subtitle: str = "",
+                eyebrow: str = "",
+                palette, fonts, type_scale, sw, sh):
+    """Deck opener / cover (PowerPoint base 1 — Title Slide). Centered
+    eyebrow + large title + short accent rule + subtitle.
+
+    Distinct from `chapter_divider` (a *mid-deck* section break) — this
+    is the *opener* at slide 1 with author / venue / date metadata.
+
+    Contract: **Owns the whole slide.** Do NOT call h.accent_stripe or
+    h.title_block before; this pattern is the slide.
+
+    Content limits:
+        title:    ≤ ~50 chars at display size (wraps to 2 lines).
+        subtitle: ≤ ~80 chars (1 line; e.g. "Author — Venue 2026").
+        eyebrow:  ≤ ~30 chars; rendered upper-case in accent color.
+    """
+    title_pt = max(48, type_scale.get("cover_title", 40) + 8)
+    sub_pt = type_scale.get("head", 26)
+    eyebrow_pt = type_scale.get("caption", 12)
+
+    fg = palette["foreground"]
+    fg_muted = _muted(fg)
+    accent = palette["accent"]
+    margin_x = sw // 12
+    box_w = sw - 2 * margin_x
+
+    title_h = Pt(title_pt * 1.25)
+    rule_gap = Pt(_h.SPACING_UNIT_PT * 2)
+    rule_h = Pt(6)
+    eyebrow_h = Pt(eyebrow_pt * 1.8) if eyebrow else 0
+    sub_h = Pt(sub_pt * 1.8) if subtitle else 0
+    block_h = (eyebrow_h + (Pt(4) if eyebrow else 0)
+               + title_h
+               + (rule_gap + rule_h if subtitle else 0)
+               + (rule_gap + sub_h if subtitle else 0))
+    block_top = (sh - block_h) // 2
+
+    cursor = block_top
+    if eyebrow:
+        _emit_text(slide, eyebrow.upper(),
+                   left=margin_x, top=cursor,
+                   width=box_w, height=eyebrow_h,
+                   size_pt=eyebrow_pt, color=accent,
+                   font_name=fonts.get("body"), bold=True,
+                   align=PP_ALIGN.CENTER)
+        cursor += eyebrow_h + Pt(4)
+    _emit_text(slide, title,
+               left=margin_x, top=cursor,
+               width=box_w, height=title_h,
+               size_pt=title_pt, color=fg,
+               font_name=fonts.get("display"), bold=True,
+               align=PP_ALIGN.CENTER, line_spacing=1.05)
+    cursor += title_h
+    if subtitle:
+        rule_w = max(Inches(1.2), sw // 8)
+        _accent_rule(slide, left=(sw - rule_w) // 2,
+                     top=cursor + rule_gap,
+                     width=rule_w, height=rule_h, color=accent)
+        _emit_text(slide, subtitle,
+                   left=margin_x, top=cursor + rule_gap + rule_h + rule_gap,
+                   width=box_w, height=sub_h,
+                   size_pt=sub_pt, color=fg_muted,
+                   font_name=fonts.get("body"),
+                   align=PP_ALIGN.CENTER)
+
+
+def title_and_body(slide, *, title: str, body, lead: str = "",
+                   palette, fonts, type_scale, sw, sh):
+    """Standard title + bullet body (PowerPoint base 2 — Title and
+    Content, plain). Body sits in a left ~60% column with the right
+    ~40% intentionally left as whitespace (focus discipline — see
+    SKILL §5c).
+
+    Contract: **Goes under a title_block.** Call h.accent_stripe + h.
+    title_block BEFORE. Optional `lead` sentence renders in display
+    type above the bullets.
+
+    Content limits:
+        body: list of strings (bullets) OR a string (one bullet per
+            non-empty line; leading bullet marker stripped).
+        lead: ≤ ~120 chars (wraps to 2 lines max).
+    """
+    if isinstance(body, str):
+        items = [ln.strip().lstrip("-*•").lstrip()
+                 for ln in body.splitlines() if ln.strip()]
+    else:
+        items = list(body or [])
+
+    fg = palette["foreground"]
+    fg_muted = _muted(fg)
+    body_pt = type_scale.get("body", 20)
+    lead_pt = max(body_pt + 4, type_scale.get("head", 26) - 4)
+    body_top = _BODY_TOP
+    body_left = _SIDE_MARGIN
+    # ~60% width left column, 40% whitespace on the right
+    body_w = int((sw - 2 * _SIDE_MARGIN) * 0.6)
+
+    cursor = body_top
+    if lead:
+        lead_h = Pt(lead_pt * 2.2)
+        _emit_text(slide, lead,
+                   left=body_left, top=cursor,
+                   width=body_w, height=lead_h,
+                   size_pt=lead_pt, color=fg,
+                   font_name=fonts.get("display"), bold=False,
+                   line_spacing=1.2, italic=True)
+        cursor += lead_h + Pt(_h.SPACING_UNIT_PT * 2)
+
+    # Body bullets
+    bullets_h = sh - cursor - _BOTTOM_MARGIN
+    tb = slide.shapes.add_textbox(body_left, cursor, body_w, bullets_h)
+    tf = tb.text_frame
+    tf.word_wrap = True
+    _h._autoshrink(tf)
+    line_spacing = type_scale.get("line_spacing", 1.22)
+    first = True
+    for item in items:
+        para = tf.paragraphs[0] if first else tf.add_paragraph()
+        first = False
+        para.line_spacing = line_spacing
+        para.space_after = Pt(_h.SPACING_UNIT_PT)
+        run = para.add_run()
+        run.text = f"•  {item}"
+        run.font.size = Pt(body_pt)
+        run.font.color.rgb = fg_muted
+        if fonts.get("body"):
+            run.font.name = fonts["body"]
+
+
+def title_two_content(slide, *, title: str, left: dict, right: dict,
+                       palette, fonts, type_scale, sw, sh):
+    """Generic 2-column body (PowerPoint base 4 — Two Content). Each
+    side is `{heading?, body?, bullets?}`. Mirrored panels — both
+    equally weighted. Use for "X vs Y" structures where neither side
+    dominates (for emphasized comparison, prefer
+    `p.before_after_split`; for pros/cons, prefer `p.contrast_pair`).
+
+    Contract: **Goes under a title_block.** Pattern starts at _BODY_TOP.
+
+    Content limits:
+        left / right: each {heading (≤ ~24 chars), body (≤ ~280 chars,
+            wraps to 6 lines), bullets (≤ 5 of ≤ ~60 chars)}.
+    """
+    fg = palette["foreground"]
+    fg_muted = _muted(fg)
+    accent = palette["accent"]
+    head_pt = type_scale.get("head", 26)
+    body_pt = type_scale.get("body", 20)
+
+    side = _SIDE_MARGIN
+    top = _BODY_TOP
+    gap = Inches(0.4)
+    col_w = (sw - 2 * side - gap) // 2
+    height = sh - top - _BOTTOM_MARGIN
+
+    for i, item in enumerate((left, right)):
+        x = side + i * (col_w + gap)
+        heading = item.get("heading") or ""
+        body = item.get("body") or ""
+        bullets = item.get("bullets") or []
+
+        cursor = top
+        if heading:
+            head_h = Pt(head_pt * 1.6)
+            _emit_text(slide, heading,
+                       left=x, top=cursor,
+                       width=col_w, height=head_h,
+                       size_pt=head_pt, color=fg,
+                       font_name=fonts.get("display"), bold=True)
+            # Small accent rule under the column heading
+            _accent_rule(slide, left=x, top=cursor + head_h + Pt(2),
+                         width=Inches(1.0), height=Pt(3), color=accent)
+            cursor += head_h + Pt(_h.SPACING_UNIT_PT * 2)
+
+        remaining = top + height - cursor
+        tb = slide.shapes.add_textbox(x, cursor, col_w, remaining)
+        tf = tb.text_frame
+        tf.word_wrap = True
+        _h._autoshrink(tf)
+        first = True
+        line_spacing = type_scale.get("line_spacing", 1.22)
+        if body:
+            p = tf.paragraphs[0]
+            first = False
+            p.line_spacing = line_spacing
+            p.space_after = Pt(_h.SPACING_UNIT_PT)
+            run = p.add_run()
+            run.text = body
+            run.font.size = Pt(body_pt)
+            run.font.color.rgb = fg_muted
+            if fonts.get("body"):
+                run.font.name = fonts["body"]
+        for b in bullets:
+            p = tf.paragraphs[0] if first else tf.add_paragraph()
+            first = False
+            p.line_spacing = line_spacing
+            p.space_after = Pt(_h.SPACING_UNIT_PT // 2)
+            run = p.add_run()
+            run.text = f"•  {b}"
+            run.font.size = Pt(body_pt)
+            run.font.color.rgb = fg_muted
+            if fonts.get("body"):
+                run.font.name = fonts["body"]
+
+
+def title_and_image_grid(slide, *, title: str,
+                          images: list[dict], cols: int = 2,
+                          palette, fonts, type_scale, sw, sh):
+    """N images in a `cols`-column grid (PowerPoint base 4 extended).
+    1 image = full-half; 2 = side-by-side; 4 = 2×2; etc. Optional per-
+    image caption strip below each tile. Layout effect (SKILL §5c):
+    grid implies COMPARISON; for PROGRESSION use cols=N rows=1.
+
+    Contract: **Goes under a title_block.** Pattern starts at _BODY_TOP.
+
+    Content limits:
+        images: 1–6 items, each {path (real filesystem path), caption?
+            (≤ ~60 chars; 1 line)}.
+        cols: 1, 2, 3, or 4 (default 2).
+    """
+    if not images:
+        return
+    cols = max(1, min(4, int(cols)))
+    n = len(images)
+    rows = (n + cols - 1) // cols
+
+    side = _SIDE_MARGIN
+    top = _BODY_TOP
+    gap = Pt(_h.SPACING_UNIT_PT * 2)
+    grid_w = sw - 2 * side - gap * (cols - 1)
+    grid_h = sh - top - _BOTTOM_MARGIN - gap * (rows - 1)
+    cell_w = grid_w // cols
+    cell_h = grid_h // rows
+
+    cap_pt = type_scale.get("caption", 12)
+    fg_muted = _muted(palette["foreground"])
+
+    for i, img in enumerate(images):
+        r, c = i // cols, i % cols
+        x = side + c * (cell_w + gap)
+        y = top + r * (cell_h + gap)
+        path = img.get("path")
+        caption = (img.get("caption") or "").strip()
+        cap_h = Pt(cap_pt * 1.8) if caption else 0
+        img_h = cell_h - cap_h - (Pt(4) if caption else 0)
+        # Embed image with Keynote-safe normalization
+        if path:
+            img_buf = _normalize_for_helper(path)
+            pic = slide.shapes.add_picture(img_buf, x, y, width=cell_w, height=img_h)
+            # Letterbox-fit (contain) — never crop a tile image.
+            if pic.width != cell_w or pic.height != img_h:
+                # contain math
+                pic_ar = pic.width / pic.height if pic.height else 1
+                box_ar = cell_w / img_h if img_h else 1
+                if pic_ar > box_ar:
+                    new_w = cell_w
+                    new_h = int(cell_w / pic_ar)
+                else:
+                    new_h = img_h
+                    new_w = int(img_h * pic_ar)
+                pic.width = new_w
+                pic.height = new_h
+                pic.left = x + (cell_w - new_w) // 2
+                pic.top = y + (img_h - new_h) // 2
+        if caption:
+            _emit_text(slide, caption,
+                       left=x, top=y + img_h + Pt(4),
+                       width=cell_w, height=cap_h,
+                       size_pt=cap_pt, color=fg_muted,
+                       font_name=fonts.get("body"),
+                       italic=True, align=PP_ALIGN.CENTER)
