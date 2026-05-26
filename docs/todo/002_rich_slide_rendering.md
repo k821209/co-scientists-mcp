@@ -2,8 +2,23 @@
 
 **Audience:** co-scientist-local MCP / Claude Code harness dev team.
 **Filed by:** Yang Jae Kang, project `ai-breeding`, 2026-05-25.
-**Status:** open · proposal.
+**Status:** in progress · approach revised.
 **Related:** [001 — Native-language prose in the harness](./001_native_language_prose_in_harness.md)
+
+## Resolution log
+
+- **2026-05-25** — first attempt landed (`commit 93ca849`): expanded the
+  body-markdown renderer with pull-quote / tag-pill / code-panel block
+  emitters in `deck_render._render_markdown_block`. This was a misstep
+  — the user pointed out (2026-05-26) that markdown's grammar is too
+  thin to drive slide design, and trying to do so produces mediocre
+  slides regardless of how much sugar we layer on top.
+- **2026-05-26** — reverted the markdown-rich layer. `body` is back to
+  plain-text rendering (`deck_render._render_simple_body`). Visual
+  richness is to be delivered via the slide's `code` field — a python-
+  pptx snippet the agent writes per slide that composes the slide
+  natively. Wiring up the `code` execution path is the next commit on
+  this todo; this file stays open until that lands.
 
 ---
 

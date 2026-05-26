@@ -227,7 +227,7 @@ mcp__co_scientist__add_slide(
   slide_number=N,
   role="<role>",
   title="<slide title>",
-  body="<markdown body>",
+  body="<plain-text body — lines become bullets; not markdown-parsed (§5a)>",
   prompt="""
     {accent} accent on the trend line. Display font: {display_font}.
     Body: clean grid showing X vs Y across 4 conditions.
@@ -250,39 +250,35 @@ header using placeholders. Example:
 Never hardcode `"navy blue"` or `"Inter"` — write `{accent}` /
 `{display_font}` so theme switching is a no-op rebuild.
 
-### 5a. Rich body markdown patterns (todo 002)
+### 5a. Body is informational, not a design language (todo 002)
 
-The body markdown renderer recognises **semantic blocks** and renders
-them as distinct visual compositions in the PPTX (not just bold runs in
-one paragraph). Use them deliberately:
+The `body` field is **not** rendered through a markdown parser. It is
+just a list of lines — each non-empty line becomes a plain paragraph
+at the deck's body type size; leading `-`, `*`, `•` markers are
+stripped; nothing else (no `**bold**`, no `> quote` block, no fenced
+code panel).
 
-| Markdown pattern | Rendered as | When to use |
-|---|---|---|
-| `> a quoted line` (one or more contiguous `>` lines) | **Pull-quote**: vertical accent bar on the left + italic body, slightly larger type | Punchline / take-home / a single emphatic sentence you want the audience to remember |
-| `- **Tag**: body text` | **Tag pill**: small accent-colored rounded rectangle on the left with the tag in white + body text on the right | A small set (3–6) of named primitives or features, each with a one-line description |
-| Triple-backtick code fence | **Code panel**: tinted background panel + mono font (uses `mono:` from the concept's Typography block) | Showing a command, snippet, or short pseudocode |
-| `# heading` | Larger bold paragraph (own textbox) | Section breaks within a slide |
-| `- item` / `1. item` | Bulleted / numbered paragraph (own textbox) | Standard lists |
+Markdown's grammar is too thin to capture slide *design* (what is the
+punchline? where does the figure go? are these four items a list or a
+2×2 card grid?). When you try to derive visual treatment from `>`
+quote vs `-` bullet markers, the result is a mediocre slide.
 
-So if the slide is "four primitives of the harness, each with a short
-description plus a closing punchline," prefer:
+**If a slide needs visual richness** (cards, quote callouts, KPI
+tiles, custom layout, data viz), the right tool is the slide's `code`
+field — a python-pptx snippet you write that composes the slide
+natively. The exporter runs that code with the slide object + theme
+context bound. (Hooking up the `code` execution path is in progress;
+until then, use `code-shape` slides — agent renders a PNG locally —
+for any slide whose design exceeds plain title + bullets.)
 
-```markdown
-- **Memory**: decisions stack across sessions
-- **Hooks**: run on specific events (export validation, etc.)
-- **Slash commands**: `/literature-review`, `/paper-deck`, …
-- **Context manager**: what the LLM is looking at right now
+The `body` field stays useful as:
+- **Speaker-facing notes** about the slide's content
+- **Source-of-truth text** that the slide's `code` reads in to build
+  cards / quotes / labels at compose time
+- **A graceful default** when you haven't written `code` yet — the
+  slide still exports as title + plain bullets, just without design
 
-> Each conversation builds the next version of the AI.
-```
-
-…over four naked `**Bold**: text` bullets followed by a fifth bullet
-that says "remember this." The renderer produces the tag-pill grid +
-pull-quote automatically — no per-slide design work.
-
-**Layout dropping**: blocks that would overflow the body box are
-silently dropped (no error). Keep body content under ~8 blocks per
-slide; split into two slides otherwise.
+Don't pack design intent into markdown markers — pack it into `code`.
 
 ### 5b. Hybrid slides — bullets + figure, or several images (regions)
 
