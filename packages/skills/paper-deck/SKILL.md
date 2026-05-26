@@ -349,28 +349,37 @@ h.pull_quote(slide, "Take-home line",
              left=left, top=top, width=w_, height=h_)
 ```
 
-**`p.*` whole-slide pattern catalog** (todo 004 §B) — these are
+**`p.*` whole-slide pattern catalog** (todo 004 §B + 005) — these are
 *designed compositions*, not primitives. Each pattern bundles a
 designer's compositional decisions (grid placement, type hierarchy,
 whitespace ratios, color use, visual storytelling devices). Pick a
 pattern that fits the slide's *intent*; don't reinvent the layout
 with raw helpers.
 
-| Pattern | Intent / when to use | Content shape |
-|---|---|---|
-| `p.hero_with_trailing_evidence(slide, *, headline, evidence)` | Thesis / takeaway slide. Asymmetric: big headline + evidence column. | `headline: str`, `evidence: list[str]` |
-| `p.chapter_divider(slide, *, chapter_label, summary)` | Section opener (Era I/II/III). Distinct rhythm from interior slides — most space empty. | `chapter_label: str`, `summary: str` |
-| `p.metric_tile_row(slide, *, tiles)` | KPI / quantitative summary. Big numbers across a row. | `tiles: [(value, label)]` or `[(value, label, unit)]` |
-| `p.evidence_stack(slide, *, claim, evidence)` | A claim backed by 2-4 stacked supporting facts with tag-pill labels. | `claim: str`, `evidence: [{tag, body}]` |
-| `p.flow_pipeline(slide, *, steps)` | Process / workflow. Horizontal flow with right-arrows between numbered cards. | `steps: [{tag, body}]` |
-| `p.before_after_split(slide, *, before, after, transition_label="")` | Risk vs mitigation, old vs new. Muted left + vibrant right + arrow between. | `before / after: {title, body}` |
-| `p.contrast_pair(slide, *, left_item, right_item, axis_label="")` | Two competing options framed by an axis. Mirrored panels with pros/cons. | `*_item: {title, pros, cons}` |
-| `p.quadrant_map(slide, *, items, axes)` | Comparative landscape. Items positioned by (x, y) ∈ [0,1]² on labeled axes. | `items: [{label, x, y}]`, `axes: {x, y, x_low?, x_high?}` |
-| `p.numbered_milestone_arc(slide, *, milestones)` | Progressive timeline. Numbered markers along a line; weight saturates toward present. | `milestones: [{tag, note}]` |
-| `p.zoom_in_callout(slide, *, context_image_path, callout, note="")` | Focus on a region of a complex figure. Context image + outlined ROI + zoomed inset. | `context_image_path: str`, `callout: {x, y, w, h}` (0-1 fractions) |
+**Contract: every pattern is one of two kinds.** Get this wrong and
+the pattern collides with your `h.title_block` (or vice versa).
+Patterns marked **under title** assume you've already called
+`h.accent_stripe(slide, ...)` + `h.title_block(slide, ...)`; they
+draw their content starting at `y ≈ 1.85"`. The one **owns slide**
+pattern (`chapter_divider`) replaces the entire chrome — don't call
+the preamble before it.
 
-All patterns take the same theme kwargs (`palette`, `fonts`,
-`type_scale`, `sw`, `sh`) as `h.*` helpers.
+| Pattern | Contract | Intent / when to use | Content shape |
+|---|---|---|---|
+| `p.chapter_divider(slide, *, chapter_label, summary="")` | **owns slide** | Section opener (Era I/II/III). Big centered label + accent rule + summary. | `chapter_label` (≤ 12 chars), `summary` (≤ 50 chars) |
+| `p.hero_with_trailing_evidence(slide, *, headline, evidence)` | under title | Thesis / takeaway. Big headline on the left + numbered evidence column on the right. | `headline` (≤ 60 chars), `evidence` (2–4 items, ≤ 80 chars) |
+| `p.metric_tile_row(slide, *, tiles)` | under title | KPI / quantitative summary. Big numbers in a row. | `tiles: 3–5 of (value, label)` or `(value, label, unit)` |
+| `p.evidence_stack(slide, *, claim, evidence)` | under title | A claim backed by 2-4 stacked tag-pill rows. | `claim` (≤ 80 chars), `evidence` (2–4 items, `{tag, body}`) |
+| `p.flow_pipeline(slide, *, steps)` | under title | Process / workflow. Numbered cards with right-arrows between. | `steps: 3–5 of {tag, body}` |
+| `p.before_after_split(slide, *, before, after, transition_label="")` | under title | Risk vs mitigation, old vs new. Muted left + accent right + arrow. | `before / after: {title, body}`, `transition_label` (≤ 16 chars) |
+| `p.contrast_pair(slide, *, left_item, right_item, axis_label="")` | under title | Two competing options framed by an axis. Mirrored panels with pros/cons. | `*_item: {title, pros, cons}`, `axis_label` (≤ 40 chars) |
+| `p.quadrant_map(slide, *, items, axes)` | under title | Comparative landscape. Items at (x, y) ∈ [0,1]² on labeled axes. | `items: [{label, x, y}]`, `axes: {x, y, x_low?, x_high?}` |
+| `p.numbered_milestone_arc(slide, *, milestones)` | under title | Progressive timeline. Equal slots; tag + note **below** the line; weight saturates left→right. | `milestones: 3–6 of {tag, note}` |
+| `p.zoom_in_callout(slide, *, context_image_path, callout, note="")` | under title | Focus on a region of a complex figure. Context + outlined ROI + zoomed inset. | `context_image_path` (real path), `callout: {x, y, w, h}` ∈ [0,1] |
+
+All under-title patterns take the same theme kwargs (`palette`,
+`fonts`, `type_scale`, `sw`, `sh`) as `h.*` helpers; `chapter_divider`
+likewise.
 
 **Pattern selection — role → recommended pattern**:
 

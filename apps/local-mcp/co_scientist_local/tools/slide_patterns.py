@@ -36,6 +36,16 @@ from pptx.dml.color import RGBColor       # type: ignore
 from . import slide_render_helpers as _h
 
 
+# Where the body content starts for patterns that sit under an agent-
+# drawn h.title_block (which spans ~Inches(0.45) .. Inches(1.5) plus a
+# short accent rule below it). Inches(1.85) leaves a small clearance.
+# Patterns that "own the whole slide" (e.g. chapter_divider) ignore this.
+# (todo 005 Bug B / meta-issue: patterns need a contract about caller state.)
+_BODY_TOP = Inches(1.85)
+_SIDE_MARGIN = Inches(0.7)
+_BOTTOM_MARGIN = Inches(0.6)
+
+
 # ─── shared internals ────────────────────────────────────────────────────
 
 
@@ -98,48 +108,60 @@ def _accent_rule(slide, *, left, top, width, height, color):
 def hero_with_trailing_evidence(slide, *, headline: str,
                                  evidence: list[str],
                                  palette, fonts, type_scale, sw, sh):
-    """Thesis / takeaway slide. Massive headline upper-left (display
-    type, ~half slide width), evidence as a vertical column on the right
-    in fine print. The asymmetry is intentional — left-aligned headline
-    + right column creates tension that earns the contrast."""
+    """Thesis / takeaway slide. Asymmetric: large headline on the left
+    (~⅔ width), small numbered evidence column on the right. Tension
+    between the two earns the contrast.
+
+    Contract: **Goes under a title_block.** Call h.accent_stripe(slide)
+    and h.title_block(slide, ...) BEFORE this pattern. The pattern
+    starts at y = `_BODY_TOP` (≈ 1.85"), below the title bar.
+
+    Content limits:
+        headline: max ~60 chars; wraps to 3 lines.
+        evidence: 2–4 items, each max ~80 chars (wraps to 2 lines).
+    """
     headline_pt = max(36, type_scale.get("cover_title", 40) - 4)
     body_pt = type_scale.get("body", 20) - 2
     label_pt = type_scale.get("caption", 12)
 
-    _accent_rule(slide, left=Inches(0.7), top=Inches(0.8),
-                 width=Inches(0.5), height=Pt(6),
-                 color=palette["accent"])
+    body_top = _BODY_TOP
+    body_h = sh - body_top - Inches(0.6)
+    # Left column ~62% width, right column the rest
+    margin = Inches(0.7)
+    left_w = int((sw - 2 * margin) * 0.62)
+    right_x = margin + left_w + Inches(0.3)
+    right_w = sw - right_x - margin
+
     _emit_text(slide, headline,
-               left=Inches(0.7), top=Inches(1.0),
-               width=Inches(7.6), height=Inches(4.5),
+               left=margin, top=body_top,
+               width=left_w, height=body_h,
                size_pt=headline_pt, color=palette["foreground"],
                font_name=fonts.get("display"), bold=True,
                line_spacing=1.05)
 
-    # Evidence column on the right
-    ev_left = Inches(8.6)
-    ev_top = Inches(1.5)
-    ev_w = sw - ev_left - Inches(0.6)
-    ev_h_each = Pt(body_pt * 2.6)
     fg_muted = _muted(palette["foreground"])
     _emit_text(slide, "EVIDENCE",
-               left=ev_left, top=ev_top,
-               width=ev_w, height=Pt(label_pt * 2),
+               left=right_x, top=body_top,
+               width=right_w, height=Pt(label_pt * 2),
                size_pt=label_pt, color=palette["accent"],
                font_name=fonts.get("body"), bold=True)
+
+    ev_top = body_top + Pt(label_pt * 2.8)
+    ev_h_each = (body_h - Pt(label_pt * 2.8)) // max(1, len(evidence))
     for i, line in enumerate(evidence):
-        y = ev_top + Pt(label_pt * 2.8) + i * (ev_h_each + Pt(4))
+        y = ev_top + i * ev_h_each
         # Thin accent number
         _emit_text(slide, f"{i + 1:02d}",
-                   left=ev_left, top=y,
+                   left=right_x, top=y,
                    width=Pt(36), height=ev_h_each,
                    size_pt=int(body_pt * 0.85), color=palette["accent"],
                    font_name=fonts.get("display"), bold=True)
         _emit_text(slide, line,
-                   left=ev_left + Pt(36), top=y,
-                   width=ev_w - Pt(36), height=ev_h_each,
+                   left=right_x + Pt(36), top=y,
+                   width=right_w - Pt(36), height=ev_h_each,
                    size_pt=body_pt, color=fg_muted,
-                   font_name=fonts.get("body"))
+                   font_name=fonts.get("body"),
+                   anchor=MSO_ANCHOR.TOP)
 
 
 # ─── 2. chapter_divider ───────────────────────────────────────────────────
@@ -147,30 +169,60 @@ def hero_with_trailing_evidence(slide, *, headline: str,
 
 def chapter_divider(slide, *, chapter_label: str, summary: str = "",
                     palette, fonts, type_scale, sw, sh):
-    """Section opener. Massive chapter number / name in the centre-left,
-    optional one-line summary tagline below. Massive whitespace right —
-    no body content. Distinct rhythm from interior slides so the
-    audience feels the section break."""
-    label_pt = type_scale.get("cover_title", 40)
-    summary_pt = type_scale.get("head", 26) - 2
+    """Section opener — Era I/II/III. Massive chapter label vertically
+    centered + a short accent rule UNDER the label + optional summary
+    tagline below. Distinct rhythm from interior slides — the audience
+    feels the section break.
 
-    _accent_rule(slide, left=Inches(0.9), top=Inches(2.8),
-                 width=Inches(1.4), height=Pt(8),
-                 color=palette["accent"])
+    Contract: **Owns the whole slide.** Do NOT call h.accent_stripe()
+    or h.title_block() before this pattern. This pattern is the slide;
+    the centred label is the only top-level element.
+
+    Content limits:
+        chapter_label: ≤ ~12 chars at chapter size (>= 56pt). Korean
+            counts as 2× width per char.
+        summary: ≤ ~50 chars; wraps to 2 lines max.
+    """
+    # Use a clearly chapter-sized type (>= 56pt) so the label reads as a
+    # section break, not a slide title (todo 005 Bug C).
+    label_pt = max(56, type_scale.get("cover_title", 40) + 16)
+    summary_pt = type_scale.get("head", 26)
+
+    fg = palette["foreground"]
+    fg_muted = _muted(fg)
+    accent = palette["accent"]
+    margin_x = sw // 14
+    box_w = sw - 2 * margin_x
+
+    # Build a centred vertical block: label + rule + summary.
+    label_h = Pt(label_pt * 1.25)
+    rule_gap = Pt(_h.SPACING_UNIT_PT * 2)   # 16pt above + below the rule
+    rule_h = Pt(8)
+    summary_h = Pt(summary_pt * 2.4) if summary else 0
+    block_h = label_h + rule_gap + rule_h + (rule_gap + summary_h if summary else 0)
+    block_top = (sh - block_h) // 2
+
     _emit_text(slide, chapter_label,
-               left=Inches(0.9), top=Inches(3.0),
-               width=Inches(9.0), height=Inches(2.0),
-               size_pt=label_pt + 8, color=palette["foreground"],
+               left=margin_x, top=block_top,
+               width=box_w, height=label_h,
+               size_pt=label_pt, color=fg,
                font_name=fonts.get("display"), bold=True,
-               line_spacing=1.0)
+               align=PP_ALIGN.CENTER, line_spacing=1.05)
+    # Accent rule UNDER the chapter label — anchors the title visually.
+    rule_w = max(Inches(1.2), sw // 8)
+    _accent_rule(slide,
+                 left=(sw - rule_w) // 2,
+                 top=block_top + label_h + rule_gap,
+                 width=rule_w, height=rule_h, color=accent)
     if summary:
-        fg_muted = _muted(palette["foreground"])
         _emit_text(slide, summary,
-                   left=Inches(0.9), top=Inches(4.5),
-                   width=Inches(9.0), height=Inches(1.5),
+                   left=margin_x,
+                   top=block_top + label_h + rule_gap + rule_h + rule_gap,
+                   width=box_w, height=summary_h,
                    size_pt=summary_pt, color=fg_muted,
                    font_name=fonts.get("body"),
-                   italic=True, line_spacing=1.25)
+                   italic=True, align=PP_ALIGN.CENTER,
+                   line_spacing=1.25)
 
 
 # ─── 3. metric_tile_row ───────────────────────────────────────────────────
@@ -179,19 +231,22 @@ def chapter_divider(slide, *, chapter_label: str, summary: str = "",
 def metric_tile_row(slide, *, tiles: list[tuple],
                     palette, fonts, type_scale, sw, sh,
                     top=None, height=None):
-    """KPI / quantitative summary. A row of large numbers with thin
-    labels under each. `tiles` is a list of (value, label) or
-    (value, label, unit) tuples — typically 3-5 items.
+    """KPI / quantitative summary — a row of large numbers with thin
+    labels (and optional units) under each.
 
-    Renders the value in display type (huge), unit in smaller accent
-    type adjacent, label in caption type below. All tile widths are
-    equal; the row centers within the available width.
+    Contract: **Goes under a title_block.** Call h.accent_stripe + h.
+    title_block BEFORE. Pattern starts at y ≈ `_BODY_TOP + Inches(0.5)`
+    by default (use `top=` to override).
+
+    Content limits:
+        tiles: 3–5 items. Each label ≤ ~24 chars (1 line).
+            Tuple shape: (value, label) or (value, label, unit).
     """
     if not tiles:
         return
-    top = Inches(2.5) if top is None else top
+    top = _BODY_TOP + Inches(0.5) if top is None else top
     height = Inches(3.0) if height is None else height
-    side_margin = Inches(0.7)
+    side_margin = _SIDE_MARGIN
     usable = sw - 2 * side_margin
     gap = Pt(_h.SPACING_UNIT_PT * 3)
     tile_w = (usable - gap * (len(tiles) - 1)) // len(tiles)
@@ -237,29 +292,37 @@ def metric_tile_row(slide, *, tiles: list[tuple],
 
 def evidence_stack(slide, *, claim: str, evidence: list[dict],
                    palette, fonts, type_scale, sw, sh):
-    """Claim + 2-3 supporting facts. Top: claim in display type. Bottom:
-    stacked evidence rows, each with a small accent tag-pill on the left
-    + body text on the right.
+    """Claim + 2-3 supporting facts. Top: the claim in display type.
+    Bottom: stacked evidence rows, each with a small accent tag-pill
+    on the left + body text on the right.
 
-    `evidence` items: {"tag": str, "body": str} (or just `body` and the
-    pill is left blank).
+    Contract: **Goes under a title_block.** Call h.accent_stripe + h.
+    title_block BEFORE. Claim starts at `_BODY_TOP`.
+
+    Content limits:
+        claim: ≤ ~80 chars; wraps to 2 lines max at claim_pt size.
+        evidence: 2–4 items, each {tag (≤ ~10 chars), body (≤ ~120
+            chars; wraps to 2 lines)}.
     """
     claim_pt = max(28, type_scale.get("head", 26) + 4)
     tag_pt = type_scale.get("caption", 12)
     body_pt = type_scale.get("body", 20)
 
+    claim_top = _BODY_TOP
+    claim_h = Inches(1.6)
     _emit_text(slide, claim,
-               left=Inches(0.7), top=Inches(1.0),
-               width=sw - Inches(1.4), height=Inches(1.8),
+               left=_SIDE_MARGIN, top=claim_top,
+               width=sw - 2 * _SIDE_MARGIN, height=claim_h,
                size_pt=claim_pt, color=palette["foreground"],
                font_name=fonts.get("display"), bold=True,
                line_spacing=1.15)
-    _accent_rule(slide, left=Inches(0.7), top=Inches(2.85),
+    rule_top = claim_top + claim_h + Pt(4)
+    _accent_rule(slide, left=_SIDE_MARGIN, top=rule_top,
                  width=Inches(3.0), height=Pt(4),
                  color=palette["accent"])
 
-    stack_top = Inches(3.2)
-    row_h = (sh - stack_top - Inches(0.6)) // max(1, len(evidence))
+    stack_top = rule_top + Pt(16)
+    row_h = (sh - stack_top - _BOTTOM_MARGIN) // max(1, len(evidence))
     tag_w = Inches(1.6)
     fg_muted = _muted(palette["foreground"])
     for i, item in enumerate(evidence):
@@ -269,7 +332,7 @@ def evidence_stack(slide, *, claim: str, evidence: list[dict],
         if tag:
             pill = slide.shapes.add_shape(
                 MSO_SHAPE.ROUNDED_RECTANGLE,
-                Inches(0.7), y + Pt(8),
+                _SIDE_MARGIN, y + Pt(8),
                 tag_w, Pt(tag_pt * 1.8),
             )
             pill.line.fill.background()
@@ -289,8 +352,8 @@ def evidence_stack(slide, *, claim: str, evidence: list[dict],
             if fonts.get("body"):
                 run.font.name = fonts["body"]
         _emit_text(slide, body,
-                   left=Inches(0.7) + tag_w + Pt(12), top=y + Pt(4),
-                   width=sw - Inches(1.4) - tag_w - Pt(12),
+                   left=_SIDE_MARGIN + tag_w + Pt(12), top=y + Pt(4),
+                   width=sw - 2 * _SIDE_MARGIN - tag_w - Pt(12),
                    height=row_h - Pt(8),
                    size_pt=body_pt, color=fg_muted,
                    font_name=fonts.get("body"),
@@ -302,15 +365,22 @@ def evidence_stack(slide, *, claim: str, evidence: list[dict],
 
 def flow_pipeline(slide, *, steps: list[dict],
                   palette, fonts, type_scale, sw, sh):
-    """Horizontal process flow. Each step is a small card with a tag
-    label + body. Arrows (right-pointing) connect consecutive steps.
-    `steps` items: {"tag": str, "body": str}.
+    """Horizontal process flow. Each step is a small card with a
+    numbered tag + body; right-pointing arrows connect consecutive
+    steps.
+
+    Contract: **Goes under a title_block.** Call h.accent_stripe + h.
+    title_block BEFORE. Pattern starts at `_BODY_TOP + 0.4"`.
+
+    Content limits:
+        steps: 3–5 items. tag ≤ ~12 chars, body ≤ ~80 chars (wraps to
+            3 lines).
     """
     if not steps:
         return
-    side = Inches(0.7)
-    top = Inches(2.2)
-    height = Inches(3.4)
+    side = _SIDE_MARGIN
+    top = _BODY_TOP + Inches(0.4)
+    height = sh - top - _BOTTOM_MARGIN
     n = len(steps)
     gap = Inches(0.3)
     arrow_w = Pt(_h.SPACING_UNIT_PT * 5)
@@ -377,14 +447,20 @@ def before_after_split(slide, *, before: dict, after: dict,
                        transition_label: str = "",
                        palette, fonts, type_scale, sw, sh):
     """Two-panel comparison. Left = muted/before, right = accent/after.
-    A single arrow + optional label between them. Asymmetry on weight
-    (after is visually heavier) earns the contrast.
+    A single right-arrow + optional label between them. Asymmetry on
+    weight (after is visually heavier) earns the contrast.
 
-    Each panel: {"title": str, "body": str}.
+    Contract: **Goes under a title_block.** Call h.accent_stripe + h.
+    title_block BEFORE. Pattern starts at `_BODY_TOP + 0.2"`.
+
+    Content limits:
+        before / after: {title (≤ ~16 chars), body (≤ ~140 chars,
+            wraps to 4 lines)}.
+        transition_label: ≤ ~16 chars.
     """
-    side = Inches(0.7)
-    top = Inches(2.0)
-    height = Inches(4.4)
+    side = _SIDE_MARGIN
+    top = _BODY_TOP + Inches(0.2)
+    height = sh - top - _BOTTOM_MARGIN
     arrow_w = Inches(0.9)
     panel_w = (sw - 2 * side - arrow_w) // 2
 
@@ -466,29 +542,37 @@ def before_after_split(slide, *, before: dict, after: dict,
 def contrast_pair(slide, *, left_item: dict, right_item: dict,
                   axis_label: str = "",
                   palette, fonts, type_scale, sw, sh):
-    """Two competing options framed by an axis. Mirrored boxes; an axis
-    label sits above (e.g. 'cost', 'risk', 'expressivity'). Different
-    from before_after_split — both sides are equally weighted; the
-    question is which one *for your case*.
+    """Two competing options framed by an axis (e.g. cost / risk /
+    speed). Mirrored panels — both equally weighted. The question is
+    which one *for your case*. Distinct from `before_after_split`,
+    where the after-panel is intentionally heavier.
 
-    Items: {"title": str, "pros": list[str], "cons": list[str]}.
+    Contract: **Goes under a title_block.** Call h.accent_stripe + h.
+    title_block BEFORE. Axis label (if any) sits at `_BODY_TOP`; panels
+    start just below it.
+
+    Content limits:
+        left_item / right_item: {title (≤ ~16 chars), pros (≤ 4 items
+            of ≤ ~40 chars), cons (≤ 4 items of ≤ ~40 chars)}.
+        axis_label: ≤ ~40 chars.
     """
-    side = Inches(0.7)
-    top = Inches(1.9)
+    side = _SIDE_MARGIN
     panel_w = (sw - 2 * side - Inches(0.3)) // 2
-    height = Inches(4.7)
     title_pt = type_scale.get("head", 26)
     body_pt = type_scale.get("body", 20) - 2
     fg_muted = _muted(palette["foreground"])
 
+    axis_h = Pt(20) if axis_label else 0
     if axis_label:
         _emit_text(slide, axis_label.upper(),
-                   left=side, top=Inches(1.4),
-                   width=sw - 2 * side, height=Pt(20),
+                   left=side, top=_BODY_TOP,
+                   width=sw - 2 * side, height=axis_h,
                    size_pt=type_scale.get("caption", 12),
                    color=palette["accent"],
                    font_name=fonts.get("body"), bold=True,
                    align=PP_ALIGN.CENTER)
+    top = _BODY_TOP + axis_h + (Pt(8) if axis_label else 0)
+    height = sh - top - _BOTTOM_MARGIN
 
     for i, item in enumerate((left_item, right_item)):
         x = side + i * (panel_w + Inches(0.3))
@@ -551,20 +635,28 @@ def contrast_pair(slide, *, left_item: dict, right_item: dict,
 
 def quadrant_map(slide, *, items: list[dict], axes: dict,
                  palette, fonts, type_scale, sw, sh):
-    """2×2 conceptual map. Items are positioned by their (x, y) in
-    [0, 1] (origin bottom-left). Axes carry labels and an optional
-    explanation. Useful for "is X high/low on cost AND high/low on
+    """2×2 conceptual map. Items positioned by their (x, y) in [0, 1]
+    (origin bottom-left). Axes carry labels + optional low/high
+    descriptors. Useful for "X is high/low on cost AND high/low on
     impact" comparisons.
 
-    items: [{"label": str, "x": float, "y": float}]
-    axes: {"x": str, "y": str, "x_low": str?, "x_high": str?,
-           "y_low": str?, "y_high": str?}
+    Contract: **Goes under a title_block.** Call h.accent_stripe + h.
+    title_block BEFORE. The y-axis label sits at `_BODY_TOP`; the map
+    starts just below.
+
+    Content limits:
+        items: 2–8. Each label ≤ ~16 chars.
+        axes: {x, y} required (≤ ~30 chars each); optional x_low,
+            x_high (≤ ~16 chars each) anchor the horizontal axis.
     """
-    pad = Inches(1.2)
     map_left = Inches(1.6)
-    map_top = Inches(1.5)
+    pad = Inches(0.6)
+    # y-axis label sits in the top strip (height ≈ Pt(label_pt * 1.5))
+    label_pt = type_scale.get("body", 20) - 4
+    y_label_h = Pt(label_pt * 1.7)
+    map_top = _BODY_TOP + y_label_h + Pt(4)
     map_w = sw - map_left - pad
-    map_h = sh - map_top - Inches(1.0)
+    map_h = sh - map_top - _BOTTOM_MARGIN - Pt(label_pt * 2)
 
     # Axes — vertical (Y) on the left, horizontal (X) on the bottom
     accent = palette["accent"]
@@ -608,10 +700,11 @@ def quadrant_map(slide, *, items: list[dict], axes: dict,
                    font_name=fonts.get("body"),
                    align=PP_ALIGN.RIGHT)
     # Vertical axis label — rotated would be best, but python-pptx
-    # rotation is finicky; place it above the line for legibility.
-    _emit_text(slide, axes.get("y") or "",
-               left=Inches(0.3), top=map_top - Pt(label_pt * 1.5) - 4,
-               width=Inches(1.6), height=Pt(label_pt * 1.5),
+    # rotation is finicky; place it horizontally above the map and
+    # within slide bounds (todo 005 — keep all shapes inside the slide).
+    _emit_text(slide, "↑ " + (axes.get("y") or ""),
+               left=Inches(0.6), top=_BODY_TOP,
+               width=sw - Inches(1.2), height=y_label_h,
                size_pt=label_pt, color=fg,
                font_name=fonts.get("body"), bold=True)
 
@@ -642,34 +735,63 @@ def quadrant_map(slide, *, items: list[dict], axes: dict,
 
 def numbered_milestone_arc(slide, *, milestones: list[dict],
                             palette, fonts, type_scale, sw, sh):
-    """Progressive timeline. Numbered markers (1, 2, 3, …) along a
-    horizontal line; each marker has a brief tag + note above/below
-    alternating. Visual weight progresses from light (early) to
-    accent-saturated (late) so the audience sees direction.
+    """Progressive timeline. Equal-width slots across the body area;
+    each slot has a numbered circle on a horizontal baseline + a tag +
+    a note **all below the line**. Marker color saturates left → right
+    (muted → accent) so the audience sees direction. Slot-based layout
+    (no alternating above/below) keeps the design robust to Korean
+    text wrapping and edge milestones (todo 005 Bug A).
 
-    milestones: [{"tag": str, "note": str}].
+    Contract: **Goes under a title_block.** Call h.accent_stripe + h.
+    title_block BEFORE. Pattern starts at y = `_BODY_TOP`.
+
+    Content limits:
+        milestones: 3–6 items. Each tag ≤ ~14 chars at tag size
+            (wraps to 2 lines max); note ≤ ~60 chars (3 lines max).
     """
     if not milestones:
         return
     n = len(milestones)
-    side = Inches(0.8)
-    line_y = sh // 2 + Inches(0.3)
-    line_w = sw - 2 * side
-    # Base timeline
-    _accent_rule(slide, left=side, top=line_y,
-                 width=line_w, height=Pt(3),
-                 color=_muted(palette["foreground"]))
 
     fg = palette["foreground"]
     fg_muted = _muted(fg)
-    tag_pt = type_scale.get("head", 26) - 4
-    note_pt = type_scale.get("body", 20) - 4
     accent = palette["accent"]
+    tag_pt = max(14, type_scale.get("head", 26) - 6)
+    note_pt = type_scale.get("body", 20) - 4
 
+    # Body area
+    body_top = _BODY_TOP
+    body_bottom = sh - _BOTTOM_MARGIN
+    body_h = body_bottom - body_top
+
+    # Line sits at the top quarter of the body (markers below it)
+    line_y = body_top + body_h // 4
+
+    # Equal slots across usable width
+    margin = _SIDE_MARGIN
+    usable_w = sw - 2 * margin
+    slot_w = usable_w // n
+
+    # Marker dot radius
+    dot_r = Pt(20)
+
+    # Baseline timeline runs between the first and last slot CENTRES, so
+    # the line doesn't extend past the markers and into empty margins.
+    first_cx = margin + slot_w // 2
+    last_cx = margin + (n - 1) * slot_w + slot_w // 2
+    if last_cx > first_cx:
+        _accent_rule(slide,
+                     left=first_cx,
+                     top=line_y - Pt(1),
+                     width=last_cx - first_cx, height=Pt(3),
+                     color=fg_muted)
+
+    # Per-milestone slot
     for i, m in enumerate(milestones):
-        # Position along the line
-        x = side + int(line_w * (i / max(1, n - 1))) if n > 1 else side + line_w // 2
-        # Marker color saturates over time (interpolate accent vs muted)
+        slot_left = margin + i * slot_w
+        slot_cx = slot_left + slot_w // 2
+
+        # Marker color: interpolate muted → accent across the row
         try:
             ar, ag, ab = accent
             mr, mg, mb = fg_muted
@@ -681,54 +803,53 @@ def numbered_milestone_arc(slide, *, milestones: list[dict],
             )
         except Exception:
             marker_color = accent
-        # Numbered marker (circle)
-        dot_r = Pt(20)
+
+        # Numbered circle, centered on the slot at the timeline
         dot = slide.shapes.add_shape(
-            MSO_SHAPE.OVAL, x - dot_r, line_y - dot_r + Pt(1),
+            MSO_SHAPE.OVAL,
+            slot_cx - dot_r, line_y - dot_r,
             dot_r * 2, dot_r * 2,
         )
         dot.line.fill.background()
         dot.fill.solid()
         dot.fill.fore_color.rgb = marker_color
         dot.shadow.inherit = False
-        # Number inside the marker
         dtf = dot.text_frame
-        dtf.margin_left = Pt(2)
-        dtf.margin_right = Pt(2)
-        dtf.margin_top = Pt(2)
-        dtf.margin_bottom = Pt(2)
+        dtf.margin_left = Pt(2); dtf.margin_right = Pt(2)
+        dtf.margin_top = Pt(2); dtf.margin_bottom = Pt(2)
         dp = dtf.paragraphs[0]
         dp.alignment = PP_ALIGN.CENTER
         drun = dp.add_run()
         drun.text = str(i + 1)
-        drun.font.size = Pt(tag_pt - 6)
+        drun.font.size = Pt(tag_pt - 4)
         drun.font.bold = True
         drun.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
         if fonts.get("display"):
             drun.font.name = fonts["display"]
 
-        # Tag + note alternating above / below the line
-        block_w = Inches(2.0)
-        above = (i % 2 == 0)
-        if above:
-            block_top = line_y - dot_r - Inches(1.6)
-            block_h = Inches(1.4)
-        else:
-            block_top = line_y + dot_r + Pt(8)
-            block_h = Inches(1.4)
+        # Tag + note stacked BELOW the line within the slot
+        text_top = line_y + dot_r + Pt(8)
+        text_left = slot_left + Pt(4)
+        text_w = slot_w - Pt(8)
+        # Tag: room for up to 2 wrapped lines
+        tag_h = Pt(tag_pt * 1.5 * 2)
         _emit_text(slide, m.get("tag") or "",
-                   left=x - block_w // 2, top=block_top,
-                   width=block_w, height=Pt(tag_pt * 1.5),
+                   left=text_left, top=text_top,
+                   width=text_w, height=tag_h,
                    size_pt=tag_pt, color=fg,
                    font_name=fonts.get("display"), bold=True,
-                   align=PP_ALIGN.CENTER)
+                   align=PP_ALIGN.CENTER, line_spacing=1.15,
+                   anchor=MSO_ANCHOR.TOP)
+        # Note: the rest of the slot
+        note_top = text_top + tag_h + Pt(4)
         _emit_text(slide, m.get("note") or "",
-                   left=x - block_w // 2,
-                   top=block_top + Pt(tag_pt * 1.6),
-                   width=block_w, height=block_h - Pt(tag_pt * 1.6),
+                   left=text_left, top=note_top,
+                   width=text_w,
+                   height=body_bottom - note_top,
                    size_pt=note_pt, color=fg_muted,
                    font_name=fonts.get("body"),
-                   align=PP_ALIGN.CENTER, line_spacing=1.2)
+                   align=PP_ALIGN.CENTER, line_spacing=1.2,
+                   anchor=MSO_ANCHOR.TOP)
 
 
 # ─── 10. zoom_in_callout ──────────────────────────────────────────────────
@@ -738,19 +859,22 @@ def zoom_in_callout(slide, *, context_image_path: str,
                     callout: dict, note: str = "",
                     palette, fonts, type_scale, sw, sh):
     """Focus on a region of a complex figure: full image on the left,
-    a labeled rectangle marking the region of interest, then a zoomed
-    inset on the right with a connector line and an explanatory note
-    below the inset.
+    a marked rectangle on the region of interest, zoomed inset on the
+    right with an optional note below it.
 
-    context_image_path: filesystem path to the source PNG.
-    callout: {"x": 0..1, "y": 0..1, "w": 0..1, "h": 0..1} — region of
-             interest as fractions of the source image's bounding box.
+    Contract: **Goes under a title_block.** Call h.accent_stripe + h.
+    title_block BEFORE. Content starts at `_BODY_TOP`.
+
+    Content limits:
+        context_image_path: a real filesystem path (the helper Keynote-
+            normalizes the image into RGB JPEG ≤ 1920px).
+        callout: {x, y, w, h} fractions of the image (0..1).
+        note: ≤ ~120 chars, wraps to 3 lines.
     """
-    # Left half — the context image
-    left_x = Inches(0.6)
-    left_y = Inches(1.6)
-    left_w = (sw - Inches(1.2)) // 2 - Inches(0.3)
-    left_h = sh - left_y - Inches(1.4)
+    left_x = _SIDE_MARGIN
+    left_y = _BODY_TOP
+    left_w = (sw - 2 * _SIDE_MARGIN) // 2 - Inches(0.3)
+    left_h = sh - left_y - _BOTTOM_MARGIN - Inches(0.4)
 
     _h._autoshrink  # ensure import is touched (silence linters)
     # Place the context image (contain)

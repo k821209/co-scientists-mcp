@@ -21,6 +21,7 @@ reference the commit that shipped it. Currently open:
 - [001 — Native-language prose in the harness](todo/001_native_language_prose_in_harness.md)
 - [002 — Rich slide rendering beyond literal markdown](todo/002_rich_slide_rendering.md) (closed 2026-05-26 — `render_mode="code"`)
 - [004 — Design methodology for code slides](todo/004_design_methodology_for_code_slides.md) (mostly shipped 2026-05-26 — §A critique + §B patterns + §D grid + §G design-language; §C/E/F open)
+- [005 — Pattern library quality](todo/005_pattern_library_quality.md) (closed 2026-05-26 — bugs A/B/C fixed, contracts added, integration tests landed)
 
 ### Architecture decisions (ADRs)
 

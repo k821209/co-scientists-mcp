@@ -1252,6 +1252,202 @@ def test_pattern_numbered_milestone_arc(state, tmp_path, monkeypatch):
         assert token in txt
 
 
+# ─── Pattern QA: contracts + bounds (todo 005 §D) ───────────────────────
+#
+# Every under-title pattern must coexist with the standard agent
+# preamble (h.accent_stripe + h.title_block). The preamble adds exactly
+# three shapes in the top "title zone" (y < ~Inches(1.65)):
+#     1. accent_stripe rectangle (top=0)
+#     2. title textbox (top=Inches(0.45))
+#     3. accent rule rectangle (top=Inches(1.52))
+# Any other shape with top < title_zone_bottom is a title-collision bug.
+#
+# chapter_divider owns the whole slide; we test it without the preamble.
+
+
+_PREAMBLE = (
+    "h.accent_stripe(slide, palette=palette, sw=sw)\n"
+    "h.title_block(slide, 'My Title', palette=palette, fonts=fonts,\n"
+    "              type_scale=type_scale, sw=sw, sh=sh)\n"
+)
+
+
+def _shape_in_bounds(sh, sw, sh_total, tol_emu: int = 200):
+    """All shapes must sit within slide bounds (small EMU tolerance)."""
+    return (
+        sh.left is not None and sh.top is not None
+        and sh.left >= -tol_emu
+        and sh.top >= -tol_emu
+        and sh.left + sh.width <= sw + tol_emu
+        and sh.top + sh.height <= sh_total + tol_emu
+    )
+
+
+def _count_shapes_in_title_zone(slide):
+    """Pixels-equivalent: count shapes whose top is above ~Inches(1.65)."""
+    from pptx.util import Inches as _I
+    return sum(1 for s in slide.shapes
+               if s.top is not None and s.top < _I(1.65))
+
+
+def _build_pattern_slide(state, tmp_path, monkeypatch, *,
+                        snippet: str, with_preamble: bool = True):
+    """One-slide deck running snippet (optionally with preamble) and
+    return the loaded Presentation slide + raw bounds for assertion."""
+    from pptx import Presentation
+    pytest.importorskip("pptx")
+
+    slug = _setup(state)
+    decks.update_deck(state, slug, "d", concept="accent: #b58900")
+    code = (_PREAMBLE + snippet) if with_preamble else snippet
+    decks.add_slide(state, slug, "d", slide_number=1, role="background",
+                    title="My Title", notes="n", render_mode="code",
+                    code=code)
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(
+        state, slug, "d", output_path=str(out),
+    )
+    assert res["code_errors"] == [], res["code_errors"]
+    prs = Presentation(str(out))
+    return prs.slides[0], prs.slide_width, prs.slide_height
+
+
+# Each (name, snippet, owns_whole_slide) — pattern + Korean-ish content
+_UNDER_TITLE_PATTERNS = [
+    ("hero_with_trailing_evidence",
+     "p.hero_with_trailing_evidence(slide,\n"
+     "  headline='앞으로 10년의 농업 AI는 데이터에 말을 거는 일이다.',\n"
+     "  evidence=['500종 통합', '4 모달리티 결합', '쿼리당 30초'],\n"
+     "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"),
+    ("metric_tile_row",
+     "p.metric_tile_row(slide, tiles=[('30','초당 쿼리','s'),\n"
+     "  ('500','accession',None),('4','modality',None)],\n"
+     "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"),
+    ("evidence_stack",
+     "p.evidence_stack(slide, claim='MCP가 새 파이프라인이다.',\n"
+     "  evidence=[{'tag': '속도', 'body': '2주가 30초로'},\n"
+     "            {'tag': '범위', 'body': '500 accession × 4 modality'},\n"
+     "            {'tag': '재현', 'body': 'provenance trail이 모든 단계'}],\n"
+     "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"),
+    ("flow_pipeline",
+     "p.flow_pipeline(slide, steps=[\n"
+     "  {'tag': '수집', 'body': '다중 모달 accession 데이터'},\n"
+     "  {'tag': '정제', 'body': 'DOI 도장 + 결측 처리'},\n"
+     "  {'tag': '학습', 'body': '단일 임베딩 학습'},\n"
+     "  {'tag': '배포', 'body': '자연어 쿼리 인터페이스'}],\n"
+     "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"),
+    ("before_after_split",
+     "p.before_after_split(slide,\n"
+     "  before={'title': '맞춤 파이프라인', 'body': '쿼리당 2주: 컬럼 손으로 조인, 플롯 손으로 코딩.'},\n"
+     "  after={'title': 'MCP 쿼리', 'body': '쿼리당 30초: 자연어 입력 → provenance trail.'},\n"
+     "  transition_label='150× 더 빠름',\n"
+     "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"),
+    ("contrast_pair",
+     "p.contrast_pair(slide,\n"
+     "  left_item={'title': '사내 서버',\n"
+     "             'pros': ['완전한 통제','쿼리당 비용 없음'],\n"
+     "             'cons': ['운영 부담','스케일 느림']},\n"
+     "  right_item={'title': '클라우드 MCP',\n"
+     "              'pros': ['분 단위 스케일','운영 부담 없음'],\n"
+     "              'cons': ['쿼리당 비용','벤더 lock-in']},\n"
+     "  axis_label='배포 시간 vs 운영 부담',\n"
+     "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"),
+    ("quadrant_map",
+     "p.quadrant_map(slide,\n"
+     "  items=[{'label':'A','x':0.2,'y':0.8},{'label':'B','x':0.8,'y':0.3},\n"
+     "         {'label':'C','x':0.1,'y':0.2},{'label':'D','x':0.7,'y':0.6}],\n"
+     "  axes={'x':'배포 시간','y':'재현성','x_low':'일 단위','x_high':'분 단위'},\n"
+     "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"),
+    ("numbered_milestone_arc",
+     "p.numbered_milestone_arc(slide, milestones=[\n"
+     "  {'tag':'Era I (2010–)','note':'시퀀스 예측. 유전체 안에서.'},\n"
+     "  {'tag':'2018 · DL-on-SNP','note':'딥러닝이 SNP를 받아들이기 시작'},\n"
+     "  {'tag':'2024 · Genomic LM','note':'언어모델이 유전체 안으로 진입'},\n"
+     "  {'tag':'Now','note':'육종가가 데이터에 말을 거는 시대'}],\n"
+     "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"),
+]
+
+
+@pytest.mark.parametrize("name,snippet", _UNDER_TITLE_PATTERNS,
+                         ids=[n for n, _ in _UNDER_TITLE_PATTERNS])
+def test_pattern_no_title_collision(name, snippet, state, tmp_path,
+                                    monkeypatch):
+    """Each under-title pattern, run with the standard preamble:
+    exactly 3 shapes sit in the title zone (the preamble chrome — top
+    stripe, title textbox, title accent rule). Pattern content stays
+    below."""
+    slide, sw, sh_total = _build_pattern_slide(
+        state, tmp_path, monkeypatch, snippet=snippet,
+    )
+    in_title = _count_shapes_in_title_zone(slide)
+    assert in_title == 3, (
+        f"{name}: expected 3 title-zone shapes (preamble chrome) but "
+        f"got {in_title} — pattern leaks shapes into the title area"
+    )
+
+
+@pytest.mark.parametrize("name,snippet", _UNDER_TITLE_PATTERNS,
+                         ids=[n for n, _ in _UNDER_TITLE_PATTERNS])
+def test_pattern_stays_within_slide_bounds(name, snippet, state, tmp_path,
+                                            monkeypatch):
+    """Each pattern + preamble: every shape sits fully within the slide.
+    Catches the Bug-A class of "first/last marker extends past edges"."""
+    slide, sw, sh_total = _build_pattern_slide(
+        state, tmp_path, monkeypatch, snippet=snippet,
+    )
+    out_of_bounds = [
+        sh for sh in slide.shapes
+        if not _shape_in_bounds(sh, sw, sh_total)
+    ]
+    assert not out_of_bounds, (
+        f"{name}: {len(out_of_bounds)} shape(s) extend past slide edges. "
+        f"First: left={out_of_bounds[0].left}, top={out_of_bounds[0].top}, "
+        f"w={out_of_bounds[0].width}, h={out_of_bounds[0].height}, "
+        f"slide={sw}×{sh_total}"
+    )
+
+
+def test_chapter_divider_owns_whole_slide(state, tmp_path, monkeypatch):
+    """chapter_divider is the 'owns whole slide' pattern — no preamble.
+    Bug C check: it must NOT leave an orphan accent stripe in the title
+    zone without an anchoring label above. Label should sit near vertical
+    center."""
+    slide, sw, sh_total = _build_pattern_slide(
+        state, tmp_path, monkeypatch, with_preamble=False, snippet=(
+            "p.chapter_divider(slide, chapter_label='Era II',\n"
+            "  summary='데이터가 디지털로 — 육종가는 종이 위에 있다.',\n"
+            "  palette=palette, fonts=fonts, type_scale=type_scale,\n"
+            "  sw=sw, sh=sh)\n"
+        ),
+    )
+    # All shapes within slide bounds
+    for sh in slide.shapes:
+        assert _shape_in_bounds(sh, sw, sh_total), \
+            f"chapter_divider shape out of bounds: top={sh.top}, " \
+            f"left={sh.left}, w={sh.width}, h={sh.height}"
+    # No shape in the title zone (pattern owns the slide; no orphan stripe).
+    from pptx.util import Inches as _I
+    in_title = _count_shapes_in_title_zone(slide)
+    assert in_title == 0, (
+        f"chapter_divider leaked {in_title} shape(s) into the title "
+        "zone — it should own the whole canvas, not place orphan "
+        "stripes above the label"
+    )
+    # Chapter label should sit near vertical center, not at ¾ down.
+    text_frames = [sh for sh in slide.shapes if sh.has_text_frame
+                   and "Era II" in sh.text_frame.text]
+    assert text_frames
+    label = text_frames[0]
+    center_y = sh_total // 2
+    # Label's vertical mid-point should be within ~Inches(1.0) of center
+    label_mid = label.top + label.height // 2
+    assert abs(label_mid - center_y) < _I(1.0), (
+        f"chapter_divider label centered poorly: label_mid={label_mid}, "
+        f"slide_center={center_y}"
+    )
+
+
 def test_pattern_zoom_in_callout(state, tmp_path, monkeypatch):
     """zoom_in_callout needs an image source; smoke-test with a 1×1 PNG."""
     pytest.importorskip("pptx")
