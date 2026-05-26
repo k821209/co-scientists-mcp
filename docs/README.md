@@ -19,7 +19,7 @@ self-contained proposal with TL;DR + concrete observation + approaches +
 acceptance criteria. Closing a todo: move the file to `todo/closed/` and
 reference the commit that shipped it. Currently open:
 - [001 — Native-language prose in the harness](todo/001_native_language_prose_in_harness.md)
-- [002 — Rich slide rendering beyond literal markdown](todo/002_rich_slide_rendering.md)
+- [002 — Rich slide rendering beyond literal markdown](todo/002_rich_slide_rendering.md) (closed 2026-05-26 — `render_mode="code"`)
 
 ### Architecture decisions (ADRs)
 

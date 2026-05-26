@@ -162,11 +162,20 @@ Adjust to duration: each slide ≈ 1–2 minutes; 20 min ≈ 12–15 slides.
 For each slide, decide the **render_mode**. This decides whether the
 slide's text stays editable in the exported .pptx — choose carefully:
 
-- `text` — title + bullet body rendered as **NATIVE, editable
-  PowerPoint text**, themed with the concept's fonts / colours /
-  spacing. **This is the default for any slide that is mostly words** —
-  background, methods narrative, takeaways, agenda, section dividers.
-  The reviewer can edit it in PowerPoint and it inherits the deck design.
+- `text` — title + plain bullet body rendered as **NATIVE, editable
+  PowerPoint text** (each `body` line → one paragraph, no markdown
+  parsing). Use for any slide that is genuinely just title + a list
+  with no design treatment needed. The reviewer can edit it in
+  PowerPoint and it inherits the deck's fonts / colors.
+- `code` — **YOU author the slide via python-pptx code in `code`**.
+  At export, the snippet runs against a namespace where `slide`,
+  `palette`, `fonts`, `type_scale`, `Pt`, `Inches`, `MSO_SHAPE`, and
+  a `h` helpers namespace are pre-bound. The slide ends up as
+  NATIVE editable shapes — title, accent stripe, cards, bullets,
+  figures — composed exactly the way you wrote them. **This is how
+  you ship designed text slides** (card grids, two-column compares,
+  pull-quote callouts, banner-and-bullets) without baking the slide
+  into a PNG. Examples + the `h.*` catalog: §5a.
 - `paper-figure` — re-use a manuscript figure full-bleed (set `figure_number`).
 - `ai-image` — a generated image: an eyecatch (cover / closing) or an
   abstract concept slide that is image-led, not text-led.
@@ -175,8 +184,8 @@ slide's text stays editable in the exported .pptx — choose carefully:
   into the bitmap, NOT editable in the .pptx, and ignores the deck's
   fonts/theme. Use it **only** for a genuine code-drawn data visual
   (a real plot / chart). **Never** make a prose- or bullet-heavy slide
-  `code-shape` — that is the #1 way to ship an ugly, unreadable,
-  uneditable slide. Text-heavy slide → `text`.
+  `code-shape` — for those, the right answer is `code` (native editable
+  shapes), not `code-shape` (baked image).
 - `hybrid` — **title + native body bullets (rendered in the LEFT half)
   + one or more image regions** (positioned by you, typically on the
   right). This is the right mode for "title + bullets + a figure /
@@ -185,22 +194,23 @@ slide's text stays editable in the exported .pptx — choose carefully:
   `set_slide_regions` (see "Multi-image slides"). Don't set this in
   `add_slide`'s render_mode — let `set_slide_regions` flip it.
 
-Rule of thumb: **if you'd write more than a few words of text on the
-slide, it is a `text` slide.** `code-shape` / `ai-image` are for slides
-that are fundamentally a picture.
+Rule of thumb: **if the slide is mostly words AND needs any visual
+treatment beyond a flat bullet list, it is a `code` slide.** Use `text`
+only when "title + plain bullets, no design" is exactly what you want.
+`code-shape` / `ai-image` are for slides that are fundamentally a picture.
 
 **Role → recommended render_mode** (start here; adapt only with a reason):
 
 | Role         | Default mode    | When to deviate                                 |
 | ------------ | --------------- | ----------------------------------------------- |
-| `title`      | `ai-image` or `text` | `text` if you don't want a hero image       |
-| `outline`    | `hybrid`        | `text` if no arc diagram fits                   |
-| `background` | `text` or `hybrid` | `hybrid` when there's prior-state schematic  |
-| `question`   | `text`          | Big-display single sentence, no body bullets    |
+| `title`      | `code` (cover layout) or `ai-image` | `text` for a stripped-down opener |
+| `outline`    | `code` (card grid) or `hybrid` | `text` only for a bare bullet outline |
+| `background` | `code` or `text` | `hybrid` when there's a prior-state schematic |
+| `question`   | `code` (centered big-display) | `text` for a plainer treatment |
 | `method`     | `hybrid`        | Workflow / pipeline diagram on the right        |
-| `result`     | `paper-figure` (full bleed) **or** `hybrid` | `hybrid` if take-home bullets matter too |
-| `discussion` | `text` or `hybrid` | `hybrid` if a comparative grid clarifies    |
-| `conclusion` | `text`          | 3 take-home bullets, large type                 |
+| `result`     | `paper-figure` (full bleed) **or** `hybrid` | `code` for KPI tiles around a figure |
+| `discussion` | `code` (comparative grid) or `hybrid` | `text` if 3 bullets fit |
+| `conclusion` | `code` (take-home card grid) | `text` for plain 3 take-home bullets |
 | `qa`         | `text`          | Acknowledgments + contact, plain                |
 
 **Dense-slide layout patterns** — when the content is heavy, pick the
@@ -233,10 +243,8 @@ mcp__co_scientist__add_slide(
     Body: clean grid showing X vs Y across 4 conditions.
   """,
   notes="<MANDATORY speaker notes — what you'll say>",
-  code="""```python
-    # if render_mode == code-shape, the code that defines the slide
-  ```""",
-  render_mode="text" | "code-shape" | "paper-figure" | "ai-image" | "hybrid",
+  code="<python-pptx snippet (render_mode='code') OR a code-shape author note>",
+  render_mode="code" | "text" | "code-shape" | "paper-figure" | "ai-image" | "hybrid",
   figure_number=<N>,   # if render_mode == paper-figure
 )
 ```
@@ -250,35 +258,117 @@ header using placeholders. Example:
 Never hardcode `"navy blue"` or `"Inter"` — write `{accent}` /
 `{display_font}` so theme switching is a no-op rebuild.
 
-### 5a. Body is informational, not a design language (todo 002)
+### 5a. `code` slides — author the slide in python-pptx (todo 002)
 
-The `body` field is **not** rendered through a markdown parser. It is
-just a list of lines — each non-empty line becomes a plain paragraph
-at the deck's body type size; leading `-`, `*`, `•` markers are
-stripped; nothing else (no `**bold**`, no `> quote` block, no fenced
-code panel).
+A slide with `render_mode="code"` carries a python-pptx **snippet** in
+its `code` field. The exporter `exec`s that snippet with a prepared
+namespace, and the snippet adds shapes/textboxes/images to the slide
+natively. Result: editable PPTX, visually-rich layout, your design
+choices.
 
-Markdown's grammar is too thin to capture slide *design* (what is the
-punchline? where does the figure go? are these four items a list or a
-2×2 card grid?). When you try to derive visual treatment from `>`
-quote vs `-` bullet markers, the result is a mediocre slide.
+Why not just render the markdown `body`? Because markdown's grammar
+is too thin to capture slide *design* — punchline placement, figure
+position, "is this a list or a card grid", colored callouts, KPI
+tiles. Trying to derive visual treatment from `>` quote vs `-` bullet
+markers produces mediocre slides. You decide the design; code it.
 
-**If a slide needs visual richness** (cards, quote callouts, KPI
-tiles, custom layout, data viz), the right tool is the slide's `code`
-field — a python-pptx snippet you write that composes the slide
-natively. The exporter runs that code with the slide object + theme
-context bound. (Hooking up the `code` execution path is in progress;
-until then, use `code-shape` slides — agent renders a PNG locally —
-for any slide whose design exceeds plain title + bullets.)
+**The namespace bound at exec time** (use these freely in `code`):
 
-The `body` field stays useful as:
-- **Speaker-facing notes** about the slide's content
-- **Source-of-truth text** that the slide's `code` reads in to build
-  cards / quotes / labels at compose time
-- **A graceful default** when you haven't written `code` yet — the
-  slide still exports as title + plain bullets, just without design
+| Name | What it is |
+|---|---|
+| `slide` | The python-pptx `Slide` object you append shapes to |
+| `title`, `body`, `notes`, `row` | The slide's stored fields (read-only inputs) |
+| `palette` | `{"accent": RGBColor, "background": RGBColor, "foreground": RGBColor, "surface": RGBColor}` |
+| `fonts` | `{"display": str|None, "body": str|None, "mono": str|None}` |
+| `type_scale` | `{"title": 32, "head": 26, "body": 20, "line_spacing": 1.22, "cover_title": 40, "caption": 12, ...}` |
+| `aspect` | `"16:9"` / `"16:10"` / `"4:3"` |
+| `sw`, `sh` | Slide width / height in EMU (use with `Inches(...)` math) |
+| `Pt`, `Inches`, `Emu` | python-pptx units |
+| `MSO_SHAPE`, `PP_ALIGN`, `MSO_ANCHOR`, `RGBColor` | python-pptx primitives |
+| `h` (alias `helpers`) | Helper namespace (see catalog below) |
 
-Don't pack design intent into markdown markers — pack it into `code`.
+**`h.*` helper catalog** — covers the boilerplate so the snippet can
+focus on actual layout:
+
+| Helper | Signature (sw/sh/palette/fonts/type_scale are kwargs) | Purpose |
+|---|---|---|
+| `h.accent_stripe(slide, *, palette, sw)` | — | Top accent stripe, deck signature |
+| `h.title_block(slide, text, *, palette, fonts, type_scale, sw, sh, cover=False, accent_rule=True)` | — | Themed title + short accent rule (or centered cover layout if `cover=True`) |
+| `h.bullet_list(slide, items, *, palette, fonts, type_scale, left, top, width, height, bullet="•")` | items=list[str] | Vertical bulleted list inside a box |
+| `h.card(slide, *, left, top, width, height, title, body, palette, fonts, type_scale, accent_top=True)` | — | One titled card: bg + accent stripe + title + body |
+| `h.card_grid(slide, items, *, left, top, width, height, palette, fonts, type_scale, cols=2, gap_pt=12)` | items=list[{title, body}] | N cards in a `cols`-column grid filling a box |
+| `h.pull_quote(slide, text, *, palette, fonts, type_scale, left, top, width, height)` | — | Vertical accent bar + italic body — for a punchline |
+| `h.image_path(path, *, left, top, width, height, fit="contain")` | — | Embed an image from a filesystem path |
+| `h.image_region(region_id, *, left, top, width, height, fit="contain")` | — | Resolve `row.regions[id]` → embed that image |
+| `h.image_figure(figure_number, *, left, top, width, height, fit="contain")` | — | Resolve a paper figure → embed |
+
+All Keynote-safe (RGBA → RGB JPEG ≤ 1920px normalization happens inside
+the image helpers).
+
+**Example 1 — title + 4-card grid + take-home quote**:
+
+```python
+mcp__co_scientist__add_slide(
+  slug, deck_id, slide_number=N, role="discussion",
+  title="The four harness primitives",
+  body="Memory keeps decisions. Hooks fire on events. Slash commands "
+       "are reusable. The context manager is the LLM's attention.",
+  notes="Spend ~30 seconds on each primitive then land the take-home.",
+  render_mode="code",
+  code="""
+h.accent_stripe(slide, palette=palette, sw=sw)
+h.title_block(slide, title, palette=palette, fonts=fonts,
+              type_scale=type_scale, sw=sw, sh=sh)
+h.card_grid(slide, [
+    {"title": "Memory",
+     "body": "decisions and corrections stack across sessions"},
+    {"title": "Hooks",
+     "body": "auto-run on events (export validation, DOI check, …)"},
+    {"title": "Slash commands",
+     "body": "reusable workflows like /literature-review"},
+    {"title": "Context manager",
+     "body": "what the LLM is looking at right now"},
+], left=Inches(0.7), top=Inches(1.9),
+   width=sw - Inches(1.4), height=Inches(3.6),
+   palette=palette, fonts=fonts, type_scale=type_scale, cols=2)
+h.pull_quote(slide,
+    "Each conversation builds the next version of the AI.",
+    palette=palette, fonts=fonts, type_scale=type_scale,
+    left=Inches(0.7), top=Inches(5.7),
+    width=sw - Inches(1.4), height=Inches(1.0))
+""",
+)
+```
+
+**Example 2 — title + bullets on the left + figure on the right**:
+
+```python
+code="""
+h.accent_stripe(slide, palette=palette, sw=sw)
+h.title_block(slide, title, palette=palette, fonts=fonts,
+              type_scale=type_scale, sw=sw, sh=sh)
+h.bullet_list(slide, [
+    "Two-week bespoke pipeline (before)",
+    "30-second MCP query (after)",
+    "Automatic provenance trail on every step",
+], palette=palette, fonts=fonts, type_scale=type_scale,
+   left=Inches(0.7), top=Inches(2.0),
+   width=Inches(6.0), height=Inches(4.5))
+h.image_figure(1, left=Inches(7.0), top=Inches(2.0),
+               width=Inches(5.8), height=Inches(4.5))
+"""
+```
+
+**Failure handling** — if the snippet raises, the exporter degrades
+that slide to plain text (title + body) and records the error in
+the export result's `code_errors[]`. The deck still exports. After
+seeing an error, fix the snippet and re-export.
+
+**Don't reinvent** — the `h.*` helpers cover ~90% of the layouts you'll
+need. Drop to raw `slide.shapes.add_textbox(...)` only when no helper
+fits. Keep snippets **declarative** (helper calls + a few coordinates),
+not procedural (don't write loops that compute positions when
+`card_grid(cols=N)` already does).
 
 ### 5b. Hybrid slides — bullets + figure, or several images (regions)
 

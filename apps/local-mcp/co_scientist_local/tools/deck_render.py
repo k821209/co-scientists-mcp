@@ -198,6 +198,12 @@ def render_slide(
             "text slides carry no image — they render as native PPTX "
             "text on export; nothing to render here"
         )
+    if mode == "code":
+        raise ValueError(
+            "code slides carry no image — the `code` field runs at "
+            "PPTX export time and populates the slide natively; "
+            "nothing to render here"
+        )
     if mode == "hybrid":
         return _render_hybrid_slide(state, slug, deck_id, slide, deck)
 
@@ -377,10 +383,11 @@ def render_region(
 
 
 def _slide_is_rendered(s: dict) -> bool:
-    """A slide is 'done' when its image(s) exist: text → always; hybrid →
-    every region has an image; else → has image_blob_path."""
+    """A slide is 'done' when its image(s) exist: text + code → always
+    (they materialize natively at export time); hybrid → every region
+    has an image; else → has image_blob_path."""
     mode = s.get("render_mode") or "code-shape"
-    if mode == "text":
+    if mode in ("text", "code"):
         return True
     if mode == "hybrid":
         regions = s.get("regions") or []
@@ -400,6 +407,11 @@ def render_deck(state: State, slug: str, deck_id: str) -> dict:
         if mode == "text":
             results["skipped"].append({
                 **tag, "reason": "text slide — native PPTX text on export",
+            })
+            continue
+        if mode == "code":
+            results["skipped"].append({
+                **tag, "reason": "code slide — runs at PPTX export time",
             })
             continue
         if mode == "code-shape":
@@ -849,6 +861,127 @@ def _add_hybrid_slide(slide, row, state, tmpd, *, sw, sh, accent, fg, bg,
     return unrendered
 
 
+# ─── code slides: agent-authored python-pptx snippets ───────────────────
+
+
+def _build_code_namespace(slide, row, state, slug, tmpd, *,
+                          palette, fonts, type_scale, aspect, sw, sh):
+    """Build the namespace handed to a code slide's `exec()`. Pre-binds
+    the slide object, theme primitives, python-pptx imports, and the
+    `h` helpers namespace — including image-loading closures that
+    capture `state` so the snippet doesn't have to thread it through.
+
+    The snippet runs as top-level statements (not a function). The
+    convention: `slide`, `title`, `body`, `row`, `palette`, `fonts`,
+    `type_scale`, `aspect`, `sw`, `sh`, plus python-pptx (`Pt`,
+    `Inches`, `MSO_SHAPE`, `PP_ALIGN`, `MSO_ANCHOR`, `RGBColor`), plus
+    `h` for the helpers. See docs/todo/002 + paper-deck SKILL §5a.
+    """
+    from pptx.util import Pt, Inches, Emu                  # type: ignore
+    from pptx.enum.shapes import MSO_SHAPE                 # type: ignore
+    from pptx.enum.text import PP_ALIGN, MSO_ANCHOR        # type: ignore
+    from pptx.dml.color import RGBColor                    # type: ignore
+    from types import SimpleNamespace
+    from . import slide_render_helpers as _h
+
+    def _image_from_path(path, *, left, top, width, height, fit="contain"):
+        _place_picture(slide, str(path),
+                       left=left, top=top, box_w=width, box_h=height, fit=fit)
+
+    def _image_from_region(region_id, *, left, top, width, height, fit="contain"):
+        region = next(
+            (r for r in (row.get("regions") or [])
+             if r.get("id") == region_id), None,
+        )
+        if region is None:
+            raise ValueError(f"region {region_id!r} not on this slide")
+        bp = region.get("image_blob_path")
+        if not bp:
+            raise ValueError(
+                f"region {region_id!r} has no image_blob_path — "
+                "render it via render_region first"
+            )
+        blob = state.backend.get_blob(bp)
+        if not blob:
+            raise ValueError(f"region {region_id!r} blob is empty")
+        tmp = pathlib.Path(tmpd) / f"region_{row['id']}_{region_id}.png"
+        tmp.write_bytes(blob)
+        _place_picture(slide, str(tmp),
+                       left=left, top=top, box_w=width, box_h=height, fit=fit)
+
+    def _image_from_figure(figure_number, *, left, top, width, height, fit="contain"):
+        png = _figure_png(state, slug, int(figure_number))
+        tmp = pathlib.Path(tmpd) / f"figure_{figure_number}_{row['id']}.png"
+        tmp.write_bytes(png)
+        _place_picture(slide, str(tmp),
+                       left=left, top=top, box_w=width, box_h=height, fit=fit)
+
+    # Combine static helpers + state-aware image helpers into one `h`.
+    h = SimpleNamespace(
+        accent_stripe=_h.accent_stripe,
+        title_block=_h.title_block,
+        bullet_list=_h.bullet_list,
+        card=_h.card,
+        card_grid=_h.card_grid,
+        pull_quote=_h.pull_quote,
+        image_path=_image_from_path,
+        image_region=_image_from_region,
+        image_figure=_image_from_figure,
+    )
+
+    return {
+        # Slide + content
+        "slide": slide,
+        "title": row.get("title") or "",
+        "body": row.get("body") or "",
+        "notes": row.get("notes") or "",
+        "row": row,
+        # Theme
+        "palette": palette,
+        "fonts": fonts,
+        "type_scale": type_scale,
+        "aspect": aspect,
+        # Canvas
+        "sw": sw, "sh": sh,
+        # python-pptx imports the snippet will reach for
+        "Pt": Pt, "Inches": Inches, "Emu": Emu,
+        "MSO_SHAPE": MSO_SHAPE,
+        "PP_ALIGN": PP_ALIGN,
+        "MSO_ANCHOR": MSO_ANCHOR,
+        "RGBColor": RGBColor,
+        # Helpers (full + short alias)
+        "h": h, "helpers": h,
+    }
+
+
+def _add_code_slide(slide, row, state, slug, tmpd, *, sw, sh,
+                    accent, fg, bg, fonts, Inches, Pt, MSO_SHAPE,
+                    type_scale: dict = _DEFAULT_TYPE_SCALE) -> str | None:
+    """Execute the slide's `code` against a prepared namespace.
+
+    Returns the error message string when execution raises (the caller
+    then degrades to plain text); returns None on success.
+    """
+    code = (row.get("code") or "").strip()
+    if not code:
+        return "no code on slide"
+    palette = {
+        "accent": accent, "background": bg, "foreground": fg,
+        "surface": bg,
+    }
+    aspect = "16:9"  # only used as a hint inside the snippet
+    ns = _build_code_namespace(
+        slide, row, state, slug, tmpd,
+        palette=palette, fonts=fonts, type_scale=type_scale,
+        aspect=aspect, sw=sw, sh=sh,
+    )
+    try:
+        exec(compile(code, f"<slide {row.get('id', '?')} code>", "exec"), ns)
+        return None
+    except Exception as e:  # noqa: BLE001 — surface to the caller
+        return f"{type(e).__name__}: {e}"
+
+
 def _pdf_via_soffice(pptx_path: pathlib.Path) -> pathlib.Path | None:
     """Convert the .pptx to a sibling .pdf via LibreOffice. Returns the PDF
     path, or None if soffice/libreoffice is missing or the conversion fails.
@@ -923,14 +1056,49 @@ def export_deck_to_pptx(
     blank_layout = prs.slide_layouts[6]
 
     missing_renders: list[int] = []
+    code_errors: list[dict] = []
     image_slides = 0
     text_slides = 0
     hybrid_slides = 0
+    code_slides = 0
     with tempfile.TemporaryDirectory() as tmpd:
         for s in slides:
             slide = prs.slides.add_slide(blank_layout)
             mode = s.get("render_mode") or "code-shape"
-            if mode == "hybrid":
+            if mode == "code":
+                # Agent-authored python-pptx snippet builds the slide
+                # natively (docs/todo/002). On exec failure we degrade
+                # to plain text so the deck still exports — the error
+                # surfaces in `code_errors[]` of the result.
+                err = _add_code_slide(
+                    slide, s, state, slug, tmpd, sw=sw, sh=sh,
+                    accent=accent, fg=fg, bg=bg, fonts=fonts,
+                    Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE,
+                    type_scale=type_scale,
+                )
+                if err is None:
+                    code_slides += 1
+                else:
+                    code_errors.append({
+                        "slide_number": s.get("slide_number"),
+                        "slide_id": s.get("id"),
+                        "error": err,
+                    })
+                    # Wipe the (possibly partial) slide and rebuild as text.
+                    # python-pptx doesn't expose a clean remove-slide API
+                    # without rewriting the XML, so we re-add as a fresh
+                    # slide at the end of the deck order. Simpler: just
+                    # populate the existing slide via _add_text_slide;
+                    # any partial shapes from the failed exec will still
+                    # be there, but they don't crash the export.
+                    _add_text_slide(
+                        slide, s, sw=sw, sh=sh,
+                        accent=accent, fg=fg, bg=bg, fonts=fonts,
+                        Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE,
+                        type_scale=type_scale,
+                    )
+                    text_slides += 1
+            elif mode == "hybrid":
                 n_missing = _add_hybrid_slide(
                     slide, s, state, tmpd, sw=sw, sh=sh,
                     accent=accent, fg=fg, bg=bg, fonts=fonts,
@@ -1016,7 +1184,9 @@ def export_deck_to_pptx(
         "image_slides": image_slides,
         "text_slides": text_slides,
         "hybrid_slides": hybrid_slides,
+        "code_slides": code_slides,
         "missing_renders": missing_renders,
+        "code_errors": code_errors,
         "local_path": str(out),
         "blob_path": pptx_blob,
         "pdf_local_path": str(pdf_path) if pdf_path else None,

@@ -2,7 +2,7 @@
 
 **Audience:** co-scientist-local MCP / Claude Code harness dev team.
 **Filed by:** Yang Jae Kang, project `ai-breeding`, 2026-05-25.
-**Status:** in progress · approach revised.
+**Status:** closed · landed via `render_mode="code"`.
 **Related:** [001 — Native-language prose in the harness](./001_native_language_prose_in_harness.md)
 
 ## Resolution log
@@ -17,8 +17,17 @@
   plain-text rendering (`deck_render._render_simple_body`). Visual
   richness is to be delivered via the slide's `code` field — a python-
   pptx snippet the agent writes per slide that composes the slide
-  natively. Wiring up the `code` execution path is the next commit on
-  this todo; this file stays open until that lands.
+  natively.
+- **2026-05-26 (same day)** — Step 2 shipped. `render_mode="code"`
+  added. At PPTX export time the slide's `code` snippet executes
+  against a prepared namespace (slide, palette, fonts, type_scale,
+  Pt/Inches/MSO_SHAPE, and an `h` helpers namespace). Helpers in
+  `slide_render_helpers.py` cover the common boilerplate
+  (`accent_stripe`, `title_block`, `bullet_list`, `card`, `card_grid`,
+  `pull_quote`, `image_path`, `image_region`, `image_figure`). Snippet
+  exceptions degrade the slide to plain text and surface in the export
+  result's `code_errors[]`. paper-deck SKILL §5a rewritten with the
+  helper catalog and two worked examples. Closing the todo.
 
 ---
 

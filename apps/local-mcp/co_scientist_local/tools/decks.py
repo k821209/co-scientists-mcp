@@ -50,7 +50,9 @@ _VALID_ROLES = {
     "title", "outline", "background", "method", "result",
     "discussion", "conclusion", "qa", "custom",
 }
-_VALID_RENDER_MODES = {"code-shape", "paper-figure", "ai-image", "hybrid", "text"}
+_VALID_RENDER_MODES = {
+    "code-shape", "paper-figure", "ai-image", "hybrid", "text", "code",
+}
 _VALID_DECK_STATUS = {"draft", "drafted", "rendered"}
 _VALID_SLIDE_STATUS = {"draft", "rendered"}
 _VALID_ASPECT = {"16:9", "16:10", "4:3"}

@@ -711,3 +711,186 @@ def test_export_applies_type_scale_to_title(state, tmp_path, monkeypatch):
     # python-pptx font.size is an Emu/Pt object; check via .pt
     assert title_runs[0].font.size.pt == 30
 
+
+# ─── code slides: agent-authored python-pptx snippets (todo 002) ────────
+
+
+def test_render_deck_skips_code_slides(state):
+    """A code slide's `code` runs at PPTX export time; render_deck has
+    nothing to do for it."""
+    slug = _setup(state)
+    decks.add_slide(state, slug, "d", slide_number=1, role="background",
+                    title="t", code="pass", render_mode="code")
+    result = deck_render.render_deck(state, slug, "d")
+    assert len(result["skipped"]) == 1
+    assert result["skipped"][0]["reason"] == \
+        "code slide — runs at PPTX export time"
+
+
+def test_render_slide_code_mode_raises(state):
+    slug = _setup(state)
+    s = decks.add_slide(state, slug, "d", slide_number=1, role="discussion",
+                        title="t", code="pass", render_mode="code")
+    with pytest.raises(ValueError, match="code slides"):
+        deck_render.render_slide(state, slug, "d", s["id"])
+
+
+def test_render_deck_all_code_marks_rendered(state):
+    """A deck of only code slides is fully 'rendered' — they materialize
+    natively at export time, so they must not block the status flip."""
+    slug = _setup(state)
+    decks.add_slide(state, slug, "d", slide_number=1, role="discussion",
+                    title="t", code="pass", render_mode="code")
+    deck_render.render_deck(state, slug, "d")
+    assert decks.get_deck(state, slug, "d")["status"] == "rendered"
+
+
+def test_export_code_slide_executes_snippet(state, tmp_path, monkeypatch):
+    """A `code` slide's snippet runs at export, populating the slide
+    with whatever shapes the agent's code adds."""
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+
+    slug = _setup(state)
+    decks.update_deck(state, slug, "d", concept="accent: #b58900")
+    decks.add_slide(
+        state, slug, "d", slide_number=1, role="discussion",
+        title="My Title", notes="n", render_mode="code",
+        code=(
+            "h.accent_stripe(slide, palette=palette, sw=sw)\n"
+            "h.title_block(slide, title, palette=palette, fonts=fonts,\n"
+            "              type_scale=type_scale, sw=sw, sh=sh)\n"
+            "h.bullet_list(slide, ['alpha', 'beta', 'gamma'],\n"
+            "              palette=palette, fonts=fonts, type_scale=type_scale,\n"
+            "              left=Inches(0.7), top=Inches(2.0),\n"
+            "              width=sw - Inches(1.4), height=Inches(4.0))\n"
+        ),
+    )
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    assert res["code_slides"] == 1
+    assert res["code_errors"] == []
+    assert res["text_slides"] == 0
+    flat = " ".join(
+        sh.text_frame.text for sh in Presentation(str(out)).slides[0].shapes
+        if sh.has_text_frame
+    )
+    assert "My Title" in flat
+    for token in ("alpha", "beta", "gamma"):
+        assert token in flat
+
+
+def test_export_code_slide_card_grid(state, tmp_path, monkeypatch):
+    """The card_grid helper produces N cards arranged in `cols` columns."""
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    slug = _setup(state)
+    decks.update_deck(state, slug, "d", concept="accent: #b58900")
+    decks.add_slide(
+        state, slug, "d", slide_number=1, role="background",
+        title="Spec", notes="n", render_mode="code",
+        code=(
+            "h.accent_stripe(slide, palette=palette, sw=sw)\n"
+            "h.title_block(slide, title, palette=palette, fonts=fonts,\n"
+            "              type_scale=type_scale, sw=sw, sh=sh)\n"
+            "h.card_grid(slide, [\n"
+            "    {'title': 'Memory', 'body': 'persists across sessions'},\n"
+            "    {'title': 'Hooks', 'body': 'fire on events'},\n"
+            "    {'title': 'Slash', 'body': 'reusable commands'},\n"
+            "    {'title': 'Context', 'body': 'attention manager'},\n"
+            "], left=Inches(0.7), top=Inches(2.0),\n"
+            "   width=sw - Inches(1.4), height=Inches(4.0),\n"
+            "   palette=palette, fonts=fonts, type_scale=type_scale, cols=2)\n"
+        ),
+    )
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    slide = Presentation(str(out)).slides[0]
+    # Each card adds: a card body rect (RECTANGLE), an accent stripe
+    # (RECTANGLE), a title textbox, a body textbox. We expect 4 cards.
+    flat = " ".join(
+        sh.text_frame.text for sh in slide.shapes if sh.has_text_frame
+    )
+    for tag in ("Memory", "Hooks", "Slash", "Context"):
+        assert tag in flat
+    for body in ("persists across sessions", "fire on events",
+                 "reusable commands", "attention manager"):
+        assert body in flat
+    # 4 cards × (card rect + accent stripe) = 8 RECTANGLE auto-shapes,
+    # plus the top accent stripe and the title accent rule = at least 10.
+    auto_shapes = [
+        sh for sh in slide.shapes
+        if sh.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE
+    ]
+    assert len(auto_shapes) >= 10
+
+
+def test_export_code_slide_error_degrades_to_text(state, tmp_path, monkeypatch):
+    """A broken `code` slide's exception is captured in `code_errors`
+    and the slide degrades to plain text — the whole export still
+    succeeds."""
+    pytest.importorskip("pptx")
+
+    slug = _setup(state)
+    decks.add_slide(
+        state, slug, "d", slide_number=1, role="background",
+        title="Broken", body="fallback text", notes="n",
+        render_mode="code",
+        code="raise RuntimeError('intentional test failure')",
+    )
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    assert out.is_file()
+    assert res["code_slides"] == 0
+    assert len(res["code_errors"]) == 1
+    err = res["code_errors"][0]
+    assert err["slide_number"] == 1
+    assert "RuntimeError" in err["error"]
+    assert "intentional test failure" in err["error"]
+    # Slide degraded to text — body content survives.
+    from pptx import Presentation
+    flat = " ".join(
+        sh.text_frame.text for sh in Presentation(str(out)).slides[0].shapes
+        if sh.has_text_frame
+    )
+    assert "fallback text" in flat
+    assert res["text_slides"] == 1
+
+
+def test_export_code_slide_image_from_figure(state, tmp_path, monkeypatch):
+    """`h.image_figure(N, ...)` resolves a paper figure and embeds it."""
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    slug = _setup(state)
+    p = tmp_path / "fig.png"
+    p.write_bytes(_PNG_1x1)
+    figures.add_figure(state, slug, figure_number=1, title="F", local_path=str(p))
+    decks.add_slide(
+        state, slug, "d", slide_number=1, role="result",
+        title="With figure", notes="n", render_mode="code",
+        code=(
+            "h.accent_stripe(slide, palette=palette, sw=sw)\n"
+            "h.title_block(slide, title, palette=palette, fonts=fonts,\n"
+            "              type_scale=type_scale, sw=sw, sh=sh)\n"
+            "h.image_figure(1, left=Inches(0.7), top=Inches(2.0),\n"
+            "               width=sw - Inches(1.4), height=Inches(4.0))\n"
+        ),
+    )
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    assert res["code_slides"] == 1
+    assert res["code_errors"] == []
+    pics = [
+        sh for sh in Presentation(str(out)).slides[0].shapes
+        if sh.shape_type == MSO_SHAPE_TYPE.PICTURE
+    ]
+    assert len(pics) == 1   # one image embedded via image_figure
+
