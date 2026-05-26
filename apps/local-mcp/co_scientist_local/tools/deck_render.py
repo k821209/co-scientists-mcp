@@ -927,6 +927,8 @@ def _build_code_namespace(slide, row, state, slug, tmpd, *,
         image_path=_image_from_path,
         image_region=_image_from_region,
         image_figure=_image_from_figure,
+        grid=_h.grid,                       # todo 004 §D — design grid
+        SPACING_UNIT_PT=_h.SPACING_UNIT_PT,  # 8pt vertical rhythm
     )
 
     return {

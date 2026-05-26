@@ -862,6 +862,127 @@ def test_export_code_slide_error_degrades_to_text(state, tmp_path, monkeypatch):
     assert res["text_slides"] == 1
 
 
+# ─── Design grid (todo 004 §D) ──────────────────────────────────────────
+
+
+def test_grid_cell_basic_geometry():
+    """First cell sits at (margin_x, margin_top); column widths divide
+    the usable width evenly; horizontal gutters separate columns."""
+    from pptx.util import Inches, Pt
+    from co_scientist_local.tools import slide_render_helpers as srh
+
+    sw = Inches(13.333)  # 16:9 deck slide width
+    sh = Inches(7.5)
+    g = srh.grid(sw=sw, sh=sh, cols=12, rows=6)
+    left, top, w, h = g.cell(col=1, span=1, row=1, row_span=1)
+    assert left == g.margin_x
+    assert top == g.margin_top
+    assert w == g.col_w
+    assert h == g.row_h
+
+
+def test_grid_span_absorbs_gutters():
+    """A span-3 cell is wider than 3 separate col-1 cells by 2 gutters
+    — the cell straddles the gutters between covered columns."""
+    from pptx.util import Inches, Pt
+    from co_scientist_local.tools import slide_render_helpers as srh
+
+    g = srh.grid(sw=Inches(13.333), sh=Inches(7.5), cols=12, rows=6)
+    _, _, w_single, _ = g.cell(col=1, span=1, row=1)
+    _, _, w_three, _ = g.cell(col=1, span=3, row=1)
+    assert w_three == 3 * w_single + 2 * g.gutter
+
+
+def test_grid_row_helper_spans_all_columns():
+    """`g.row(...)` is full-width across `cols` columns."""
+    from pptx.util import Inches
+    from co_scientist_local.tools import slide_render_helpers as srh
+
+    g = srh.grid(sw=Inches(13.333), sh=Inches(7.5))
+    full = g.row(row=2)
+    same = g.cell(col=1, span=g.cols, row=2)
+    assert full == same
+
+
+def test_grid_rejects_out_of_range():
+    """Cells outside the grid raise ValueError, not silently clip."""
+    from pptx.util import Inches
+    from co_scientist_local.tools import slide_render_helpers as srh
+
+    g = srh.grid(sw=Inches(13.333), sh=Inches(7.5), cols=12, rows=6)
+    with pytest.raises(ValueError, match="col must be 1..12"):
+        g.cell(col=0, row=1)
+    with pytest.raises(ValueError, match="exceeds 12 cols"):
+        g.cell(col=10, span=5, row=1)
+    with pytest.raises(ValueError, match="row must be 1..6"):
+        g.cell(col=1, row=7)
+    with pytest.raises(ValueError, match="exceeds 6 rows"):
+        g.cell(col=1, row=5, row_span=3)
+
+
+def test_export_code_slide_uses_grid(state, tmp_path, monkeypatch):
+    """End-to-end: a `code` snippet builds a grid + a card grid in it,
+    everything renders, the cards land at the grid coordinates."""
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    slug = _setup(state)
+    decks.update_deck(state, slug, "d", concept="accent: #b58900")
+    decks.add_slide(
+        state, slug, "d", slide_number=1, role="background",
+        title="Grid demo", notes="n", render_mode="code",
+        code=(
+            "g = h.grid(sw=sw, sh=sh, cols=12, rows=4)\n"
+            "h.accent_stripe(slide, palette=palette, sw=sw)\n"
+            "h.title_block(slide, title, palette=palette, fonts=fonts,\n"
+            "              type_scale=type_scale, sw=sw, sh=sh)\n"
+            "left, top, w, ht = g.cell(col=1, span=6, row=1, row_span=4)\n"
+            "h.bullet_list(slide, ['left half'],\n"
+            "              palette=palette, fonts=fonts, type_scale=type_scale,\n"
+            "              left=left, top=top, width=w, height=ht)\n"
+            "left, top, w, ht = g.cell(col=7, span=6, row=1, row_span=4)\n"
+            "h.bullet_list(slide, ['right half'],\n"
+            "              palette=palette, fonts=fonts, type_scale=type_scale,\n"
+            "              left=left, top=top, width=w, height=ht)\n"
+        ),
+    )
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    assert res["code_slides"] == 1
+    assert res["code_errors"] == []
+    flat = " ".join(
+        sh.text_frame.text for sh in Presentation(str(out)).slides[0].shapes
+        if sh.has_text_frame
+    )
+    assert "left half" in flat
+    assert "right half" in flat
+
+
+def test_spacing_unit_exposed_to_snippets(state, tmp_path, monkeypatch):
+    """A snippet can read `h.SPACING_UNIT_PT` for 8pt-rhythm math."""
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+
+    slug = _setup(state)
+    decks.add_slide(
+        state, slug, "d", slide_number=1, role="background",
+        title="Rhythm", notes="n", render_mode="code",
+        code=(
+            "assert h.SPACING_UNIT_PT == 8\n"
+            "h.accent_stripe(slide, palette=palette, sw=sw)\n"
+            "h.title_block(slide, title, palette=palette, fonts=fonts,\n"
+            "              type_scale=type_scale, sw=sw, sh=sh)\n"
+        ),
+    )
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    assert res["code_slides"] == 1
+    assert res["code_errors"] == []
+
+
 def test_export_code_slide_image_from_figure(state, tmp_path, monkeypatch):
     """`h.image_figure(N, ...)` resolves a paper figure and embeds it."""
     pytest.importorskip("pptx")

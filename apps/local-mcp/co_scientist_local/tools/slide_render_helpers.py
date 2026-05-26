@@ -37,6 +37,108 @@ from pptx.enum.shapes import MSO_SHAPE  # type: ignore
 from pptx.enum.text import MSO_AUTO_SIZE, MSO_ANCHOR, PP_ALIGN  # type: ignore
 
 
+# 8pt vertical rhythm — every vertical gap a snippet places should be an
+# integer multiple of this (todo 004 §D). Pulled out as a constant so
+# snippets can write `Pt(8 * 2)` rather than magic numbers.
+SPACING_UNIT_PT = 8
+
+
+class Grid:
+    """12-column / N-row design grid for `code` slides (todo 004 §D).
+
+    A `Grid` is pure coordinate math — it does NOT add any shapes. Use
+    `grid.cell(col=, span=, row=, row_span=)` to get a `(left, top,
+    width, height)` EMU tuple you can pass to the layout helpers
+    (`h.card`, `h.bullet_list`, `h.image_*`, etc.).
+
+    The grid leaves room at the top for `h.title_block` (default
+    margin_top=Inches(1.8)) so titles and grid content don't fight.
+    The 8pt vertical rhythm is enforced as the row gap.
+
+    Replaces ad-hoc `Inches(0.7)` constants scattered across snippets
+    with a single shared geometry — alignment becomes default, not
+    something the agent has to think about.
+    """
+
+    def __init__(self, *, sw, sh, cols: int = 12, rows: int = 6,
+                 gutter=None, margin_x=None, margin_top=None,
+                 margin_bot=None, row_gap=None, row_h=None):
+        if cols < 1:
+            raise ValueError(f"cols must be >= 1, got {cols}")
+        if rows < 1:
+            raise ValueError(f"rows must be >= 1, got {rows}")
+        self.sw = sw
+        self.sh = sh
+        self.cols = cols
+        self.rows = rows
+        self.gutter = gutter if gutter is not None else Pt(SPACING_UNIT_PT)
+        self.margin_x = margin_x if margin_x is not None else Inches(0.6)
+        self.margin_top = margin_top if margin_top is not None else Inches(1.8)
+        self.margin_bot = margin_bot if margin_bot is not None else Inches(0.6)
+        self.row_gap = row_gap if row_gap is not None else Pt(SPACING_UNIT_PT)
+        # Column width: usable width minus gutters, split N ways
+        usable_w = sw - 2 * self.margin_x - self.gutter * (cols - 1)
+        self.col_w = int(usable_w // cols)
+        # Row height: usable height minus row gaps, split N ways
+        usable_h = sh - self.margin_top - self.margin_bot
+        if row_h is not None:
+            self.row_h = row_h
+        else:
+            self.row_h = int(
+                (usable_h - self.row_gap * (rows - 1)) // rows
+            )
+
+    def cell(self, col: int, span: int = 1, row: int = 1,
+             row_span: int = 1):
+        """Return `(left, top, width, height)` in EMU for a grid cell.
+
+        col / row are 1-indexed (1..cols, 1..rows). `span` extends the
+        cell rightward; `row_span` extends it downward. Spanning
+        absorbs the gutters / row gaps between covered cells (so a
+        col_span=3 block is *wider* than 3 stand-alone cells).
+        """
+        if not 1 <= col <= self.cols:
+            raise ValueError(f"col must be 1..{self.cols}, got {col}")
+        if span < 1 or col + span - 1 > self.cols:
+            raise ValueError(
+                f"span {span} from col {col} exceeds {self.cols} cols",
+            )
+        if not 1 <= row <= self.rows:
+            raise ValueError(f"row must be 1..{self.rows}, got {row}")
+        if row_span < 1 or row + row_span - 1 > self.rows:
+            raise ValueError(
+                f"row_span {row_span} from row {row} exceeds {self.rows} rows",
+            )
+        left = self.margin_x + (col - 1) * (self.col_w + self.gutter)
+        width = self.col_w * span + self.gutter * (span - 1)
+        top = self.margin_top + (row - 1) * (self.row_h + self.row_gap)
+        height = self.row_h * row_span + self.row_gap * (row_span - 1)
+        return (left, top, width, height)
+
+    def row(self, row: int = 1, row_span: int = 1):
+        """Shorthand for `cell(1, span=cols, row=row, row_span=row_span)`
+        — the whole row, useful for headlines or pull-quotes that span
+        all columns."""
+        return self.cell(1, span=self.cols, row=row, row_span=row_span)
+
+
+def grid(*, sw, sh, **kwargs) -> Grid:
+    """Build a `Grid` sized to the current slide. The `slide` argument
+    isn't needed — the grid is pure coordinate math. Pass `cols`,
+    `rows`, `gutter`, `margin_x`, `margin_top`, `margin_bot`,
+    `row_gap`, `row_h` to override defaults (12 / 6 / Pt(8) / Inches
+    (0.6) / Inches(1.8) / Inches(0.6) / Pt(8) / computed).
+
+    Typical usage in a `code` snippet:
+
+        g = h.grid(sw=sw, sh=sh)
+        left, top, w_, h_ = g.cell(col=1, span=6, row=1, row_span=3)
+        h.bullet_list(slide, items, left=left, top=top,
+                      width=w_, height=h_, ...)
+    """
+    return Grid(sw=sw, sh=sh, **kwargs)
+
+
 def _autoshrink(tf) -> None:
     try:
         tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_SHAPE

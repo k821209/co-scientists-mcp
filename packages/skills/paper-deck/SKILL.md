@@ -126,6 +126,15 @@ mcp__co_scientist__update_deck(
     Motif:
       a single thin horizontal rule under each title;
       a recurring small icon (#b58900) marking the figure-of-merit line
+    Design language:
+      Grid: 12 columns, 8pt vertical rhythm, Inches(0.6) side margins.
+      Whitespace: >= 25% of each slide reads as empty — leave breathing room.
+      Max 4 distinct type sizes per slide; type sizes only from `type_scale`.
+      Max 3 colors per slide: accent + foreground + one neutral.
+      Visual storytelling: every section opener (Era I/II/III) uses a
+        chapter-divider pattern distinct from interior slides.
+      Iconography: leave room for accent icons (filed for follow-up,
+        todo 004 §C); for now use accent-colored shapes as visual anchors.
     Arc:
       problem → setup → result → implications → questions
   """,
@@ -141,6 +150,17 @@ Override any of them per deck:
 
 Avoid going below 14pt — the export's auto-shrink (TEXT_TO_SHAPE) will
 already step down when individual slides overrun.
+
+The `Design language:` block is the deck's **design constitution** —
+free-text rules every slide answers to (todo 004 §G). Not parsed by
+the renderer; it's a contract you write to yourself as the slide
+author. When you draft each slide's `code`, check it against this
+block. Defaults to use if you don't write one:
+- 12-column grid, 8pt vertical rhythm
+- ≥ 25% whitespace per slide
+- ≤ 4 type sizes, ≤ 3 colors per slide
+- Section openers use a distinct (chapter-divider) layout from
+  interior slides
 
 ### 4. Outline slides
 
@@ -301,9 +321,33 @@ focus on actual layout:
 | `h.image_path(path, *, left, top, width, height, fit="contain")` | — | Embed an image from a filesystem path |
 | `h.image_region(region_id, *, left, top, width, height, fit="contain")` | — | Resolve `row.regions[id]` → embed that image |
 | `h.image_figure(figure_number, *, left, top, width, height, fit="contain")` | — | Resolve a paper figure → embed |
+| `h.grid(*, sw, sh, cols=12, rows=6, gutter=Pt(8), margin_x=Inches(0.6), margin_top=Inches(1.8), margin_bot=Inches(0.6), row_gap=Pt(8), row_h=None)` | — | Build a 12-col × 6-row design grid. Returns a `Grid` with `.cell(col, span, row, row_span)` → `(left, top, width, height)`. (todo 004 §D) |
+| `h.SPACING_UNIT_PT` | constant `8` | 8pt vertical rhythm. Vertical gaps should be `Pt(SPACING_UNIT_PT * N)`. |
 
 All Keynote-safe (RGBA → RGB JPEG ≤ 1920px normalization happens inside
 the image helpers).
+
+**Use the grid** — don't scatter ad-hoc `Inches(0.7)` constants. Once
+the title's placed, `g = h.grid(sw=sw, sh=sh)` gives you a uniform 12-
+column geometry that auto-aligns everything. The default leaves
+Inches(1.8) at the top for `h.title_block` and Inches(0.6) margins on
+the sides + bottom. Override only when a layout genuinely needs less
+margin (a hero cover slide, for instance).
+
+```python
+g = h.grid(sw=sw, sh=sh)            # 12 cols × 6 rows by default
+left, top, w_, h_ = g.cell(col=1, span=7, row=1, row_span=4)
+h.bullet_list(slide, items, palette=palette, fonts=fonts,
+              type_scale=type_scale,
+              left=left, top=top, width=w_, height=h_)
+left, top, w_, h_ = g.cell(col=8, span=5, row=1, row_span=4)
+h.image_figure(1, left=left, top=top, width=w_, height=h_)
+# Full-width footer band on the last row
+left, top, w_, h_ = g.row(row=6)
+h.pull_quote(slide, "Take-home line",
+             palette=palette, fonts=fonts, type_scale=type_scale,
+             left=left, top=top, width=w_, height=h_)
+```
 
 **Example 1 — title + 4-card grid + take-home quote**:
 
