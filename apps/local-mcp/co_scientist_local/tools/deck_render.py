@@ -883,6 +883,7 @@ def _build_code_namespace(slide, row, state, slug, tmpd, *,
     from pptx.dml.color import RGBColor                    # type: ignore
     from types import SimpleNamespace
     from . import slide_render_helpers as _h
+    from . import slide_patterns as _p
 
     def _image_from_path(path, *, left, top, width, height, fit="contain"):
         _place_picture(slide, str(path),
@@ -930,6 +931,19 @@ def _build_code_namespace(slide, row, state, slug, tmpd, *,
         grid=_h.grid,                       # todo 004 §D — design grid
         SPACING_UNIT_PT=_h.SPACING_UNIT_PT,  # 8pt vertical rhythm
     )
+    # Whole-slide patterns (todo 004 §B) — bound as `p`.
+    p = SimpleNamespace(
+        hero_with_trailing_evidence=_p.hero_with_trailing_evidence,
+        chapter_divider=_p.chapter_divider,
+        metric_tile_row=_p.metric_tile_row,
+        evidence_stack=_p.evidence_stack,
+        flow_pipeline=_p.flow_pipeline,
+        before_after_split=_p.before_after_split,
+        contrast_pair=_p.contrast_pair,
+        quadrant_map=_p.quadrant_map,
+        numbered_milestone_arc=_p.numbered_milestone_arc,
+        zoom_in_callout=_p.zoom_in_callout,
+    )
 
     return {
         # Slide + content
@@ -953,6 +967,8 @@ def _build_code_namespace(slide, row, state, slug, tmpd, *,
         "RGBColor": RGBColor,
         # Helpers (full + short alias)
         "h": h, "helpers": h,
+        # Whole-slide patterns
+        "p": p, "patterns": p,
     }
 
 
@@ -982,6 +998,38 @@ def _add_code_slide(slide, row, state, slug, tmpd, *, sw, sh,
         return None
     except Exception as e:  # noqa: BLE001 — surface to the caller
         return f"{type(e).__name__}: {e}"
+
+
+def _render_pdf_to_pngs(pdf_path: pathlib.Path, out_dir: pathlib.Path,
+                        *, dpi: int = 150) -> list[pathlib.Path]:
+    """Render each page of `pdf_path` to a PNG at out_dir/slide_{N:03d}.png
+    via PyMuPDF (todo 004 §A). Per-slide PNGs let the agent run a vision
+    critique loop — Read each PNG, score against a design rubric, rewrite
+    weak slides' `code`, re-export. Best-effort: returns [] when PyMuPDF
+    is missing or the PDF can't be opened, so the rest of the export
+    still succeeds."""
+    try:
+        import pymupdf  # type: ignore
+    except ImportError:
+        return []
+    try:
+        doc = pymupdf.open(str(pdf_path))
+    except Exception:
+        return []
+    mat = pymupdf.Matrix(dpi / 72, dpi / 72)
+    pngs: list[pathlib.Path] = []
+    try:
+        for i in range(len(doc)):
+            page = doc[i]
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            out = out_dir / f"slide_{i + 1:03d}.png"
+            pix.save(str(out))
+            pngs.append(out)
+    except Exception:
+        pass  # partial results returned (best-effort)
+    finally:
+        doc.close()
+    return pngs
 
 
 def _pdf_via_soffice(pptx_path: pathlib.Path) -> pathlib.Path | None:
@@ -1178,6 +1226,23 @@ def export_deck_to_pptx(
     pptx_blob = _publish(out, "pptx")
     pdf_blob = _publish(pdf_path, "pdf") if pdf_path else None
 
+    # Per-slide PNGs for the agent's vision critique loop (todo 004 §A).
+    # Needs the PDF as source; skipped silently when soffice/PyMuPDF
+    # missing — same posture as the PDF itself.
+    slide_pngs: list[dict] = []
+    if pdf_path is not None:
+        pngs = _render_pdf_to_pngs(pdf_path, out.parent)
+        for i, p in enumerate(pngs, start=1):
+            blob_path = state.project_path(
+                "papers", slug, "decks", deck_id, "exports", p.name,
+            )
+            state.backend.put_blob(blob_path, p.read_bytes())
+            slide_pngs.append({
+                "slide_number": i,
+                "local_path": str(p),
+                "blob_path": blob_path,
+            })
+
     return {
         "deck_id": deck_id,
         "deck_title": deck.get("title"),
@@ -1195,4 +1260,6 @@ def export_deck_to_pptx(
         "pdf_blob_path": pdf_blob,
         "pdf_skipped": pdf_path is None,
         "size_bytes": os.path.getsize(out),
+        "slide_pngs": slide_pngs,
+        "slide_pngs_skipped": pdf_path is None or not slide_pngs,
     }

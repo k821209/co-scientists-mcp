@@ -2,7 +2,7 @@
 
 **Audience:** co-scientist-local MCP / Claude Code harness dev team.
 **Filed by:** Yang Jae Kang, project `ai-breeding`, 2026-05-26.
-**Status:** partially shipped — §D (grid) + §G (design language doc) landed 2026-05-26; §A/B/C/E/F open.
+**Status:** mostly shipped — §A (critique loop) + §B (pattern library) + §D (grid) + §G (design language doc) landed 2026-05-26; §C/E/F open.
 
 ## Resolution log
 
@@ -18,11 +18,31 @@
   design constitution: grid rules, whitespace ratio, max type sizes
   per slide, color count, section-opener convention. Not parsed by
   the renderer; it's the contract every slide's `code` answers to.
-- **Open:** §A (vision-LLM critic loop — needs per-slide PNG export +
-  agent workflow), §B (whole-slide pattern library — ~10 patterns,
-  largest piece), §C (iconography — asset bundle decision),
+- **Open:** §C (iconography — asset bundle decision),
   §E (semantic type roles — touches existing type_scale callers),
   §F (reference design corpus — curation work).
+- **2026-05-26 (same day)** — §A shipped. PyMuPDF (>=1.24) added as a
+  dep. `_render_pdf_to_pngs(pdf_path, out_dir, dpi=150)` renders each
+  PDF page to `slide_NNN.png` via PyMuPDF; best-effort (returns []
+  on missing dep / unreadable PDF). `export_deck_to_pptx` now emits
+  per-slide PNGs into the deck's exports folder when the sibling PDF
+  exists, and the result dict gains `slide_pngs: [{slide_number,
+  local_path, blob_path}]` + `slide_pngs_skipped`. paper-deck SKILL
+  §9 documents the critique pass: agent Reads each PNG, scores
+  against a 6-category rubric (visual hierarchy / whitespace /
+  alignment / type discipline / color discipline / visual
+  storytelling), rewrites weak slides' `code` via `update_slide`,
+  re-exports — loop max 3 rounds.
+- **2026-05-26 (same day)** — §B shipped. New `slide_patterns.py`
+  module ships 10 whole-slide patterns:
+  `hero_with_trailing_evidence`, `chapter_divider`, `metric_tile_row`,
+  `evidence_stack`, `flow_pipeline`, `before_after_split`,
+  `contrast_pair`, `quadrant_map`, `numbered_milestone_arc`,
+  `zoom_in_callout`. Each encodes designer-level compositional
+  decisions (grid placement, type hierarchy, whitespace, color use,
+  visual storytelling). Bound to the exec namespace as `p.*`
+  (and `patterns`). SKILL §5a gains the pattern catalog table +
+  role→pattern recommendations. (10 tests, all 342 pass.)
 **Related:** [002](./002_rich_slide_rendering.md), [003 — not filed in this repo; referenced as "solved by paper-deck SKILL §5a rewrite" per 004's cross-reference table]
 
 ---

@@ -5,6 +5,8 @@ optional dep.
 """
 from __future__ import annotations
 
+import pathlib
+
 import pytest
 
 from co_scientist_local.backends.base import NotFound
@@ -258,6 +260,9 @@ def test_export_deck_to_pptx_smoke(state, tmp_path, monkeypatch):
     assert res["missing_renders"] == []     # the text slide is not "missing"
     assert res["aspect_ratio"] == "4:3"
     assert res["pdf_skipped"] is True
+    # PDF was skipped → per-slide PNGs also skipped (their source).
+    assert res["slide_pngs"] == []
+    assert res["slide_pngs_skipped"] is True
 
 
 # ─── regions: hybrid multi-image slides ──────────────────────
@@ -983,6 +988,61 @@ def test_spacing_unit_exposed_to_snippets(state, tmp_path, monkeypatch):
     assert res["code_errors"] == []
 
 
+# ─── per-slide PNG export (todo 004 §A — critique loop) ─────────────────
+
+
+def _fake_render_pdf_to_pngs(_pdf_path, out_dir, *, dpi=150):
+    """Pretend each PDF page rendered to a PNG. Used to test the
+    critique-PNG wiring without a real PDF source."""
+    pages = [
+        out_dir / "slide_001.png",
+        out_dir / "slide_002.png",
+    ]
+    for p in pages:
+        p.write_bytes(_PNG_1x1)
+    return pages
+
+
+def test_export_emits_per_slide_pngs(state, tmp_path, monkeypatch):
+    """When the PDF render succeeds, the export also produces one PNG
+    per slide and uploads each to Storage for the critique loop."""
+    pytest.importorskip("pptx")
+
+    slug = _setup(state)
+    decks.add_slide(state, slug, "d", slide_number=1, role="background",
+                    title="Slide 1", body="x", render_mode="text")
+    decks.add_slide(state, slug, "d", slide_number=2, role="conclusion",
+                    title="Slide 2", body="y", render_mode="text")
+    # Fake out the soffice + PNG-rendering steps so we don't need a
+    # real LibreOffice / PDF round-trip in CI.
+    fake_pdf = tmp_path / "deck.pdf"
+    fake_pdf.write_bytes(b"%PDF-1.4 fake")
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: fake_pdf)
+    monkeypatch.setattr(deck_render, "_render_pdf_to_pngs",
+                        _fake_render_pdf_to_pngs)
+
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    assert res["slide_pngs_skipped"] is False
+    assert len(res["slide_pngs"]) == 2
+    for i, png in enumerate(res["slide_pngs"], start=1):
+        assert png["slide_number"] == i
+        # Local file present, blob_path includes slide_NNN.png filename.
+        assert pathlib.Path(png["local_path"]).is_file()
+        assert png["blob_path"].endswith(f"slide_{i:03d}.png")
+        # And it was uploaded to the backend.
+        assert state.backend.get_blob(png["blob_path"])
+
+
+def test_render_pdf_to_pngs_returns_empty_when_pdf_missing(tmp_path):
+    """Best-effort: a missing / unreadable PDF returns [] silently
+    rather than raising, so the rest of the export doesn't fail."""
+    out = deck_render._render_pdf_to_pngs(
+        tmp_path / "does-not-exist.pdf", tmp_path,
+    )
+    assert out == []
+
+
 def test_export_code_slide_image_from_figure(state, tmp_path, monkeypatch):
     """`h.image_figure(N, ...)` resolves a paper figure and embeds it."""
     pytest.importorskip("pptx")
@@ -1014,4 +1074,205 @@ def test_export_code_slide_image_from_figure(state, tmp_path, monkeypatch):
         if sh.shape_type == MSO_SHAPE_TYPE.PICTURE
     ]
     assert len(pics) == 1   # one image embedded via image_figure
+
+
+# ─── Pattern library (todo 004 §B) ──────────────────────────────────────
+
+
+def _run_pattern_slide(state, tmp_path, monkeypatch, code: str,
+                       *, title: str = "T", body: str = ""):
+    """Build a single deck with one code slide whose snippet is the
+    given code string. Returns the export result + the first slide of
+    the loaded Presentation."""
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+
+    slug = _setup(state)
+    decks.update_deck(state, slug, "d", concept="accent: #b58900")
+    decks.add_slide(state, slug, "d", slide_number=1, role="background",
+                    title=title, body=body, notes="n",
+                    render_mode="code", code=code)
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(
+        state, slug, "d", output_path=str(out),
+    )
+    slide = Presentation(str(out)).slides[0]
+    return res, slide
+
+
+def _slide_text(slide):
+    return " ".join(
+        sh.text_frame.text for sh in slide.shapes if sh.has_text_frame
+    )
+
+
+def test_pattern_hero_with_trailing_evidence(state, tmp_path, monkeypatch):
+    res, slide = _run_pattern_slide(state, tmp_path, monkeypatch, code=(
+        "p.hero_with_trailing_evidence(slide, headline='The thesis',\n"
+        "    evidence=['point one', 'point two', 'point three'],\n"
+        "    palette=palette, fonts=fonts, type_scale=type_scale,\n"
+        "    sw=sw, sh=sh)\n"
+    ))
+    assert res["code_errors"] == []
+    txt = _slide_text(slide)
+    assert "The thesis" in txt
+    for line in ("point one", "point two", "point three"):
+        assert line in txt
+
+
+def test_pattern_chapter_divider(state, tmp_path, monkeypatch):
+    res, slide = _run_pattern_slide(state, tmp_path, monkeypatch, code=(
+        "p.chapter_divider(slide, chapter_label='Era II',\n"
+        "    summary='Data goes digital',\n"
+        "    palette=palette, fonts=fonts, type_scale=type_scale,\n"
+        "    sw=sw, sh=sh)\n"
+    ))
+    assert res["code_errors"] == []
+    txt = _slide_text(slide)
+    assert "Era II" in txt
+    assert "Data goes digital" in txt
+
+
+def test_pattern_metric_tile_row(state, tmp_path, monkeypatch):
+    res, slide = _run_pattern_slide(state, tmp_path, monkeypatch, code=(
+        "p.metric_tile_row(slide, tiles=[\n"
+        "    ('30', 'seconds per query', 's'),\n"
+        "    ('500', 'accessions', None),\n"
+        "    ('4', 'modalities', None),\n"
+        "], palette=palette, fonts=fonts, type_scale=type_scale,\n"
+        "   sw=sw, sh=sh)\n"
+    ))
+    assert res["code_errors"] == []
+    txt = _slide_text(slide)
+    for token in ("30", "500", "4", "seconds per query", "accessions",
+                  "modalities"):
+        assert token in txt
+
+
+def test_pattern_evidence_stack(state, tmp_path, monkeypatch):
+    res, slide = _run_pattern_slide(state, tmp_path, monkeypatch, code=(
+        "p.evidence_stack(slide, claim='AI breeding scales',\n"
+        "    evidence=[\n"
+        "        {'tag': 'data', 'body': '500 accessions multi-modal'},\n"
+        "        {'tag': 'speed', 'body': '30s vs 2 weeks per query'},\n"
+        "    ], palette=palette, fonts=fonts, type_scale=type_scale,\n"
+        "       sw=sw, sh=sh)\n"
+    ))
+    assert res["code_errors"] == []
+    txt = _slide_text(slide)
+    assert "AI breeding scales" in txt
+    assert "DATA" in txt
+    assert "SPEED" in txt
+
+
+def test_pattern_flow_pipeline(state, tmp_path, monkeypatch):
+    res, slide = _run_pattern_slide(state, tmp_path, monkeypatch, code=(
+        "p.flow_pipeline(slide, steps=[\n"
+        "    {'tag': 'Collect', 'body': 'multi-modal data'},\n"
+        "    {'tag': 'Model', 'body': 'train on it'},\n"
+        "    {'tag': 'Deploy', 'body': 'breeder queries'},\n"
+        "], palette=palette, fonts=fonts, type_scale=type_scale,\n"
+        "   sw=sw, sh=sh)\n"
+    ))
+    assert res["code_errors"] == []
+    txt = _slide_text(slide)
+    for token in ("Collect", "Model", "Deploy", "multi-modal data",
+                  "breeder queries"):
+        assert token in txt
+
+
+def test_pattern_before_after_split(state, tmp_path, monkeypatch):
+    res, slide = _run_pattern_slide(state, tmp_path, monkeypatch, code=(
+        "p.before_after_split(slide,\n"
+        "    before={'title': 'Manual', 'body': 'two weeks per query'},\n"
+        "    after={'title': 'MCP', 'body': '30 seconds per query'},\n"
+        "    transition_label='150× faster',\n"
+        "    palette=palette, fonts=fonts, type_scale=type_scale,\n"
+        "    sw=sw, sh=sh)\n"
+    ))
+    assert res["code_errors"] == []
+    txt = _slide_text(slide)
+    assert "Manual" in txt
+    assert "MCP" in txt
+    assert "150" in txt
+
+
+def test_pattern_contrast_pair(state, tmp_path, monkeypatch):
+    res, slide = _run_pattern_slide(state, tmp_path, monkeypatch, code=(
+        "p.contrast_pair(slide,\n"
+        "    left_item={'title': 'In-house', 'pros': ['control'],\n"
+        "               'cons': ['slow']},\n"
+        "    right_item={'title': 'Cloud', 'pros': ['fast'],\n"
+        "                'cons': ['lock-in']},\n"
+        "    axis_label='deploy time vs control',\n"
+        "    palette=palette, fonts=fonts, type_scale=type_scale,\n"
+        "    sw=sw, sh=sh)\n"
+    ))
+    assert res["code_errors"] == []
+    txt = _slide_text(slide)
+    assert "In-house" in txt
+    assert "Cloud" in txt
+    assert "control" in txt
+    assert "lock-in" in txt
+    assert "DEPLOY TIME VS CONTROL" in txt
+
+
+def test_pattern_quadrant_map(state, tmp_path, monkeypatch):
+    res, slide = _run_pattern_slide(state, tmp_path, monkeypatch, code=(
+        "p.quadrant_map(slide, items=[\n"
+        "    {'label': 'A', 'x': 0.2, 'y': 0.8},\n"
+        "    {'label': 'B', 'x': 0.8, 'y': 0.2},\n"
+        "], axes={'x': 'cost', 'y': 'impact',\n"
+        "         'x_low': 'cheap', 'x_high': 'expensive'},\n"
+        "   palette=palette, fonts=fonts, type_scale=type_scale,\n"
+        "   sw=sw, sh=sh)\n"
+    ))
+    assert res["code_errors"] == []
+    txt = _slide_text(slide)
+    assert "A" in txt
+    assert "B" in txt
+    assert "cost" in txt
+    assert "impact" in txt
+
+
+def test_pattern_numbered_milestone_arc(state, tmp_path, monkeypatch):
+    res, slide = _run_pattern_slide(state, tmp_path, monkeypatch, code=(
+        "p.numbered_milestone_arc(slide, milestones=[\n"
+        "    {'tag': 'Era I', 'note': 'paper records'},\n"
+        "    {'tag': 'Era II', 'note': 'data digital'},\n"
+        "    {'tag': 'Era III', 'note': 'practice digital'},\n"
+        "], palette=palette, fonts=fonts, type_scale=type_scale,\n"
+        "   sw=sw, sh=sh)\n"
+    ))
+    assert res["code_errors"] == []
+    txt = _slide_text(slide)
+    for token in ("Era I", "Era II", "Era III", "paper records",
+                  "data digital", "practice digital", "1", "2", "3"):
+        assert token in txt
+
+
+def test_pattern_zoom_in_callout(state, tmp_path, monkeypatch):
+    """zoom_in_callout needs an image source; smoke-test with a 1×1 PNG."""
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    src = tmp_path / "ctx.png"
+    src.write_bytes(_PNG_1x1)
+    code = (
+        f"p.zoom_in_callout(slide, context_image_path={str(src)!r},\n"
+        "    callout={'x': 0.3, 'y': 0.3, 'w': 0.3, 'h': 0.3},\n"
+        "    note='zoom note',\n"
+        "    palette=palette, fonts=fonts, type_scale=type_scale,\n"
+        "    sw=sw, sh=sh)\n"
+    )
+    res, slide = _run_pattern_slide(state, tmp_path, monkeypatch, code=code)
+    assert res["code_errors"] == []
+    pics = [sh for sh in slide.shapes
+            if sh.shape_type == MSO_SHAPE_TYPE.PICTURE]
+    # Two pictures: full context + zoomed inset
+    assert len(pics) == 2
+    txt = _slide_text(slide)
+    assert "zoom note" in txt
 

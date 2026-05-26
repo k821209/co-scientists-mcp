@@ -20,6 +20,9 @@ dependencies = [
     "python-pptx>=1.0",
     # paper-import — PDF text extraction (docx goes through pandoc).
     "pypdf>=4.0",
+    # paper-deck Phase 4 (todo 004 §A) — per-slide PNG render from the
+    # sibling PDF so the agent can run a vision critique on the deck.
+    "pymupdf>=1.24",
 ]
 
 [project.optional-dependencies]

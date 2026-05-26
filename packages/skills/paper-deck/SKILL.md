@@ -349,6 +349,46 @@ h.pull_quote(slide, "Take-home line",
              left=left, top=top, width=w_, height=h_)
 ```
 
+**`p.*` whole-slide pattern catalog** (todo 004 §B) — these are
+*designed compositions*, not primitives. Each pattern bundles a
+designer's compositional decisions (grid placement, type hierarchy,
+whitespace ratios, color use, visual storytelling devices). Pick a
+pattern that fits the slide's *intent*; don't reinvent the layout
+with raw helpers.
+
+| Pattern | Intent / when to use | Content shape |
+|---|---|---|
+| `p.hero_with_trailing_evidence(slide, *, headline, evidence)` | Thesis / takeaway slide. Asymmetric: big headline + evidence column. | `headline: str`, `evidence: list[str]` |
+| `p.chapter_divider(slide, *, chapter_label, summary)` | Section opener (Era I/II/III). Distinct rhythm from interior slides — most space empty. | `chapter_label: str`, `summary: str` |
+| `p.metric_tile_row(slide, *, tiles)` | KPI / quantitative summary. Big numbers across a row. | `tiles: [(value, label)]` or `[(value, label, unit)]` |
+| `p.evidence_stack(slide, *, claim, evidence)` | A claim backed by 2-4 stacked supporting facts with tag-pill labels. | `claim: str`, `evidence: [{tag, body}]` |
+| `p.flow_pipeline(slide, *, steps)` | Process / workflow. Horizontal flow with right-arrows between numbered cards. | `steps: [{tag, body}]` |
+| `p.before_after_split(slide, *, before, after, transition_label="")` | Risk vs mitigation, old vs new. Muted left + vibrant right + arrow between. | `before / after: {title, body}` |
+| `p.contrast_pair(slide, *, left_item, right_item, axis_label="")` | Two competing options framed by an axis. Mirrored panels with pros/cons. | `*_item: {title, pros, cons}` |
+| `p.quadrant_map(slide, *, items, axes)` | Comparative landscape. Items positioned by (x, y) ∈ [0,1]² on labeled axes. | `items: [{label, x, y}]`, `axes: {x, y, x_low?, x_high?}` |
+| `p.numbered_milestone_arc(slide, *, milestones)` | Progressive timeline. Numbered markers along a line; weight saturates toward present. | `milestones: [{tag, note}]` |
+| `p.zoom_in_callout(slide, *, context_image_path, callout, note="")` | Focus on a region of a complex figure. Context image + outlined ROI + zoomed inset. | `context_image_path: str`, `callout: {x, y, w, h}` (0-1 fractions) |
+
+All patterns take the same theme kwargs (`palette`, `fonts`,
+`type_scale`, `sw`, `sh`) as `h.*` helpers.
+
+**Pattern selection — role → recommended pattern**:
+
+| Role | First-pick pattern | Backup |
+|---|---|---|
+| `title` (chapter open) | `chapter_divider` | `hero_with_trailing_evidence` |
+| `outline` | `flow_pipeline` (steps) | `numbered_milestone_arc` |
+| `background` | `evidence_stack` (claim + 2-3 facts) | `metric_tile_row` |
+| `question` | `hero_with_trailing_evidence` (single line + supporting evidence) | `chapter_divider` |
+| `method` | `flow_pipeline` (most natural) | `before_after_split` |
+| `result` | `metric_tile_row` or `evidence_stack` | `zoom_in_callout` (focus on a figure region) |
+| `discussion` | `contrast_pair` or `before_after_split` | `quadrant_map` |
+| `conclusion` | `hero_with_trailing_evidence` (one big take-home + 3 supporting) | `metric_tile_row` |
+| `qa` | `text` mode (acknowledgments) | — |
+
+Pick a different pattern per consecutive slides — visual rhythm
+across the deck matters as much as quality of any single slide.
+
 **Example 1 — title + 4-card grid + take-home quote**:
 
 ```python
@@ -508,6 +548,49 @@ exist).
 Summary: "Deck `{deck_id}` drafted with N slides at status='drafted'.
 Run /paper-deck again to iterate, or wait for Phase 3 rendering to
 turn this into slide images + .pptx."
+
+### 9. Critique pass — vision review of the exported deck (todo 004 §A)
+
+After `export_deck_to_pptx` the result includes a `slide_pngs[]` list:
+one PNG per slide rendered from the sibling PDF (so what the agent
+sees is exactly what an opener of the .pptx / .pdf will see). Use them
+to **score and rewrite weak slides** before declaring the deck done.
+
+```
+res = mcp__co_scientist__export_deck_to_pptx(slug, deck_id)
+for png in res["slide_pngs"]:
+    # Read the PNG via the Read tool — Claude is multimodal and will
+    # see the actual slide rendering.
+    Read(png["local_path"])
+    # Score it (in your head / scratchpad) against the rubric.
+    # If any category < 4, rewrite the slide's `code` and update_slide.
+```
+
+**Rubric** (each scored 1–5; a slide passes when all ≥ 4):
+
+| Category | Question |
+|---|---|
+| Visual hierarchy | Is the focal point obvious within 1 second? |
+| Whitespace | Does the slide breathe, or is it crowded? |
+| Alignment | Are elements on an implicit grid? (no rogue offsets) |
+| Typographic discipline | Type hierarchy clear; ≤ 4 sizes; consistent? |
+| Color discipline | ≤ 3 colors, used semantically? |
+| Visual storytelling | Is there a story device (contrast, progression, arrow), or is it a static composition? |
+
+For each category that scores < 4: write one specific complaint
+("S3's headline is centered, killing the asymmetric tension a thesis
+slide needs") + the fix ("left-align the headline at col=1 span=8,
+leave col=9-12 empty for breathing room"). Then call
+`update_slide(slug, deck_id, slide_id, code=<rewritten snippet>)`.
+
+**Loop**: re-export, re-score, max 3 rounds. After round 3, accept
+the deck as-is and surface the remaining weak categories in the user
+summary so they know what to ask for next.
+
+**When `slide_pngs_skipped` is True**: the export couldn't produce
+PNGs (no LibreOffice / no PyMuPDF on this machine). Skip the critique
+loop and tell the user — they can install soffice + pymupdf to enable
+it.
 
 ## Acceptance test
 
