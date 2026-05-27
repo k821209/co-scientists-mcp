@@ -470,14 +470,67 @@ def render_deck(state: State, slug: str, deck_id: str) -> dict:
 
 
 def _theme_colors(concept: str | None) -> dict[str, str]:
-    """Harvest accent / background / foreground hex colors from the deck
-    concept — the skill writes a `Palette:` block with bg / text / accent."""
+    """Harvest every documented Palette key as hex (todo 007 axis 4).
+    Concept's `Palette:` block exposes 7 named colors; we propagate all
+    of them, computing sensible defaults for any missing keys so the
+    snippet doesn't have to hardcode hex literals when it wants e.g.
+    `palette["muted"]`."""
     kv = _parse_concept(concept)
+    accent = kv.get("accent") or "#2E7D32"
+    background = kv.get("bg") or kv.get("background") or "#FFFFFF"
+    foreground = kv.get("text") or kv.get("foreground") or "#1A1A1A"
+    surface = kv.get("surface") or background
+    # `muted` defaults to a 65/35 blend of foreground+background (a
+    # legible secondary-text gray that adapts to dark/light themes).
+    # `secondary` falls back to a darker accent shift; `highlight` to a
+    # warmer accent shift — both rough heuristics that the agent can
+    # override via the concept's Palette block when precision matters.
+    muted = kv.get("muted") or _blend_hex(foreground, background, 0.45)
+    secondary = kv.get("secondary") or _shift_hex(accent, -0.18)
+    highlight = kv.get("highlight") or _shift_hex(accent, +0.18)
     return {
-        "accent": kv.get("accent") or "#2E7D32",
-        "background": kv.get("bg") or kv.get("background") or "#FFFFFF",
-        "foreground": kv.get("text") or kv.get("foreground") or "#1A1A1A",
+        "accent": accent,
+        "background": background,
+        "foreground": foreground,
+        "surface": surface,
+        "muted": muted,
+        "secondary": secondary,
+        "highlight": highlight,
     }
+
+
+def _hex_to_tuple(hexstr: str) -> tuple[int, int, int]:
+    raw = (hexstr or "").lstrip("#")
+    if len(raw) != 6:
+        raw = "000000"
+    try:
+        return (int(raw[0:2], 16), int(raw[2:4], 16), int(raw[4:6], 16))
+    except ValueError:
+        return (0, 0, 0)
+
+
+def _tuple_to_hex(rgb: tuple[int, int, int]) -> str:
+    r, g, b = (max(0, min(255, int(c))) for c in rgb)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _blend_hex(a: str, b: str, t: float) -> str:
+    """Linear interpolation between two hex colors. t=0 → all a, t=1 → all b."""
+    ar, ag, ab = _hex_to_tuple(a)
+    br, bg, bb = _hex_to_tuple(b)
+    return _tuple_to_hex((
+        ar * (1 - t) + br * t,
+        ag * (1 - t) + bg * t,
+        ab * (1 - t) + bb * t,
+    ))
+
+
+def _shift_hex(hexstr: str, delta: float) -> str:
+    """Shift each channel of a hex color by `delta` (-1..+1) toward
+    white (delta > 0) or black (delta < 0). Cheap accent-variant
+    generator for `secondary`/`highlight` defaults."""
+    target = "#FFFFFF" if delta > 0 else "#000000"
+    return _blend_hex(hexstr, target, abs(delta))
 
 
 def _hex_to_rgb(value: str, fallback: str):
@@ -935,11 +988,34 @@ def _build_code_namespace(slide, row, state, slug, tmpd, *,
     from . import slide_render_helpers as _h
     from . import slide_patterns as _p
 
-    def _image_from_path(path, *, left, top, width, height, fit="contain"):
+    # Image helpers accept slide as the first positional arg for
+    # consistency with every other helper / pattern (todo 007 axis 1).
+    # Calls without slide still work via the closure capture — that
+    # keeps the older `h.image_path("/path", ...)` form running.
+
+    def _peel_slide(args, want_one_after: bool):
+        """Resolve a varargs call shape: (target,) or (slide, target).
+        Returns (target_slide, target). Falls back to the closure-
+        captured `slide` when the caller omitted it."""
+        if len(args) == (2 if want_one_after else 1):
+            target_slide, *rest = args
+            if rest:
+                return target_slide, rest[0]
+            return target_slide, None
+        if len(args) == (1 if want_one_after else 0):
+            return (slide, args[0]) if want_one_after else (slide, None)
+        raise TypeError(
+            "expected (slide, value) or (value,); got "
+            f"{len(args)} positional args"
+        )
+
+    def _image_from_path(*args, left, top, width, height, fit="contain"):
+        _, path = _peel_slide(args, want_one_after=True)
         _place_picture(slide, str(path),
                        left=left, top=top, box_w=width, box_h=height, fit=fit)
 
-    def _image_from_region(region_id, *, left, top, width, height, fit="contain"):
+    def _image_from_region(*args, left, top, width, height, fit="contain"):
+        _, region_id = _peel_slide(args, want_one_after=True)
         region = next(
             (r for r in (row.get("regions") or [])
              if r.get("id") == region_id), None,
@@ -960,7 +1036,8 @@ def _build_code_namespace(slide, row, state, slug, tmpd, *,
         _place_picture(slide, str(tmp),
                        left=left, top=top, box_w=width, box_h=height, fit=fit)
 
-    def _image_from_figure(figure_number, *, left, top, width, height, fit="contain"):
+    def _image_from_figure(*args, left, top, width, height, fit="contain"):
+        _, figure_number = _peel_slide(args, want_one_after=True)
         png = _figure_png(state, slug, int(figure_number))
         tmp = pathlib.Path(tmpd) / f"figure_{figure_number}_{row['id']}.png"
         tmp.write_bytes(png)
@@ -984,6 +1061,8 @@ def _build_code_namespace(slide, row, state, slug, tmpd, *,
         icon_names=_h.icon_names,           # list available icon names
         autofit_pt=_h.autofit_pt,           # Korean-aware text autofit
         estimate_text_width_pt=_h.estimate_text_width_pt,
+        text=_h.text,                       # todo 007 §D — one-call textbox
+        Cell=_h.Cell,                       # Grid.cell() return type
     )
     # Whole-slide patterns (todo 004 §B, 006) — bound as `p`.
     p = SimpleNamespace(
@@ -1033,7 +1112,8 @@ def _build_code_namespace(slide, row, state, slug, tmpd, *,
 
 
 def _add_code_slide(slide, row, state, slug, tmpd, *, sw, sh,
-                    accent, fg, bg, fonts, Inches, Pt, MSO_SHAPE,
+                    accent, fg, bg, fonts, palette_full, Inches, Pt,
+                    MSO_SHAPE,
                     type_scale: dict = _DEFAULT_TYPE_SCALE) -> str | None:
     """Execute the slide's `code` against a prepared namespace.
 
@@ -1043,9 +1123,13 @@ def _add_code_slide(slide, row, state, slug, tmpd, *, sw, sh,
     code = (row.get("code") or "").strip()
     if not code:
         return "no code on slide"
+    # Full 7-key palette as RGBColor objects (todo 007 axis 4).
     palette = {
         "accent": accent, "background": bg, "foreground": fg,
-        "surface": bg,
+        "surface": _hex_to_rgb(palette_full["surface"], "#FFFFFF"),
+        "muted": _hex_to_rgb(palette_full["muted"], "#6C757D"),
+        "secondary": _hex_to_rgb(palette_full["secondary"], "#2E7D32"),
+        "highlight": _hex_to_rgb(palette_full["highlight"], "#FFC107"),
     }
     aspect = "16:9"  # only used as a hint inside the snippet
     ns = _build_code_namespace(
@@ -1183,6 +1267,7 @@ def export_deck_to_pptx(
                 err = _add_code_slide(
                     slide, s, state, slug, tmpd, sw=sw, sh=sh,
                     accent=accent, fg=fg, bg=bg, fonts=fonts,
+                    palette_full=colors,
                     Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE,
                     type_scale=type_scale,
                 )

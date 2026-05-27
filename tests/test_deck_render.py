@@ -172,11 +172,35 @@ def test_render_missing_slide_raises(state):
 
 
 def test_theme_colors_from_concept():
+    """Palette exposes all 7 keys (todo 007 axis 4). Specified keys
+    pass through unchanged; unspecified keys get computed defaults
+    (muted = blend of fg/bg; secondary / highlight = accent shifts)."""
     concept = "Palette:\n  bg: #101010  text: #fafafa  accent: #ff8800"
     c = deck_render._theme_colors(concept)
-    assert c == {
-        "accent": "#ff8800", "background": "#101010", "foreground": "#fafafa",
-    }
+    # Specified keys
+    assert c["accent"] == "#ff8800"
+    assert c["background"] == "#101010"
+    assert c["foreground"] == "#fafafa"
+    # Computed defaults
+    assert c["surface"] == "#101010"   # falls back to background
+    assert "muted" in c and c["muted"] != "#fafafa"
+    assert "secondary" in c
+    assert "highlight" in c
+
+
+def test_theme_colors_explicit_muted_secondary_highlight():
+    """When the concept declares the optional keys, they pass through
+    instead of being computed."""
+    concept = (
+        "Palette:\n  bg: #fff  text: #111  accent: #b58900\n"
+        "  muted: #888  secondary: #226699  highlight: #ee5500\n"
+        "  surface: #fafafa"
+    )
+    c = deck_render._theme_colors(concept)
+    assert c["muted"] == "#888"
+    assert c["secondary"] == "#226699"
+    assert c["highlight"] == "#ee5500"
+    assert c["surface"] == "#fafafa"
 
 
 def test_theme_colors_defaults_when_absent():
@@ -184,6 +208,9 @@ def test_theme_colors_defaults_when_absent():
     assert c["accent"] == "#2E7D32"
     assert c["background"] == "#FFFFFF"
     assert c["foreground"] == "#1A1A1A"
+    # The 4 new keys all defined too (with computed defaults)
+    for k in ("surface", "muted", "secondary", "highlight"):
+        assert k in c, f"missing palette key: {k}"
 
 
 def test_render_slide_text_mode_raises(state):
@@ -1599,6 +1626,141 @@ def test_pattern_title_and_image_grid(state, tmp_path, monkeypatch):
                     if s.has_text_frame)
     for i in range(4):
         assert f"캡션 {i + 1}" in flat
+
+
+# ─── API consistency follow-ups (todo 007) ──────────────────────────────
+
+
+def test_extended_roles_accept_common_deck_vocabulary():
+    """`hook`, `thesis`, `section`, `figure`, `image`, `content` are
+    now accepted alongside the canonical 9 roles (todo 007 #1)."""
+    from co_scientist_local.tools import papers
+    from co_scientist_local.backends.memory import InMemoryBackend
+    from co_scientist_local.state import State
+    state = State(project_id="p", owner_uid="u", backend=InMemoryBackend())
+    papers.create_paper(state, title="x")
+    decks.create_deck(state, "x", title="d", deck_id="d")
+    for r in ("hook", "thesis", "section", "figure", "image", "content"):
+        decks.add_slide(state, "x", "d",
+                        slide_number=hash(r) % 1000 + 1,
+                        role=r, title=r, render_mode="text")
+
+
+def test_grid_cell_returns_cell_namedtuple():
+    """`g.cell(...)` returns a Cell namedtuple — supports tuple-
+    unpacking AND attribute access (todo 007 axis 3)."""
+    from co_scientist_local.tools import slide_render_helpers as srh
+    from pptx.util import Inches
+    g = srh.grid(sw=Inches(13.333), sh=Inches(7.5))
+    cell = g.cell(col=1, span=2, row=1, row_span=1)
+    # Attribute access
+    assert cell.left == g.margin_x
+    assert cell.top == g.margin_top
+    assert cell.width == g.col_w * 2 + g.gutter
+    assert cell.height == g.row_h
+    # Tuple-unpacking still works (back-compat with old tuple form)
+    left, top, w, h = cell
+    assert (left, top, w, h) == (cell.left, cell.top, cell.width, cell.height)
+
+
+def test_h_text_helper_one_call_textbox(state, tmp_path, monkeypatch):
+    """`h.text(slide, text, ...)` is the one-call textbox convenience
+    (todo 007 §D) — drops the add_textbox + text_frame + paragraph +
+    run + font boilerplate to a single call."""
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+
+    slug = _setup(state)
+    decks.update_deck(state, slug, "d", concept="accent: #b58900")
+    decks.add_slide(
+        state, slug, "d", slide_number=1, role="content",
+        title="text helper", notes="n", render_mode="code",
+        code=(
+            "h.text(slide, '소제목',\n"
+            "       left=Inches(0.7), top=Inches(2.0),\n"
+            "       width=Inches(8), height=Inches(0.6),\n"
+            "       palette=palette, size_pt=24, bold=True)\n"
+            "h.text(slide, 'caption — muted',\n"
+            "       left=Inches(0.7), top=Inches(2.7),\n"
+            "       width=Inches(8), height=Inches(0.4),\n"
+            "       palette=palette, size_pt=12,\n"
+            "       color=palette['muted'], italic=True)\n"
+        ),
+    )
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    assert res["code_errors"] == []
+    flat = " ".join(
+        sh.text_frame.text for sh in Presentation(str(out)).slides[0].shapes
+        if sh.has_text_frame
+    )
+    assert "소제목" in flat
+    assert "caption — muted" in flat
+
+
+def test_palette_full_seven_keys_in_code_namespace(state, tmp_path, monkeypatch):
+    """The exec namespace's `palette` exposes all 7 keys (todo 007
+    axis 4) — accent / background / foreground / surface / muted /
+    secondary / highlight. Each is an RGBColor."""
+    pytest.importorskip("pptx")
+    slug = _setup(state)
+    decks.update_deck(state, slug, "d", concept=(
+        "Palette:\n"
+        "  bg: #fff  text: #111  accent: #b58900\n"
+        "  muted: #6c757d  secondary: #226699  highlight: #ee5500\n"
+    ))
+    decks.add_slide(
+        state, slug, "d", slide_number=1, role="content",
+        title="palette test", notes="n", render_mode="code",
+        code=(
+            "from pptx.dml.color import RGBColor\n"
+            "for key in ('accent', 'background', 'foreground', 'surface',\n"
+            "            'muted', 'secondary', 'highlight'):\n"
+            "    assert key in palette, f'missing {key}'\n"
+            "    assert isinstance(palette[key], RGBColor), key\n"
+        ),
+    )
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    assert res["code_errors"] == [], res["code_errors"]
+    assert res["code_slides"] == 1
+
+
+def test_image_figure_accepts_slide_first_positional(state, tmp_path, monkeypatch):
+    """Image helpers accept `slide` as the first positional argument
+    for consistency with every other helper / pattern (todo 007 axis
+    1). The shorter closure form still works for back-compat."""
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    slug = _setup(state)
+    p = tmp_path / "fig.png"
+    p.write_bytes(_PNG_1x1)
+    figures.add_figure(state, slug, figure_number=1, title="F", local_path=str(p))
+    decks.add_slide(
+        state, slug, "d", slide_number=1, role="figure",
+        title="image", notes="n", render_mode="code",
+        code=(
+            # Slide-first form (the consistent one)
+            "h.image_figure(slide, 1, left=Inches(0.5), top=Inches(2),\n"
+            "               width=Inches(5), height=Inches(4))\n"
+            # Closure / back-compat form (no slide)
+            "h.image_figure(1, left=Inches(6), top=Inches(2),\n"
+            "               width=Inches(5), height=Inches(4))\n"
+        ),
+    )
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    assert res["code_errors"] == [], res["code_errors"]
+    pics = [
+        sh for sh in Presentation(str(out)).slides[0].shapes
+        if sh.shape_type == MSO_SHAPE_TYPE.PICTURE
+    ]
+    assert len(pics) == 2  # both forms succeeded
 
 
 # ─── Text autofit (Korean-aware) ─────────────────────────────────────────

@@ -32,10 +32,23 @@ Usage shape inside a slide's `code` field:
 """
 from __future__ import annotations
 
+from typing import NamedTuple
+
 from pptx.util import Inches, Pt  # type: ignore
 from pptx.enum.shapes import MSO_SHAPE  # type: ignore
 from pptx.enum.text import MSO_AUTO_SIZE, MSO_ANCHOR, PP_ALIGN  # type: ignore
 from pptx.dml.color import RGBColor  # type: ignore
+
+
+class Cell(NamedTuple):
+    """Geometry of a grid cell. Tuple-iterates as `(left, top, width,
+    height)` so existing code can unpack it; attribute-accessible as
+    `.left / .top / .width / .height` for modern style (todo 007 axis
+    3). Both forms are first-class."""
+    left: int
+    top: int
+    width: int
+    height: int
 
 
 # Icon vocabulary (todo 004 §C). Each semantic name maps to either an
@@ -326,7 +339,7 @@ class Grid:
         width = self.col_w * span + self.gutter * (span - 1)
         top = self.margin_top + (row - 1) * (self.row_h + self.row_gap)
         height = self.row_h * row_span + self.row_gap * (row_span - 1)
-        return (left, top, width, height)
+        return Cell(left, top, width, height)
 
     def row(self, row: int = 1, row_span: int = 1):
         """Shorthand for `cell(1, span=cols, row=row, row_span=row_span)`
@@ -432,6 +445,49 @@ def title_block(slide, text: str, *, palette, fonts, type_scale, sw, sh,
         rule.fill.fore_color.rgb = palette["accent"]
         rule.shadow.inherit = False
     return box
+
+
+def text(slide, content: str, *, left, top, width, height,
+         palette, size_pt: int = 20, color=None, font_name=None,
+         bold: bool = False, italic: bool = False, align=None,
+         anchor=None, line_spacing: float = 1.22,
+         autofit: bool = True, min_pt: int = 10, fonts=None):
+    """One-call themed textbox (todo 007 §D — DX helper). Drops the
+    5-line `add_textbox + text_frame + paragraph + run + font` ceremony
+    to a single call. Color defaults to `palette["foreground"]`; pass
+    `color=palette["muted"]` for a caption look. Autofit-shrinks to
+    fit the box by default (Korean-aware).
+
+    Returns the textbox shape for further tweaking if needed.
+    """
+    fill = color if color is not None else palette.get("foreground")
+    actual_pt = (
+        autofit_pt(content or "", max_width_emu=width,
+                   max_height_emu=height, start_pt=size_pt,
+                   line_spacing=line_spacing, min_pt=min_pt)
+        if autofit else size_pt
+    )
+    tb = slide.shapes.add_textbox(left, top, width, height)
+    tf = tb.text_frame
+    tf.word_wrap = True
+    _autoshrink(tf)
+    if anchor is not None:
+        tf.vertical_anchor = anchor
+    p = tf.paragraphs[0]
+    p.line_spacing = line_spacing
+    if align is not None:
+        p.alignment = align
+    run = p.add_run()
+    run.text = content or ""
+    run.font.size = Pt(actual_pt)
+    run.font.bold = bold
+    run.font.italic = italic
+    if fill is not None:
+        run.font.color.rgb = fill
+    name = font_name or (fonts or {}).get("body")
+    if name:
+        run.font.name = name
+    return tb
 
 
 def bullet_list(slide, items, *, palette, fonts, type_scale,

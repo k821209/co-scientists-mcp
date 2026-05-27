@@ -47,8 +47,11 @@ from .activity import log_event
 from .papers import _paper_path
 
 _VALID_ROLES = {
+    # canonical roles (paper-deck SKILL §4)
     "title", "outline", "background", "method", "result",
     "discussion", "conclusion", "qa", "custom",
+    # extended vocabulary common in real decks (todo 007 #1)
+    "hook", "thesis", "section", "figure", "image", "content",
 }
 _VALID_RENDER_MODES = {
     "code-shape", "paper-figure", "ai-image", "hybrid", "text", "code",

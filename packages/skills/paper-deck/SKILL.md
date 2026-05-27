@@ -118,6 +118,7 @@ mcp__co_scientist__update_deck(
   concept="""
     Palette:
       bg: #fafaf7  surface: #ffffff  text: #1a1a1a  accent: #b58900
+      muted: #6c757d  secondary: #2e7d32  highlight: #ee5500
     Typography:
       display: Inter Bold     body: Inter Regular     mono: JetBrains Mono
     Type scale:
@@ -324,9 +325,10 @@ focus on actual layout:
 | `h.card(slide, *, left, top, width, height, title, body, palette, fonts, type_scale, accent_top=True)` | — | One titled card: bg + accent stripe + title + body |
 | `h.card_grid(slide, items, *, left, top, width, height, palette, fonts, type_scale, cols=2, gap_pt=12)` | items=list[{title, body}] | N cards in a `cols`-column grid filling a box |
 | `h.pull_quote(slide, text, *, palette, fonts, type_scale, left, top, width, height)` | — | Vertical accent bar + italic body — for a punchline |
-| `h.image_path(path, *, left, top, width, height, fit="contain")` | — | Embed an image from a filesystem path |
-| `h.image_region(region_id, *, left, top, width, height, fit="contain")` | — | Resolve `row.regions[id]` → embed that image |
-| `h.image_figure(figure_number, *, left, top, width, height, fit="contain")` | — | Resolve a paper figure → embed |
+| `h.image_path([slide,] path, *, left, top, width, height, fit="contain")` | slide optional | Embed an image from a filesystem path. `slide` is optional (falls back to the snippet's bound slide); pass it explicitly for consistency with other helpers. |
+| `h.image_region([slide,] region_id, *, left, top, width, height, fit="contain")` | slide optional | Resolve `row.regions[id]` → embed that image. |
+| `h.image_figure([slide,] figure_number, *, left, top, width, height, fit="contain")` | slide optional | Resolve a paper figure → embed. |
+| `h.text(slide, content, *, left, top, width, height, palette, size_pt=20, color=None, font_name=None, bold=False, italic=False, align=None, anchor=None, line_spacing=1.22, autofit=True, min_pt=10, fonts=None)` | one-call textbox | DX helper: drops the 5-line `add_textbox + text_frame + paragraph + run + font` ceremony to a single call. `color` defaults to `palette["foreground"]`; pass `palette["muted"]` for captions, `palette["accent"]` for emphasis. Autofit-shrinks Korean-aware. (todo 007 §D) |
 | `h.grid(*, sw, sh, cols=12, rows=6, gutter=Pt(8), margin_x=Inches(0.6), margin_top=Inches(1.8), margin_bot=Inches(0.6), row_gap=Pt(8), row_h=None)` | — | Build a 12-col × 6-row design grid. Returns a `Grid` with `.cell(col, span, row, row_span)` → `(left, top, width, height)`. (todo 004 §D) |
 | `h.SPACING_UNIT_PT` | constant `8` | 8pt vertical rhythm. Vertical gaps should be `Pt(SPACING_UNIT_PT * N)`. |
 | `h.icon(slide, name, *, left, top, size, palette, color=None, fonts=None)` | name = semantic key | Place a named icon at `(left, top)` with `size×size` bounding box. Native MSO_SHAPE auto-shape when available (`arrow-right`, `lightning`, `database`, `warning`, `decision`, `molecule`, `sun`, `moon`, `gear`, `star`, `heart`, `cloud`, `document`, `brace-*`, …) — recolorable + scalable + editable in PowerPoint. Unicode-glyph fallback for `check`, `x`, `info`, `dna`, `microscope`, `flask`, `chart`, `lock`, etc. Color defaults to `palette["accent"]`. (todo 004 §C) |
@@ -343,6 +345,17 @@ column geometry that auto-aligns everything. The default leaves
 Inches(1.8) at the top for `h.title_block` and Inches(0.6) margins on
 the sides + bottom. Override only when a layout genuinely needs less
 margin (a hero cover slide, for instance).
+
+`g.cell(col=, span=, row=, row_span=)` returns a **Cell** namedtuple —
+unpack as `(left, top, w, h)` OR address as `cell.left / cell.top /
+cell.width / cell.height` (todo 007 axis 3).
+
+**Palette has 7 keys** (todo 007 axis 4) — `accent`, `background`,
+`foreground`, `surface`, `muted`, `secondary`, `highlight`. The
+concept's `Palette:` block can declare any of them; missing keys get
+computed (muted = 45/55 blend of fg+bg; secondary = accent shifted
+toward black; highlight = accent shifted toward white). Use
+`palette["muted"]` for captions instead of hardcoding hex literals.
 
 ```python
 g = h.grid(sw=sw, sh=sh)            # 12 cols × 6 rows by default

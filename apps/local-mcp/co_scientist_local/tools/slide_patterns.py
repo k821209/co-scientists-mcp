@@ -493,15 +493,20 @@ def before_after_split(slide, *, before: dict, after: dict,
     bcard.line.color.rgb = fg_muted
     bcard.line.width = Pt(0.5)
     bcard.shadow.inherit = False
+    # Body must start AFTER the title box ends, not relative to `top`
+    # (todo 007 #10 — the prior math overlapped by ~15pt).
+    title_h = Pt(title_pt * 1.5)
+    title_top = top + Pt(20)
+    body_top_offset = title_top + title_h + Pt(8) - top  # gap = Pt(8)
     _emit_text(slide, before.get("title") or "BEFORE",
-               left=side + Pt(20), top=top + Pt(20),
-               width=panel_w - Pt(40), height=Pt(title_pt * 1.5),
+               left=side + Pt(20), top=title_top,
+               width=panel_w - Pt(40), height=title_h,
                size_pt=title_pt, color=fg_muted,
                font_name=fonts.get("display"), bold=True)
     _emit_text(slide, before.get("body") or "",
-               left=side + Pt(20), top=top + Pt(title_pt * 1.7),
+               left=side + Pt(20), top=top + body_top_offset,
                width=panel_w - Pt(40),
-               height=height - Pt(title_pt * 2),
+               height=height - body_top_offset - Pt(12),
                size_pt=body_pt, color=fg_muted,
                font_name=fonts.get("body"))
 
@@ -539,14 +544,14 @@ def before_after_split(slide, *, before: dict, after: dict,
                  width=panel_w, height=Pt(6),
                  color=palette["accent"])
     _emit_text(slide, after.get("title") or "AFTER",
-               left=aleft + Pt(20), top=top + Pt(20),
-               width=panel_w - Pt(40), height=Pt(title_pt * 1.5),
+               left=aleft + Pt(20), top=title_top,
+               width=panel_w - Pt(40), height=title_h,
                size_pt=title_pt, color=palette["foreground"],
                font_name=fonts.get("display"), bold=True)
     _emit_text(slide, after.get("body") or "",
-               left=aleft + Pt(20), top=top + Pt(title_pt * 1.7),
+               left=aleft + Pt(20), top=top + body_top_offset,
                width=panel_w - Pt(40),
-               height=height - Pt(title_pt * 2),
+               height=height - body_top_offset - Pt(12),
                size_pt=body_pt, color=palette["foreground"],
                font_name=fonts.get("body"))
 
