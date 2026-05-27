@@ -769,6 +769,41 @@ mcp__co_scientist__set_slide_regions(
 - At export each region becomes a **separate, individually editable
   PPTX picture** — the user can nudge them in PowerPoint.
 
+### 5d. Reference corpus — what good renderings look like (todo 004 §F)
+
+The skill ships with a curated corpus of exemplar slides at
+`reference_corpus/` (one PNG per canonical pattern + `manifest.json`).
+Each entry records the pattern name, the content the example uses, and
+a do / don't pair the agent should mirror in its own slides.
+
+**Recommended flow when authoring a `code` slide**:
+
+1. Decide the structural type + intent treatment (§5a quick-ref table).
+2. Read `packages/skills/paper-deck/reference_corpus/manifest.json` to
+   confirm the canonical example exists for your chosen pattern.
+3. Read the matching PNG (`Read("packages/skills/paper-deck/reference_corpus/<pattern>.png")`)
+   — Claude is multimodal, so the agent SEES what a good rendering of
+   that pattern looks like before authoring its own.
+4. Follow the manifest entry's **do**; avoid its **dont**.
+5. Author the `code` snippet against your own content. Run the
+   critique loop (§9) against the result and the reference side-by-
+   side; rewrite if your rendering diverges visually from the
+   exemplar's discipline.
+
+The corpus currently covers 10 patterns: `title_slide`,
+`chapter_divider`, `title_and_body`, `title_two_content`,
+`title_and_image_grid`, `hero_with_trailing_evidence`,
+`metric_tile_row`, `evidence_stack`, `flow_pipeline`, and
+`before_after_split`. Regenerate with:
+
+```bash
+PYTHONPATH=apps/local-mcp python \
+  packages/skills/paper-deck/reference_corpus/generate.py
+```
+
+The corpus is checked in (small PNGs), so the agent has it locally
+without a network round-trip. Each PNG is < 100 KB.
+
 ### 6. Renumber once at the end
 
 After adding all slides:

@@ -2120,3 +2120,31 @@ def test_pattern_zoom_in_callout(state, tmp_path, monkeypatch):
     txt = _slide_text(slide)
     assert "zoom note" in txt
 
+
+# ─── Reference corpus (todo 004 §F) ─────────────────────────────────────
+
+
+def test_reference_corpus_manifest_well_formed():
+    """The shipped corpus manifest lists every pattern with `file`, `do`,
+    and `dont` keys; every referenced file exists on disk."""
+    import json
+    corpus_dir = pathlib.Path(__file__).resolve().parents[1] \
+        / "packages" / "skills" / "paper-deck" / "reference_corpus"
+    manifest_path = corpus_dir / "manifest.json"
+    assert manifest_path.is_file(), "reference corpus manifest missing"
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert "patterns" in data and isinstance(data["patterns"], dict)
+    assert len(data["patterns"]) >= 8, \
+        f"expected 8+ patterns in corpus, got {len(data['patterns'])}"
+    for pattern, entry in data["patterns"].items():
+        assert "file" in entry, f"{pattern}: missing file"
+        assert "do" in entry and entry["do"], f"{pattern}: missing do"
+        assert "dont" in entry and entry["dont"], f"{pattern}: missing dont"
+        png_path = corpus_dir / entry["file"]
+        assert png_path.is_file(), \
+            f"{pattern}: PNG {entry['file']} not on disk"
+        # PNG header check (8 bytes)
+        head = png_path.read_bytes()[:8]
+        assert head == b"\x89PNG\r\n\x1a\n", \
+            f"{pattern}: {entry['file']} isn't a PNG"
+
