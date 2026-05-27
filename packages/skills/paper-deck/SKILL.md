@@ -207,77 +207,67 @@ Standard role sequence, scaled to duration:
 
 Adjust to duration: each slide ≈ 1–2 minutes; 20 min ≈ 12–15 slides.
 
-For each slide, decide the **render_mode**. This decides whether the
-slide's text stays editable in the exported .pptx — choose carefully:
+**Don't commit to render_mode here (todo 010).** Outline is the
+*content-brief* step — each slide gets `role + title + body intent +
+speaker notes`. The design decision (will this be a code snippet?
+a full-bleed figure? a 2-column compare? a Gantt?) is made in **§5
+per slide**, when you've actually thought about the slide's content
+and decided what layout serves it. `render_mode` defaults to None at
+this stage; the exporter / renderer infers it from whichever fields
+end up populated in §5 (regions → hybrid, code with python-pptx
+signals → code, figure_number → paper-figure, prompt → ai-image,
+otherwise → text). Pass an explicit `render_mode` only when you want
+to lock the strategy at outline time (rare).
 
-- `text` — title + plain bullet body rendered as **NATIVE, editable
-  PowerPoint text** (each `body` line → one paragraph, no markdown
-  parsing). Use for any slide that is genuinely just title + a list
-  with no design treatment needed. The reviewer can edit it in
-  PowerPoint and it inherits the deck's fonts / colors.
-- `code` — **YOU author the slide via python-pptx code in `code`**.
-  At export, the snippet runs against a namespace where `slide`,
-  `palette`, `fonts`, `type_scale`, `Pt`, `Inches`, `MSO_SHAPE`, and
-  a `h` helpers namespace are pre-bound. The slide ends up as
-  NATIVE editable shapes — title, accent stripe, cards, bullets,
-  figures — composed exactly the way you wrote them. **This is how
-  you ship designed text slides** (card grids, two-column compares,
-  pull-quote callouts, banner-and-bullets) without baking the slide
-  into a PNG. Examples + the `h.*` catalog: §5a.
-- `paper-figure` — re-use a manuscript figure full-bleed (set `figure_number`).
-- `ai-image` — a generated image: an eyecatch (cover / closing) or an
-  abstract concept slide that is image-led, not text-led.
-- `code-shape` — a single PNG you draw with code, embedded **full-bleed**.
-  ⚠ The WHOLE slide becomes a flat picture — any text in it is baked
-  into the bitmap, NOT editable in the .pptx, and ignores the deck's
-  fonts/theme. Use it **only** for a genuine code-drawn data visual
-  (a real plot / chart). **Never** make a prose- or bullet-heavy slide
-  `code-shape` — for those, the right answer is `code` (native editable
-  shapes), not `code-shape` (baked image).
-- `hybrid` — **title + native body bullets (rendered in the LEFT half)
-  + one or more image regions** (positioned by you, typically on the
-  right). This is the right mode for "title + bullets + a figure /
-  diagram" — the bullets stay editable native text, the figure is an
-  image region. Also for multi-image slides. Set with
-  `set_slide_regions` (see "Multi-image slides"). Don't set this in
-  `add_slide`'s render_mode — let `set_slide_regions` flip it.
+### 5. Design + author each slide (todo 010)
 
-Rule of thumb: **if the slide is mostly words AND needs any visual
-treatment beyond a flat bullet list, it is a `code` slide.** Use `text`
-only when "title + plain bullets, no design" is exactly what you want.
-`code-shape` / `ai-image` are for slides that are fundamentally a picture.
+Now you go slide-by-slide. For each slide:
 
-**Role → recommended render_mode** (start here; adapt only with a reason):
+1. **Read the brief** (role + title + body intent + notes from §4).
+2. **Decide the design** based on the content. The catalog in §5a is a
+   menu — pick the structural type (title-slide / title+body /
+   title+image / title+N-images / hybrid) and the intent treatment
+   (`chapter_divider` / `metric_tile_row` / `flow_pipeline` /
+   `figure_full` / `gantt_chart` / …). If no pattern fits, **go
+   bespoke** — compose with `h.text` / `h.card` / `h.icon` /
+   `h.table` / `slide.shapes.add_shape` (§5a's "patterns are a
+   starting point, not a ceiling" rule).
+3. **Author the slide** by setting the field(s) that fit your design.
+   The render_mode is **inferred** from which fields you populate —
+   don't pass `render_mode` unless you want to lock it explicitly.
 
-| Role         | Default mode    | When to deviate                                 |
-| ------------ | --------------- | ----------------------------------------------- |
-| `title`      | `code` (cover layout) or `ai-image` | `text` for a stripped-down opener |
-| `outline`    | `code` (card grid) or `hybrid` | `text` only for a bare bullet outline |
-| `background` | `code` or `text` | `hybrid` when there's a prior-state schematic |
-| `question`   | `code` (centered big-display) | `text` for a plainer treatment |
-| `method`     | `hybrid`        | Workflow / pipeline diagram on the right        |
-| `result`     | `paper-figure` (full bleed) **or** `hybrid` | `code` for KPI tiles around a figure |
-| `discussion` | `code` (comparative grid) or `hybrid` | `text` if 3 bullets fit |
-| `conclusion` | `code` (take-home card grid) | `text` for plain 3 take-home bullets |
-| `qa`         | `text`          | Acknowledgments + contact, plain                |
+| What you authored                              | Mode inferred at export |
+| ---------------------------------------------- | ----------------------- |
+| `code` with `h.*` / `p.*` / `slide.shapes` etc. | `code`                  |
+| `figure_number`                                | `paper-figure`          |
+| `prompt` (no image yet)                        | `ai-image`              |
+| `regions[]` (via `set_slide_regions`)          | `hybrid`                |
+| `code` looking like an external PNG script     | `code-shape`            |
+| Just `title + body`                            | `text`                  |
 
-**Dense-slide layout patterns** — when the content is heavy, pick the
-layout up-front rather than letting auto-shrink rescue an over-stuffed
-slide (it will, but readability suffers):
+So the simplest add+design loop is:
 
-| Pattern             | When                                            | How                                          |
-| ------------------- | ----------------------------------------------- | -------------------------------------------- |
-| Hero (full-bleed)   | A single decisive figure or eyecatch            | `paper-figure` or `ai-image`, no body        |
-| Banner + bullets    | A take-home one-liner above structured points   | `text` with the H1 used as banner            |
-| 50-50 hybrid        | Title + bullets + one figure on the right       | `hybrid`, one region at `x:0.54 y:0.22 w:0.42 h:0.65` |
-| Quadrant collage    | Two-to-four comparable images, no body          | `hybrid`, regions on a 2×2 grid              |
-| Compact text + caption strip | Lots of small-print explainer + figure | `hybrid`, large image region + thin caption  |
+```python
+# Step 4 produced the brief; Step 5 designs + authors:
+mcp__co_scientist__update_slide(
+  slug, deck_id, slide_id=...,
+  code="""
+    h.accent_stripe(slide, palette=palette, sw=sw)
+    h.title_block(slide, title, palette=palette, fonts=fonts,
+                  type_scale=type_scale, sw=sw, sh=sh)
+    h.deck_chrome(slide, palette=palette, fonts=fonts,
+                  type_scale=type_scale, sw=sw, sh=sh,
+                  eyebrow='HOW · 추진 방법', page_number=5, total=13,
+                  footer='기러기류 마커 발굴 · ㈜디보')
+    p.flow_pipeline(slide, items=[...],
+                    palette=palette, fonts=fonts,
+                    type_scale=type_scale, sw=sw, sh=sh)
+  """,
+)
+# render_mode auto-inferred to "code" — no commitment made at outline time.
+```
 
-If your `text` slide overflows even at default 20pt body, your first
-move is **drop content** (split into two slides, demote one bullet to
-the speaker notes), not lower the type — going below 16pt is a smell.
-
-### 5. Add slides one by one
+`add_slide` itself stays simple:
 
 ```
 mcp__co_scientist__add_slide(
@@ -285,20 +275,15 @@ mcp__co_scientist__add_slide(
   slide_number=N,
   role="<role>",
   title="<slide title>",
-  body="<plain-text body — lines become bullets; not markdown-parsed (§5a)>",
-  prompt="""
-    {accent} accent on the trend line. Display font: {display_font}.
-    Body: clean grid showing X vs Y across 4 conditions.
-  """,
+  body="<content-brief lines — what the slide should say>",
   notes="<MANDATORY speaker notes — what you'll say>",
-  code="<python-pptx snippet (render_mode='code') OR a code-shape author note>",
-  render_mode="code" | "text" | "code-shape" | "paper-figure" | "ai-image" | "hybrid",
-  figure_number=<N>,   # if render_mode == paper-figure
+  # render_mode / code / prompt / figure_number all OPTIONAL —
+  # populate via update_slide once you've decided the design (§5).
 )
 ```
 
-**Prompt template rule**: every prompt MUST start with the unity
-header using placeholders. Example:
+**Prompt template rule**: when you do set `prompt` (for ai-image), it
+MUST start with the unity header using placeholders. Example:
 
 > `"{accent} accent. {display_font} typography. Minimal modern academic
 > theme. Body: …"`

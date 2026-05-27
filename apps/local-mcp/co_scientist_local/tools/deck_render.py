@@ -169,6 +169,64 @@ def _image_dims(data: bytes) -> dict:
     return {"image_width": sz[0], "image_height": sz[1]} if sz else {}
 
 
+# Tokens that signal a `code` field is an in-place python-pptx snippet
+# (renders at export time via _add_code_slide) rather than a `code-shape`
+# external script (produces a PNG path the agent supplies via local_path).
+# Used by `_infer_render_mode` to disambiguate (todo 010).
+_PYPPTX_SNIPPET_SIGNALS = (
+    "slide.shapes", "slide.shapes.add", "h.text", "h.title_block",
+    "h.accent_stripe", "h.bullet_list", "h.card", "h.image_",
+    "h.icon", "h.grid", "h.table", "h.deck_chrome",
+    "p.title_slide", "p.title_and_body", "p.chapter_divider",
+    "p.hero_with_trailing_evidence", "p.evidence_stack",
+    "p.flow_pipeline", "p.metric_tile_row", "p.before_after_split",
+    "p.contrast_pair", "p.quadrant_map", "p.numbered_milestone_arc",
+    "p.zoom_in_callout", "p.figure_full", "p.gantt_chart",
+    "p.title_two_content", "p.title_and_image_grid",
+    "MSO_SHAPE.", "Inches(", "Pt(",
+)
+
+
+def _infer_render_mode(slide: dict) -> str:
+    """Pick a render mode from which fields the agent populated (todo
+    010 — defer the design decision to authoring time). Priority:
+
+      regions[]                    → "hybrid"
+      code has python-pptx signal  → "code"
+      figure_number                → "paper-figure"
+      image_blob_path              → "ai-image" (already-rendered image)
+      prompt (no blob yet)         → "ai-image" (will be generated)
+      code (no python-pptx signal) → "code-shape" (external PNG script)
+      otherwise                    → "text"
+
+    Explicit `render_mode` on the slide always wins — call this only
+    when `slide.get("render_mode")` is None / missing.
+    """
+    if slide.get("regions"):
+        return "hybrid"
+    code = (slide.get("code") or "").strip()
+    if code and any(s in code for s in _PYPPTX_SNIPPET_SIGNALS):
+        return "code"
+    if slide.get("figure_number") is not None:
+        return "paper-figure"
+    if slide.get("image_blob_path"):
+        return "ai-image"
+    if (slide.get("prompt") or "").strip():
+        return "ai-image"
+    if code:
+        return "code-shape"
+    return "text"
+
+
+def _resolve_mode(slide: dict) -> str:
+    """Explicit `render_mode` if set; otherwise infer from populated
+    fields (todo 010)."""
+    explicit = slide.get("render_mode")
+    if explicit:
+        return explicit
+    return _infer_render_mode(slide)
+
+
 def render_slide(
     state: State,
     slug: str,
@@ -190,7 +248,7 @@ def render_slide(
     slide = state.backend.get_doc(_decks._slide_path(state, slug, deck_id, slide_id))
     if slide is None:
         raise NotFound(f"slide not found: {slide_id!r}")
-    mode = slide.get("render_mode", "code-shape")
+    mode = _resolve_mode(slide)
     slide_number = slide.get("slide_number") or 0
 
     if mode == "text":
@@ -392,7 +450,7 @@ def _slide_is_rendered(s: dict) -> bool:
     with regions → every region has an image; code without regions →
     always (materializes natively at export); hybrid → every region has
     an image; else → has image_blob_path."""
-    mode = s.get("render_mode") or "code-shape"
+    mode = _resolve_mode(s)
     if mode == "text":
         return True
     if mode == "code":
@@ -414,7 +472,7 @@ def render_deck(state: State, slug: str, deck_id: str) -> dict:
     slides = _decks.list_slides(state, slug, deck_id)
     results: dict[str, list] = {"rendered": [], "skipped": [], "errors": []}
     for s in slides:
-        mode = s.get("render_mode") or "code-shape"
+        mode = _resolve_mode(s)
         tag = {"slide_id": s["id"], "slide_number": s.get("slide_number")}
         if mode == "text":
             results["skipped"].append({
@@ -1262,7 +1320,7 @@ def export_deck_to_pptx(
     with tempfile.TemporaryDirectory() as tmpd:
         for s in slides:
             slide = prs.slides.add_slide(blank_layout)
-            mode = s.get("render_mode") or "code-shape"
+            mode = _resolve_mode(s)
             if mode == "code":
                 # Agent-authored python-pptx snippet builds the slide
                 # natively (docs/todo/002). On exec failure we degrade

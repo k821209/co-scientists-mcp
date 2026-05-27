@@ -238,11 +238,18 @@ def add_slide(
     prompt: str = "",
     notes: str = "",
     code: str = "",
-    render_mode: str = "code-shape",
+    render_mode: str | None = None,
     figure_number: int | None = None,
 ) -> dict:
     """Append a slide. `slide_number` is the 1-based order. Use
-    `renumber_deck` after bulk add/delete to normalize gaps."""
+    `renumber_deck` after bulk add/delete to normalize gaps.
+
+    `render_mode` is optional (todo 010 — defer the design decision to
+    authoring time). When `None`, the exporter / renderer infers the
+    mode from which fields are populated (regions → hybrid, code with
+    python-pptx signals → code, figure_number → paper-figure, prompt
+    → ai-image, otherwise → text). Pass an explicit mode only when you
+    want to lock the strategy at outline time."""
     _ensure_paper(state, slug)
     if state.backend.get_doc(_deck_path(state, slug, deck_id)) is None:
         raise NotFound(f"deck not found: {deck_id!r} on paper {slug!r}")

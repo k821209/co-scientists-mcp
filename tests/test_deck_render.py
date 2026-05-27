@@ -2237,6 +2237,116 @@ def test_hero_with_trailing_evidence_tight_on_short_content():
         )
 
 
+# ─── Mode inference (todo 010) ──────────────────────────────────────────
+
+
+def test_infer_mode_from_regions():
+    """A slide with regions[] is hybrid, regardless of any other fields."""
+    assert deck_render._infer_render_mode({
+        "regions": [{"id": "r1"}],
+    }) == "hybrid"
+
+
+def test_infer_mode_from_code_pyptx_signals():
+    """`code` field with python-pptx signals → 'code' (snippet runs at
+    export time)."""
+    assert deck_render._infer_render_mode({
+        "code": "h.title_block(slide, ...); p.flow_pipeline(slide, ...)",
+    }) == "code"
+    # Bare slide.shapes.add_* also counts
+    assert deck_render._infer_render_mode({
+        "code": "slide.shapes.add_textbox(Inches(1), Inches(1), ...)",
+    }) == "code"
+
+
+def test_infer_mode_from_code_external_script():
+    """`code` without python-pptx signals → 'code-shape' (external PNG
+    producer)."""
+    assert deck_render._infer_render_mode({
+        "code": "import matplotlib.pyplot as plt; plt.savefig('out.png')",
+    }) == "code-shape"
+
+
+def test_infer_mode_from_figure_number():
+    assert deck_render._infer_render_mode({"figure_number": 3}) == "paper-figure"
+
+
+def test_infer_mode_from_prompt():
+    assert deck_render._infer_render_mode({
+        "prompt": "{accent} schematic of the workflow",
+    }) == "ai-image"
+
+
+def test_infer_mode_from_blob_only():
+    """Already-rendered image (e.g. earlier ai-image run finished) →
+    'ai-image' so the exporter embeds it."""
+    assert deck_render._infer_render_mode({
+        "image_blob_path": "papers/x/decks/d/slides/1.png",
+    }) == "ai-image"
+
+
+def test_infer_mode_default_text():
+    assert deck_render._infer_render_mode({"title": "x"}) == "text"
+    assert deck_render._infer_render_mode({}) == "text"
+
+
+def test_resolve_mode_explicit_wins():
+    """Explicit `render_mode` always trumps inference."""
+    assert deck_render._resolve_mode({
+        "render_mode": "text",
+        "code": "p.flow_pipeline(slide, items=...)",   # would infer 'code'
+    }) == "text"
+
+
+def test_add_slide_without_render_mode(state):
+    """`render_mode` is optional now — `add_slide(...)` w/o the kwarg
+    produces a slide doc where `render_mode` is None and inference
+    picks the right mode at export / render time."""
+    slug = _setup(state)
+    s = decks.add_slide(
+        state, slug, "d", slide_number=1, role="thesis",
+        title="auto-inferred", body="x", notes="n",
+        code="h.title_block(slide, title, palette=palette, fonts=fonts, "
+             "type_scale=type_scale, sw=sw, sh=sh)",
+    )
+    # The slide doc stores render_mode=None — no commit at outline time.
+    assert s.get("render_mode") is None
+    # Inference picks `code` (python-pptx snippet signals present).
+    assert deck_render._resolve_mode(s) == "code"
+
+
+def test_export_with_inferred_mode(state, tmp_path, monkeypatch):
+    """End-to-end: add_slide without render_mode + a code field →
+    export runs the snippet as a `code` slide (mode inferred)."""
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    slug = _setup(state)
+    decks.add_slide(
+        state, slug, "d", slide_number=1, role="content",
+        title="Auto mode", notes="n",
+        code=(
+            "h.accent_stripe(slide, palette=palette, sw=sw)\n"
+            "h.title_block(slide, title, palette=palette, fonts=fonts,\n"
+            "              type_scale=type_scale, sw=sw, sh=sh)\n"
+            "h.text(slide, 'inferred from code field',\n"
+            "       left=Inches(1), top=Inches(2),\n"
+            "       width=Inches(10), height=Inches(1),\n"
+            "       palette=palette, size_pt=24)\n"
+        ),
+        # NOTE: no render_mode passed
+    )
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    assert res["code_errors"] == []
+    assert res["code_slides"] == 1   # ran the code path via inference
+    flat = " ".join(
+        sh.text_frame.text for sh in Presentation(str(out)).slides[0].shapes
+        if sh.has_text_frame
+    )
+    assert "inferred from code field" in flat
+
+
 # ─── Deck chrome + table + gantt (todo 009) ─────────────────────────────
 
 

@@ -26,6 +26,7 @@ reference the commit that shipped it. Currently open:
 - [007 — Pattern + helper API consistency](todo/007_pattern_library_api_consistency.md) (closed 2026-05-27 — Tier 1 palette/h.text/Cell/slide-first/overlap/roles + Tier 2 items canonical + dict shape detection + Tier 3 SKILL quick-reference table)
 - [008 — Figure space + Latin/Hangul + hero short content](todo/008_figure_space_typography_hero_pattern.md) (closed 2026-05-27 — §A figure_full pattern + §B Noto Sans KR doc + §C hero adaptive spacing)
 - [009 — Pattern ceiling, deck chrome, density](todo/009_pattern_ceiling_deck_chrome_density.md) (closed 2026-05-27 — invert SKILL nudge + h.deck_chrome + h.table + p.gantt_chart + dense corpus exemplar; closes capability gap to original co-scientist)
+- [011 — Defer mode decision to authoring time](todo/010_defer_mode_decision_to_authoring.md) (closed 2026-05-28 — `render_mode` optional, inferred from populated fields; SKILL flow has agent design per slide instead of pre-committing at outline)
 
 ### Architecture decisions (ADRs)
 
