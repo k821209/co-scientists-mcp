@@ -176,6 +176,77 @@ def icon_names() -> list[str]:
     return sorted(list(_ICON_SHAPES) + list(_ICON_GLYPHS))
 
 
+# ─── text autofit (todo follow-up — box overlap fix) ─────────────────────
+
+
+def _char_width_factor(cp: int) -> float:
+    """Approximate width of a glyph at font_pt = 1.0, by codepoint
+    range. Hangul / CJK / Kana count as ~1.0 × font_pt (wide); ASCII
+    counts as ~0.55 × font_pt; punctuation / spaces around 0.3–0.4.
+    LibreOffice / PowerPoint render at slightly different widths, so
+    this is a conservative estimate used for autofit only."""
+    if (0x1100 <= cp <= 0x11FF or 0x3130 <= cp <= 0x318F
+            or 0xAC00 <= cp <= 0xD7AF):
+        return 1.0   # Hangul Jamo / Compatibility Jamo / Syllables
+    if (0x4E00 <= cp <= 0x9FFF or 0x3040 <= cp <= 0x309F
+            or 0x30A0 <= cp <= 0x30FF):
+        return 1.0   # CJK Unified / Hiragana / Katakana
+    if cp >= 0x2000 and cp < 0x3000:
+        return 0.4   # general punctuation block
+    if cp < 128:
+        if cp == 32:
+            return 0.3
+        ch = chr(cp)
+        if ch.isalnum() or ch in "._/-+":
+            return 0.55
+        return 0.4
+    return 0.6
+
+
+def estimate_text_width_pt(text: str, font_pt: int) -> float:
+    """Rough width-in-pt for `text` rendered at `font_pt`. Sums per-
+    character width factors; Korean-aware so Korean-heavy text doesn't
+    fool the autofit into thinking it'll fit."""
+    return sum(_char_width_factor(ord(c)) * font_pt for c in text)
+
+
+def autofit_pt(text: str, *, max_width_emu, max_height_emu, start_pt: int,
+                line_spacing: float = 1.22, min_pt: int = 10) -> int:
+    """Largest pt in [min_pt, start_pt] at which `text` fits inside an
+    EMU-sized box, conservatively wrapping per estimated character
+    width. Falls back to `min_pt` if even that doesn't fit (caller's
+    job to handle over-min overflow).
+
+    The autofit happens BEFORE python-pptx runs, so the rendered PNG
+    (via soffice — which doesn't fully honor TEXT_TO_SHAPE auto-shrink)
+    matches what the user will see. PowerPoint's own renderer will
+    still auto-shrink further if needed.
+    """
+    if not text or not text.strip():
+        return start_pt
+    width_pt = max(1, max_width_emu / 12700)
+    height_pt = max(1, max_height_emu / 12700)
+    lines_raw = [ln for ln in text.splitlines() if ln.strip()]
+    if not lines_raw:
+        return start_pt
+
+    def line_count_at(pt: int) -> int:
+        total = 0
+        for ln in lines_raw:
+            w = estimate_text_width_pt(ln, pt)
+            # Ceiling of w / width_pt, min 1 line
+            wraps = max(1, int((w + width_pt - 1) // width_pt))
+            total += wraps
+        return total
+
+    pt = start_pt
+    while pt > min_pt:
+        if line_count_at(pt) * pt * line_spacing <= height_pt:
+            return pt
+        pt -= 1
+    return min_pt
+
+
 
 
 
@@ -366,23 +437,31 @@ def title_block(slide, text: str, *, palette, fonts, type_scale, sw, sh,
 def bullet_list(slide, items, *, palette, fonts, type_scale,
                 left, top, width, height, bullet: str = "•"):
     """A vertical bulleted list. `items` is a list of strings; each
-    becomes one paragraph at the deck's body type. Pass bullet="" for
-    a plain paragraph list."""
+    becomes one paragraph at the deck's body type (autofit-shrunk if
+    the items don't fit at the start size). Pass bullet="" for a
+    plain paragraph list."""
     box = slide.shapes.add_textbox(left, top, width, height)
     tf = box.text_frame
     tf.word_wrap = True
     _autoshrink(tf)
     body_pt = type_scale.get("body", 20)
     line_spacing = type_scale.get("line_spacing", 1.22)
+    rendered = [(f"{bullet} {it}" if bullet else str(it)) for it in items]
+    actual_pt = autofit_pt(
+        "\n".join(rendered),
+        max_width_emu=width, max_height_emu=height,
+        start_pt=body_pt, line_spacing=line_spacing,
+        min_pt=max(10, body_pt - 8),
+    )
     first = True
-    for item in items:
+    for line in rendered:
         para = tf.paragraphs[0] if first else tf.add_paragraph()
         first = False
         para.line_spacing = line_spacing
         para.space_after = Pt(4)
         run = para.add_run()
-        run.text = f"{bullet} {item}" if bullet else str(item)
-        run.font.size = Pt(body_pt)
+        run.text = line
+        run.font.size = Pt(actual_pt)
         run.font.color.rgb = palette["foreground"]
         if fonts.get("body"):
             run.font.name = fonts["body"]

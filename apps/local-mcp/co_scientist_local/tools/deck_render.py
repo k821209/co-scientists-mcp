@@ -199,10 +199,15 @@ def render_slide(
             "text on export; nothing to render here"
         )
     if mode == "code":
+        # Code slide with regions = image-placeholder layout. Render
+        # the regions same as hybrid. Code without regions has nothing
+        # to materialize ahead of export.
+        if slide.get("regions"):
+            return _render_hybrid_slide(state, slug, deck_id, slide, deck)
         raise ValueError(
-            "code slides carry no image — the `code` field runs at "
-            "PPTX export time and populates the slide natively; "
-            "nothing to render here"
+            "code slide has no regions — its `code` runs at PPTX export "
+            "time and populates the slide natively. To pre-render image "
+            "placeholders, call set_slide_regions on this slide first."
         )
     if mode == "hybrid":
         return _render_hybrid_slide(state, slug, deck_id, slide, deck)
@@ -383,12 +388,19 @@ def render_region(
 
 
 def _slide_is_rendered(s: dict) -> bool:
-    """A slide is 'done' when its image(s) exist: text + code → always
-    (they materialize natively at export time); hybrid → every region
-    has an image; else → has image_blob_path."""
+    """A slide is 'done' when its image(s) exist: text → always; code
+    with regions → every region has an image; code without regions →
+    always (materializes natively at export); hybrid → every region has
+    an image; else → has image_blob_path."""
     mode = s.get("render_mode") or "code-shape"
-    if mode in ("text", "code"):
+    if mode == "text":
         return True
+    if mode == "code":
+        regions = s.get("regions") or []
+        # No regions → nothing to pre-render. With regions → every
+        # placeholder needs an image before export so h.image_region
+        # resolves.
+        return all(r.get("image_blob_path") for r in regions)
     if mode == "hybrid":
         regions = s.get("regions") or []
         return bool(regions) and all(r.get("image_blob_path") for r in regions)
@@ -410,9 +422,24 @@ def render_deck(state: State, slug: str, deck_id: str) -> dict:
             })
             continue
         if mode == "code":
-            results["skipped"].append({
-                **tag, "reason": "code slide — runs at PPTX export time",
-            })
+            # Code slide may carry image placeholders (regions[]) the
+            # snippet will pull in via h.image_region(). Render those
+            # regions ahead of export. No regions → nothing to do.
+            if s.get("regions"):
+                try:
+                    hr = _render_hybrid_slide(
+                        state, slug, deck_id, s,
+                        _decks.get_deck(state, slug, deck_id),
+                    )
+                    results["rendered"].extend(hr["rendered"])
+                    results["skipped"].extend(hr["skipped"])
+                    results["errors"].extend(hr["errors"])
+                except Exception as e:
+                    results["errors"].append({**tag, "error": str(e)})
+            else:
+                results["skipped"].append({
+                    **tag, "reason": "code slide — runs at PPTX export time",
+                })
             continue
         if mode == "code-shape":
             results["skipped"].append({
@@ -657,15 +684,26 @@ def _render_simple_body(slide, body: str, *, box, fg, fonts, Pt,
                         body_pt: int = _BODY_PT,
                         line_spacing: float = _LINE_SPACING) -> None:
     """Plain-text body. Each non-empty line becomes one paragraph at
-    `body_pt`, with any leading bullet/star marker stripped. **No
-    markdown parsing.** Markdown's grammar is too thin to drive slide
-    design; per docs/todo/002 the slide's visual treatment belongs in
-    its `code` field (a python-pptx render function the agent writes),
-    not in a renderer that guesses layout from `**bold**` / `> quote` /
-    `- **Tag**: text` patterns. Keep `body` as informational text —
-    what the slide *says* — and let the agent compose the slide
-    natively when it needs anything beyond plain bullets."""
+    `body_pt` (Korean-aware autofit may shrink further to fit the box),
+    with any leading bullet/star marker stripped. **No markdown
+    parsing** — see docs/todo/002."""
+    from . import slide_render_helpers as _h
     left, top, w, h = box
+    # Strip leading markers and gather lines so the autofit calc sees
+    # the same text that ends up rendered.
+    lines = [raw.strip().lstrip("-•*").lstrip()
+             for raw in body.splitlines() if raw.strip()]
+    if not lines:
+        return
+    # Autofit considers the entire body's wrap + line count, then sets
+    # one font size for every paragraph in the textbox so the rhythm
+    # stays even.
+    actual_pt = _h.autofit_pt(
+        "\n".join(lines),
+        max_width_emu=w, max_height_emu=h,
+        start_pt=body_pt, line_spacing=line_spacing,
+        min_pt=max(10, body_pt - 8),
+    )
     tb = slide.shapes.add_textbox(left, top, w, h)
     tf = tb.text_frame
     tf.word_wrap = True
@@ -675,18 +713,13 @@ def _render_simple_body(slide, body: str, *, box, fg, fonts, Pt,
     except Exception:
         pass
     first = True
-    for raw in body.splitlines():
-        if not raw.strip():
-            continue
+    for ln in lines:
         para = tf.paragraphs[0] if first else tf.add_paragraph()
         first = False
         para.line_spacing = line_spacing
         run = para.add_run()
-        # Strip leading bullet markers (-, *, •) and surrounding whitespace
-        # so the input `- foo` and `foo` both render the same way; original
-        # co-scientist's compile_deck does the same in its text fallback.
-        run.text = raw.strip().lstrip("-•*").lstrip()
-        run.font.size = Pt(body_pt)
+        run.text = ln
+        run.font.size = Pt(actual_pt)
         run.font.color.rgb = fg
         if fonts.get("body"):
             run.font.name = fonts["body"]
@@ -949,6 +982,8 @@ def _build_code_namespace(slide, row, state, slug, tmpd, *,
         SPACING_UNIT_PT=_h.SPACING_UNIT_PT,  # 8pt vertical rhythm
         icon=_h.icon,                       # todo 004 §C — iconography
         icon_names=_h.icon_names,           # list available icon names
+        autofit_pt=_h.autofit_pt,           # Korean-aware text autofit
+        estimate_text_width_pt=_h.estimate_text_width_pt,
     )
     # Whole-slide patterns (todo 004 §B, 006) — bound as `p`.
     p = SimpleNamespace(

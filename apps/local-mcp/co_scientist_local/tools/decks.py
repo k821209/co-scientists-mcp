@@ -364,10 +364,17 @@ def set_slide_regions(
     *,
     regions: list[dict],
 ) -> dict:
-    """Define the multi-image region layout for a slide. Forces the slide's
-    render_mode to 'hybrid'. Each region is one positioned image with its
-    own render_mode (ai-image / code-shape / paper-figure); x/y/w/h are
-    fractions (0..1) of the slide so the layout is aspect-independent.
+    """Define the multi-image region layout for a slide. Each region is
+    one positioned image with its own render_mode (ai-image / code-shape
+    / paper-figure); x/y/w/h are fractions (0..1) of the slide so the
+    layout is aspect-independent.
+
+    Forces the slide's render_mode to 'hybrid', EXCEPT when the slide
+    is already in 'code' mode — in that case regions act as image
+    placeholders the slide's `code` snippet references via
+    `h.image_region(region_id, ...)`. This lets the agent plan a
+    slide's images up-front (regions = placeholders), have them
+    rendered separately, and embed them by id at compose time.
 
     Replaces any existing regions. A region whose *source* (render_mode +
     figure_number / prompt / code) is unchanged keeps its rendered image,
@@ -403,9 +410,12 @@ def set_slide_regions(
         reg["rendered_at"] = old.get("rendered_at") if old else None
         normalized.append(reg)
 
+    # Preserve `code` mode (image placeholder use); everything else
+    # snaps to `hybrid` (the historical default).
+    new_mode = "code" if cur.get("render_mode") == "code" else "hybrid"
     state.backend.update_doc(path, {
         "regions": normalized,
-        "render_mode": "hybrid",
+        "render_mode": new_mode,
         "updated_at": now_iso(),
     })
     return state.backend.get_doc(path)

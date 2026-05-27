@@ -331,6 +331,8 @@ focus on actual layout:
 | `h.SPACING_UNIT_PT` | constant `8` | 8pt vertical rhythm. Vertical gaps should be `Pt(SPACING_UNIT_PT * N)`. |
 | `h.icon(slide, name, *, left, top, size, palette, color=None, fonts=None)` | name = semantic key | Place a named icon at `(left, top)` with `size×size` bounding box. Native MSO_SHAPE auto-shape when available (`arrow-right`, `lightning`, `database`, `warning`, `decision`, `molecule`, `sun`, `moon`, `gear`, `star`, `heart`, `cloud`, `document`, `brace-*`, …) — recolorable + scalable + editable in PowerPoint. Unicode-glyph fallback for `check`, `x`, `info`, `dna`, `microscope`, `flask`, `chart`, `lock`, etc. Color defaults to `palette["accent"]`. (todo 004 §C) |
 | `h.icon_names()` | — | Sorted list of every icon name `h.icon()` accepts. Call at runtime when the agent needs to pick one. |
+| `h.autofit_pt(text, *, max_width_emu, max_height_emu, start_pt, line_spacing=1.22, min_pt=10)` | Korean-aware | Largest pt in `[min_pt, start_pt]` at which `text` fits inside an EMU-sized box. Used internally by `_emit_text` / `bullet_list` / `_render_simple_body` so every text region auto-shrinks pre-export (soffice doesn't fully honor PowerPoint's TEXT_TO_SHAPE autoshrink — without this, dense Korean text overflowed into adjacent boxes). Call directly if you build a custom textbox. |
+| `h.estimate_text_width_pt(text, font_pt)` | — | Rough pt-width estimate, summed per-char (Korean / CJK ≈ 1.0 × font_pt, ASCII alnum ≈ 0.55, space ≈ 0.3). |
 
 All Keynote-safe (RGBA → RGB JPEG ≤ 1920px normalization happens inside
 the image helpers).
@@ -498,6 +500,31 @@ need. Drop to raw `slide.shapes.add_textbox(...)` only when no helper
 fits. Keep snippets **declarative** (helper calls + a few coordinates),
 not procedural (don't write loops that compute positions when
 `card_grid(cols=N)` already does).
+
+**Image placeholder workflow for code slides.** When a `code` slide
+needs images (a paper figure, an AI-generated diagram, a code-shape
+PNG), **declare them as regions[] up front** instead of hardcoding
+paths. The agent's workflow:
+
+1. `add_slide(..., render_mode="code", code="""…h.image_region('r1', left=…, top=…, width=…, height=…)…""")`
+2. `set_slide_regions(slug, deck_id, slide_id, regions=[{"render_mode": "ai-image", "prompt": "…", "x": 0.54, "y": 0.30, "w": 0.42, "h": 0.55}, …])`
+3. `render_deck(slug, deck_id)` — `render_mode="code"` slides with regions are now rendered the same way as hybrid (each region's image is materialized).
+4. `export_deck_to_pptx(slug, deck_id)` — the snippet's `h.image_region(id, …)` call resolves to the rendered blob and embeds it.
+
+This separates **layout decision** (in the code) from **image
+generation** (in regions[]). Theme / palette changes don't trigger
+re-generation; re-positioning a region doesn't either. Set
+`render_mode="code"` BEFORE calling `set_slide_regions` to keep the
+mode (otherwise it snaps to `hybrid` for backwards compatibility).
+
+**Box overlap won't happen** — every text emitter in `h.*` and every
+`_emit_text` inside `p.*` calls `h.autofit_pt` to shrink the font
+before rendering when content would overflow. PowerPoint's
+TEXT_TO_SHAPE autoshrink kicks in on top of this; soffice (our
+preview pipeline) doesn't fully honor that, so the autofit ensures
+the PNG matches the slide. The minimum fall-back is ~12pt for body,
+~16pt for headings — if you see autofit hitting min, the right fix
+is to **drop content**, not to expand the box.
 
 ### 5c. Compositional effects — why arrangement matters (todo 006)
 

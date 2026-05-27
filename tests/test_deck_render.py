@@ -732,12 +732,77 @@ def test_render_deck_skips_code_slides(state):
         "code slide — runs at PPTX export time"
 
 
-def test_render_slide_code_mode_raises(state):
+def test_render_slide_code_mode_without_regions_raises(state):
+    """A code slide with no regions has nothing to pre-render — render_
+    slide raises so the caller knows the `code` runs at export time."""
     slug = _setup(state)
     s = decks.add_slide(state, slug, "d", slide_number=1, role="discussion",
                         title="t", code="pass", render_mode="code")
-    with pytest.raises(ValueError, match="code slides"):
+    with pytest.raises(ValueError, match="code slide has no regions"):
         deck_render.render_slide(state, slug, "d", s["id"])
+
+
+def test_set_slide_regions_preserves_code_mode(state, tmp_path):
+    """`set_slide_regions` on a code-mode slide keeps it in code mode
+    (regions act as image placeholders for the snippet); on every other
+    mode it still snaps to hybrid (legacy behavior). (todo 004 follow-
+    up — image placeholder strategy.)"""
+    slug = _setup(state)
+    # Stage a figure for paper-figure regions
+    p = tmp_path / "fig.png"
+    p.write_bytes(_PNG_1x1)
+    figures.add_figure(state, slug, figure_number=1, title="F", local_path=str(p))
+
+    # Code-mode slide → set_slide_regions keeps it in code
+    code_slide = decks.add_slide(
+        state, slug, "d", slide_number=1, role="result", title="Code",
+        notes="n", render_mode="code",
+        code="h.image_region('r1', left=Inches(1), top=Inches(2), "
+             "width=Inches(6), height=Inches(4))",
+    )
+    decks.set_slide_regions(state, slug, "d", code_slide["id"], regions=[
+        {"render_mode": "paper-figure", "figure_number": 1,
+         "x": 0.1, "y": 0.25, "w": 0.5, "h": 0.5},
+    ])
+    refreshed = decks.list_slides(state, slug, "d")[0]
+    assert refreshed["render_mode"] == "code"
+    assert len(refreshed["regions"]) == 1
+
+    # Text-mode slide → set_slide_regions snaps to hybrid (back-compat)
+    text_slide = decks.add_slide(
+        state, slug, "d", slide_number=2, role="result", title="Text",
+        notes="n", render_mode="text",
+    )
+    decks.set_slide_regions(state, slug, "d", text_slide["id"], regions=[
+        {"render_mode": "paper-figure", "figure_number": 1,
+         "x": 0.1, "y": 0.25, "w": 0.5, "h": 0.5},
+    ])
+    refreshed = decks.list_slides(state, slug, "d")[1]
+    assert refreshed["render_mode"] == "hybrid"
+
+
+def test_render_slide_code_mode_with_regions_renders_them(state, tmp_path):
+    """render_slide on a code slide with regions = same path as a
+    hybrid slide: each region's image is materialized so h.image_region
+    can pick it up at export."""
+    slug = _setup(state)
+    p = tmp_path / "fig.png"
+    p.write_bytes(_PNG_1x1)
+    figures.add_figure(state, slug, figure_number=1, title="F", local_path=str(p))
+    s = decks.add_slide(
+        state, slug, "d", slide_number=1, role="result", title="Code+regions",
+        notes="n", render_mode="code", code="pass",
+    )
+    decks.set_slide_regions(state, slug, "d", s["id"], regions=[
+        {"render_mode": "paper-figure", "figure_number": 1,
+         "x": 0.1, "y": 0.25, "w": 0.5, "h": 0.5},
+    ])
+    result = deck_render.render_slide(state, slug, "d", s["id"])
+    assert result["mode"] == "hybrid"   # routed through hybrid renderer
+    assert len(result["rendered"]) == 1
+    # Region got its image
+    refreshed = decks.list_slides(state, slug, "d")[0]
+    assert refreshed["regions"][0]["image_blob_path"]
 
 
 def test_render_deck_all_code_marks_rendered(state):
@@ -1534,6 +1599,73 @@ def test_pattern_title_and_image_grid(state, tmp_path, monkeypatch):
                     if s.has_text_frame)
     for i in range(4):
         assert f"캡션 {i + 1}" in flat
+
+
+# ─── Text autofit (Korean-aware) ─────────────────────────────────────────
+
+
+def test_estimate_text_width_pt_korean_wider_than_ascii():
+    """Korean chars take ~1.0 × font_pt; ASCII letters ~0.55 × font_pt
+    — so the same character count of Korean is much wider than ASCII."""
+    from co_scientist_local.tools import slide_render_helpers as srh
+    en = srh.estimate_text_width_pt("hello world", font_pt=20)
+    ko = srh.estimate_text_width_pt("안녕하세요세상", font_pt=20)
+    # Korean (7 chars wide) should be visibly wider than English
+    # (11 chars but mostly narrow letters)
+    assert ko > en
+    # And ~20pt × 7 chars ≈ 140pt
+    assert 100 < ko < 200
+
+
+def test_autofit_pt_shrinks_when_text_overflows():
+    """A long Korean paragraph in a narrow short box → autofit returns
+    a font size smaller than start_pt."""
+    from co_scientist_local.tools import slide_render_helpers as srh
+    from pptx.util import Inches as _I
+    text = "한국어 텍스트가 길어서 박스 안에 한 줄로 들어갈 수 없는 경우 " * 3
+    fit = srh.autofit_pt(
+        text,
+        max_width_emu=_I(3), max_height_emu=_I(1),
+        start_pt=24, line_spacing=1.22, min_pt=10,
+    )
+    assert fit < 24, "autofit should have shrunk; got the start size back"
+    assert fit >= 10
+
+
+def test_autofit_pt_keeps_start_size_when_text_fits():
+    """Short text in a big box → autofit returns start_pt unchanged."""
+    from co_scientist_local.tools import slide_render_helpers as srh
+    from pptx.util import Inches as _I
+    fit = srh.autofit_pt(
+        "Hi", max_width_emu=_I(10), max_height_emu=_I(4),
+        start_pt=20, line_spacing=1.22, min_pt=10,
+    )
+    assert fit == 20
+
+
+def test_autofit_exposed_on_helpers_namespace(state, tmp_path, monkeypatch):
+    """The exec namespace exposes h.autofit_pt so slide code can autofit
+    its own custom text emits."""
+    pytest.importorskip("pptx")
+    slug = _setup(state)
+    decks.add_slide(
+        state, slug, "d", slide_number=1, role="background",
+        title="autofit hook", notes="n", render_mode="code",
+        code=(
+            "assert h.autofit_pt('abc', max_width_emu=Inches(5),\n"
+            "                    max_height_emu=Inches(2), start_pt=24) == 24\n"
+            "# Long Korean text in a narrow box must shrink\n"
+            "fit = h.autofit_pt('한국어 텍스트 ' * 30,\n"
+            "                   max_width_emu=Inches(3), max_height_emu=Inches(1),\n"
+            "                   start_pt=24, min_pt=10)\n"
+            "assert 10 <= fit < 24, f'expected shrunk size, got {fit}'\n"
+        ),
+    )
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    assert res["code_errors"] == [], res["code_errors"]
+    assert res["code_slides"] == 1
 
 
 # ─── Iconography (todo 004 §C) ──────────────────────────────────────────

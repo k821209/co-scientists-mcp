@@ -68,8 +68,23 @@ def _muted(fg) -> RGBColor:
 def _emit_text(slide, text, *, left, top, width, height,
                size_pt: int, color, font_name=None, bold: bool = False,
                italic: bool = False, align=None, anchor=None,
-               line_spacing: float = 1.2):
-    """Add a textbox with a single styled run. Returns the textbox."""
+               line_spacing: float = 1.2, autofit: bool = True,
+               min_pt: int = 10):
+    """Add a textbox with a single styled run.
+
+    Autofits the font size to the box BEFORE rendering (Korean-aware
+    width estimate) so the PNG preview matches the slide — soffice
+    doesn't fully honor TEXT_TO_SHAPE auto-shrink, so we shrink up-
+    front. Pass `autofit=False` to opt out (e.g. when the caller wants
+    a guaranteed font size for visual hierarchy).
+    """
+    actual_pt = (
+        _h.autofit_pt(text or "", max_width_emu=width,
+                      max_height_emu=height,
+                      start_pt=size_pt, line_spacing=line_spacing,
+                      min_pt=min_pt)
+        if autofit else size_pt
+    )
     tb = slide.shapes.add_textbox(left, top, width, height)
     tf = tb.text_frame
     tf.word_wrap = True
@@ -82,7 +97,7 @@ def _emit_text(slide, text, *, left, top, width, height,
         p.alignment = align
     run = p.add_run()
     run.text = text or ""
-    run.font.size = Pt(size_pt)
+    run.font.size = Pt(actual_pt)
     run.font.bold = bold
     run.font.italic = italic
     run.font.color.rgb = color
