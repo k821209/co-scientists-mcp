@@ -35,6 +35,148 @@ from __future__ import annotations
 from pptx.util import Inches, Pt  # type: ignore
 from pptx.enum.shapes import MSO_SHAPE  # type: ignore
 from pptx.enum.text import MSO_AUTO_SIZE, MSO_ANCHOR, PP_ALIGN  # type: ignore
+from pptx.dml.color import RGBColor  # type: ignore
+
+
+# Icon vocabulary (todo 004 §C). Each semantic name maps to either an
+# MSO_SHAPE built-in (preferred — native PowerPoint shape, fully
+# recolorable + editable + scalable) or a fallback Unicode glyph
+# rendered in a textbox. The agent calls `h.icon(slide, name, ...)`
+# with one of these names; unknown names raise.
+_ICON_SHAPES = {
+    # Direction / flow
+    "arrow-right":   MSO_SHAPE.RIGHT_ARROW,
+    "arrow-left":    MSO_SHAPE.LEFT_ARROW,
+    "arrow-up":      MSO_SHAPE.UP_ARROW,
+    "arrow-down":    MSO_SHAPE.DOWN_ARROW,
+    "arrow-both":    MSO_SHAPE.LEFT_RIGHT_ARROW,
+    "arrow-vert":    MSO_SHAPE.UP_DOWN_ARROW,
+    "arrow-quad":    MSO_SHAPE.QUAD_ARROW,
+    "arrow-curve":   MSO_SHAPE.CURVED_RIGHT_ARROW,
+    "arrow-loop":    MSO_SHAPE.CIRCULAR_ARROW,
+    "chevron":       MSO_SHAPE.CHEVRON,
+    # Status / emphasis
+    "lightning":     MSO_SHAPE.LIGHTNING_BOLT,
+    "burst":         MSO_SHAPE.EXPLOSION1,
+    "burst-big":     MSO_SHAPE.EXPLOSION2,
+    "star":          MSO_SHAPE.STAR_5_POINT,
+    "heart":         MSO_SHAPE.HEART,
+    "plus":          MSO_SHAPE.MATH_PLUS,
+    "minus":         MSO_SHAPE.MATH_MINUS,
+    "warning":       MSO_SHAPE.ISOSCELES_TRIANGLE,
+    # Data / storage
+    "database":      MSO_SHAPE.CAN,
+    "cloud":         MSO_SHAPE.CLOUD,
+    "document":      MSO_SHAPE.FOLDED_CORNER,
+    # Process / decision
+    "decision":      MSO_SHAPE.DIAMOND,
+    "molecule":      MSO_SHAPE.HEXAGON,
+    "stop":          MSO_SHAPE.OCTAGON,
+    "input":         MSO_SHAPE.PARALLELOGRAM,
+    "gear":          MSO_SHAPE.GEAR_6,
+    # Time / mode
+    "sun":           MSO_SHAPE.SUN,
+    "moon":          MSO_SHAPE.MOON,
+    # Generic geometry
+    "circle":        MSO_SHAPE.OVAL,
+    "square":        MSO_SHAPE.RECTANGLE,
+    "rounded":       MSO_SHAPE.ROUNDED_RECTANGLE,
+    "ring":          MSO_SHAPE.DONUT,
+    # Annotation / brackets
+    "brace-left":    MSO_SHAPE.LEFT_BRACE,
+    "brace-right":   MSO_SHAPE.RIGHT_BRACE,
+    "brace-pair":    MSO_SHAPE.DOUBLE_BRACE,
+}
+
+# Unicode-glyph fallbacks for things python-pptx doesn't ship as a
+# native shape (check, x, info, …). Rendered as text inside a textbox
+# — still recolorable and scalable.
+_ICON_GLYPHS = {
+    "check":         "✓",   # ✓
+    "x":             "✗",   # ✗
+    "info":          "ⓘ",   # ⓘ
+    "question":      "?",
+    "exclaim":       "!",
+    "dot":           "●",   # ●
+    "open-dot":      "○",   # ○
+    "diamond-glyph": "◆",   # ◆
+    "asterisk":      "✱",   # ✱
+    "skull":         "☠",   # ☠
+    "atom":          "⚛",   # ⚛
+    "leaf":          "⚘",   # ⚘
+    "flask":         "⚚",   # ⚚
+    "dna":           "\U0001F9EC",   # 🧬
+    "microscope":    "\U0001F52C",   # 🔬
+    "chart":         "\U0001F4C8",   # 📈
+    "lock":          "\U0001F512",   # 🔒
+}
+
+
+def icon(slide, name: str, *, left, top, size, palette,
+         color=None, fonts=None):
+    """Place a named icon at `(left, top)` with `size × size` bounding
+    box (todo 004 §C). The vocabulary maps semantic names to MSO_SHAPE
+    built-ins (preferred — native, recolorable, editable, scalable) or
+    a Unicode-glyph fallback rendered in a textbox.
+
+    color: defaults to `palette["accent"]`. Pass an RGBColor to override.
+
+    Available shape names: see _ICON_SHAPES keys (`arrow-*`, `chevron`,
+    `lightning`, `burst`, `star`, `heart`, `plus`, `minus`, `warning`,
+    `database`, `cloud`, `document`, `decision`, `molecule`, `stop`,
+    `input`, `gear`, `sun`, `moon`, `circle`, `square`, `rounded`,
+    `ring`, `brace-*`).
+
+    Glyph fallback names (textbox-rendered): `check`, `x`, `info`,
+    `question`, `exclaim`, `dot`, `open-dot`, `diamond-glyph`,
+    `asterisk`, `skull`, `atom`, `leaf`, `flask`, `dna`, `microscope`,
+    `chart`, `lock`.
+
+    Raises ValueError for unknown names.
+    """
+    fill = color if color is not None else palette["accent"]
+    shape_const = _ICON_SHAPES.get(name)
+    if shape_const is not None:
+        sh = slide.shapes.add_shape(shape_const, left, top, size, size)
+        sh.line.fill.background()
+        sh.fill.solid()
+        sh.fill.fore_color.rgb = fill
+        sh.shadow.inherit = False
+        return sh
+    glyph = _ICON_GLYPHS.get(name)
+    if glyph is None:
+        raise ValueError(
+            f"unknown icon name: {name!r}. "
+            f"See _ICON_SHAPES / _ICON_GLYPHS in slide_render_helpers.py "
+            "for the full vocabulary."
+        )
+    tb = slide.shapes.add_textbox(left, top, size, size)
+    tf = tb.text_frame
+    tf.margin_left = Pt(2); tf.margin_right = Pt(2)
+    tf.margin_top = Pt(2); tf.margin_bottom = Pt(2)
+    tf.word_wrap = False
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    p = tf.paragraphs[0]
+    p.alignment = PP_ALIGN.CENTER
+    p.line_spacing = 1.0
+    run = p.add_run()
+    run.text = glyph
+    # Size text to ~75% of the box (Pt is 1/72 inch; EMU = 12700 Pt)
+    pt_size = max(8, int(size / 12700 * 0.75))
+    run.font.size = Pt(pt_size)
+    run.font.color.rgb = fill
+    if fonts and fonts.get("display"):
+        run.font.name = fonts["display"]
+    return tb
+
+
+def icon_names() -> list[str]:
+    """Sorted list of all icon names `h.icon()` accepts. Useful for the
+    agent to consult before picking one."""
+    return sorted(list(_ICON_SHAPES) + list(_ICON_GLYPHS))
+
+
+
 
 
 # 8pt vertical rhythm — every vertical gap a snippet places should be an

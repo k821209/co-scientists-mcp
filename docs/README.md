@@ -20,7 +20,7 @@ acceptance criteria. Closing a todo: move the file to `todo/closed/` and
 reference the commit that shipped it. Currently open:
 - [001 — Native-language prose in the harness](todo/001_native_language_prose_in_harness.md)
 - [002 — Rich slide rendering beyond literal markdown](todo/002_rich_slide_rendering.md) (closed 2026-05-26 — `render_mode="code"`)
-- [004 — Design methodology for code slides](todo/004_design_methodology_for_code_slides.md) (mostly shipped 2026-05-26 — §A critique + §B patterns + §D grid + §G design-language; §C/E/F open)
+- [004 — Design methodology for code slides](todo/004_design_methodology_for_code_slides.md) (shipped 2026-05-26 / 2026-05-27 — §A critique + §B patterns + §C iconography + §D grid + §E type roles + §G design-language; §F deferred)
 - [005 — Pattern library quality](todo/005_pattern_library_quality.md) (closed 2026-05-26 — bugs A/B/C fixed, contracts added, integration tests landed)
 - [006 — Slide typology + layout effects](todo/006_slide_typology_and_layout_effects.md) (shipped 2026-05-26 — 4 structural patterns + SKILL 2-axis matrix + §5c layout effects)
 

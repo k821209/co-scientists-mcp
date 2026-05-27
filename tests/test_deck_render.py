@@ -1536,6 +1536,154 @@ def test_pattern_title_and_image_grid(state, tmp_path, monkeypatch):
         assert f"캡션 {i + 1}" in flat
 
 
+# ─── Iconography (todo 004 §C) ──────────────────────────────────────────
+
+
+def test_icon_names_lists_known_vocabulary():
+    """h.icon_names() returns the full sorted vocabulary the agent can
+    pick from. Must include at least one shape-based + one glyph-based
+    entry so the agent knows both backends exist."""
+    from co_scientist_local.tools import slide_render_helpers as srh
+    names = srh.icon_names()
+    assert isinstance(names, list)
+    assert names == sorted(names)
+    # Spot-checks: shape + glyph fallbacks both present
+    assert "arrow-right" in names    # MSO_SHAPE built-in
+    assert "lightning" in names      # MSO_SHAPE built-in
+    assert "check" in names          # Unicode glyph fallback
+    assert "info" in names           # Unicode glyph fallback
+
+
+def test_icon_unknown_name_raises():
+    """h.icon('nonexistent', ...) raises ValueError, not silently
+    nothing — so typos are loud."""
+    from co_scientist_local.tools import slide_render_helpers as srh
+    from pptx import Presentation
+    from pptx.util import Inches
+    pytest.importorskip("pptx")
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    with pytest.raises(ValueError, match="unknown icon name"):
+        srh.icon(slide, "totally-not-an-icon",
+                 left=Inches(1), top=Inches(1), size=Inches(0.5),
+                 palette={"accent": _h_accent()})
+
+
+def _h_accent():
+    """1-line helper — RGBColor for tests that don't need a full theme."""
+    from pptx.dml.color import RGBColor
+    return RGBColor(0xB5, 0x89, 0x00)
+
+
+def test_icon_shape_renders_as_native_autoshape(state, tmp_path, monkeypatch):
+    """h.icon('lightning', ...) produces an MSO_SHAPE auto-shape (not
+    a picture, not a textbox) — the icon stays native + recolorable in
+    PowerPoint."""
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    slug = _setup(state)
+    decks.update_deck(state, slug, "d", concept="accent: #b58900")
+    decks.add_slide(
+        state, slug, "d", slide_number=1, role="background",
+        title="Icons", notes="n", render_mode="code",
+        code=(
+            "h.icon(slide, 'lightning', left=Inches(1), top=Inches(2),\n"
+            "       size=Inches(1), palette=palette)\n"
+            "h.icon(slide, 'database', left=Inches(3), top=Inches(2),\n"
+            "       size=Inches(1), palette=palette)\n"
+            "h.icon(slide, 'warning', left=Inches(5), top=Inches(2),\n"
+            "       size=Inches(1), palette=palette)\n"
+        ),
+    )
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    assert res["code_errors"] == []
+    slide = Presentation(str(out)).slides[0]
+    auto_shapes = [
+        sh for sh in slide.shapes
+        if sh.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE
+    ]
+    # 3 icon shapes (and no chrome was added by this snippet)
+    assert len(auto_shapes) == 3
+
+
+def test_icon_glyph_renders_as_textbox(state, tmp_path, monkeypatch):
+    """h.icon('check', ...) — for icons python-pptx doesn't ship as a
+    shape — renders as a textbox with the Unicode glyph centered."""
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+
+    slug = _setup(state)
+    decks.update_deck(state, slug, "d", concept="accent: #b58900")
+    decks.add_slide(
+        state, slug, "d", slide_number=1, role="background",
+        title="Check + X", notes="n", render_mode="code",
+        code=(
+            "h.icon(slide, 'check', left=Inches(1), top=Inches(2),\n"
+            "       size=Inches(0.6), palette=palette)\n"
+            "h.icon(slide, 'x', left=Inches(3), top=Inches(2),\n"
+            "       size=Inches(0.6), palette=palette)\n"
+        ),
+    )
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    assert res["code_errors"] == []
+    flat = " ".join(
+        sh.text_frame.text for sh in Presentation(str(out)).slides[0].shapes
+        if sh.has_text_frame
+    )
+    assert "✓" in flat
+    assert "✗" in flat
+
+
+# ─── Semantic type roles (todo 004 §E) ──────────────────────────────────
+
+
+def test_type_scale_includes_semantic_role_keys():
+    """The default type_scale exposes semantic role names alongside the
+    legacy keys, so new code can pick by role (display_hero, body_small,
+    label_tag) instead of arbitrary names."""
+    ts = deck_render._theme_type_scale(None)
+    for role in (
+        "display_cover", "display_hero", "display_chapter",
+        "headline_section", "title_slide",
+        "body_large", "body_standard", "body_small",
+        "label_tag", "label_caption", "scale_ratio",
+    ):
+        assert role in ts, f"missing semantic role: {role}"
+    # scale_ratio is a float; others are ints.
+    assert isinstance(ts["scale_ratio"], float)
+    assert isinstance(ts["display_hero"], int)
+    # Sanity ordering:
+    # chapter > cover > hero > slide-title > headline-section >
+    # body_large > body_standard > body_small > label_*
+    assert ts["display_chapter"] > ts["display_cover"]
+    assert ts["display_cover"] > ts["display_hero"]
+    assert ts["display_hero"] > ts["title_slide"]
+    assert ts["title_slide"] > ts["headline_section"]
+    assert ts["body_large"] >= ts["body_standard"] >= ts["body_small"]
+    assert ts["body_small"] > ts["label_tag"]
+
+
+def test_type_scale_semantic_role_override(state, tmp_path, monkeypatch):
+    """A concept's Type-scale block can override the new semantic keys
+    too (the parser auto-handles all type_scale keys)."""
+    concept = (
+        "Type scale:\n"
+        "  display_hero: 36  body_small: 14  scale_ratio: 1.2\n"
+    )
+    ts = deck_render._theme_type_scale(concept)
+    assert ts["display_hero"] == 36
+    assert ts["body_small"] == 14
+    assert ts["scale_ratio"] == pytest.approx(1.2)
+    # unspecified keys keep defaults
+    assert ts["display_cover"] == 48
+
+
 def test_pattern_zoom_in_callout(state, tmp_path, monkeypatch):
     """zoom_in_callout needs an image source; smoke-test with a 1×1 PNG."""
     pytest.importorskip("pptx")

@@ -2,7 +2,7 @@
 
 **Audience:** co-scientist-local MCP / Claude Code harness dev team.
 **Filed by:** Yang Jae Kang, project `ai-breeding`, 2026-05-26.
-**Status:** mostly shipped — §A (critique loop) + §B (pattern library) + §D (grid) + §G (design language doc) landed 2026-05-26; §C/E/F open.
+**Status:** §A + §B + §C + §D + §E + §G shipped (2026-05-26 / 2026-05-27); §F (reference design corpus) deferred — curation-heavy.
 
 ## Resolution log
 
@@ -18,9 +18,23 @@
   design constitution: grid rules, whitespace ratio, max type sizes
   per slide, color count, section-opener convention. Not parsed by
   the renderer; it's the contract every slide's `code` answers to.
-- **Open:** §C (iconography — asset bundle decision),
-  §E (semantic type roles — touches existing type_scale callers),
-  §F (reference design corpus — curation work).
+- **Open:** §F (reference design corpus — curation work).
+- **2026-05-27** — §C iconography shipped. New `h.icon(slide, name,
+  *, left, top, size, palette, color=None)` helper places a semantic
+  icon as either a native MSO_SHAPE auto-shape (preferred; ~35 names
+  like `arrow-right`, `lightning`, `database`, `warning`, `molecule`,
+  `gear`, `sun`, …) or a Unicode-glyph textbox fallback (`check`,
+  `x`, `info`, `dna`, `microscope`, `flask`, `chart`, `lock`, …).
+  Asset-bundle avoided — MSO_SHAPE built-ins are recolorable +
+  editable + scalable in PowerPoint. `h.icon_names()` enumerates the
+  full vocabulary (47 names total). Unknown names raise ValueError.
+- **2026-05-27** — §E semantic type roles shipped. `_DEFAULT_TYPE_SCALE`
+  gains canonical role keys alongside legacy aliases:
+  `display_chapter/cover/hero`, `headline_section`, `title_slide`,
+  `body_large/standard/small`, `label_tag/caption`, `scale_ratio`.
+  Concept's `Type scale:` block can override any of these. Legacy
+  keys (title/head/body/cover_title/caption/line_spacing) preserved
+  so existing pattern code keeps working unchanged.
 - **2026-05-26 (same day)** — §A shipped. PyMuPDF (>=1.24) added as a
   dep. `_render_pdf_to_pngs(pdf_path, out_dir, dpi=150)` renders each
   PDF page to `slide_NNN.png` via PyMuPDF; best-effort (returns []

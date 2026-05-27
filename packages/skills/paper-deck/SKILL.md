@@ -121,8 +121,14 @@ mcp__co_scientist__update_deck(
     Typography:
       display: Inter Bold     body: Inter Regular     mono: JetBrains Mono
     Type scale:
+      # legacy keys (still honored)
       title: 32  head: 26  body: 20  line_spacing: 1.22
       hybrid_body: 18  hybrid_head: 22  cover_title: 40  caption: 12
+      # semantic role keys (canonical — prefer these in new code; todo 004 §E)
+      display_chapter: 56  display_cover: 48  display_hero: 44
+      headline_section: 28  title_slide: 32
+      body_large: 22  body_standard: 20  body_small: 16
+      label_tag: 12  label_caption: 12  scale_ratio: 1.25
     Motif:
       a single thin horizontal rule under each title;
       a recurring small icon (#b58900) marking the figure-of-merit line
@@ -323,6 +329,8 @@ focus on actual layout:
 | `h.image_figure(figure_number, *, left, top, width, height, fit="contain")` | — | Resolve a paper figure → embed |
 | `h.grid(*, sw, sh, cols=12, rows=6, gutter=Pt(8), margin_x=Inches(0.6), margin_top=Inches(1.8), margin_bot=Inches(0.6), row_gap=Pt(8), row_h=None)` | — | Build a 12-col × 6-row design grid. Returns a `Grid` with `.cell(col, span, row, row_span)` → `(left, top, width, height)`. (todo 004 §D) |
 | `h.SPACING_UNIT_PT` | constant `8` | 8pt vertical rhythm. Vertical gaps should be `Pt(SPACING_UNIT_PT * N)`. |
+| `h.icon(slide, name, *, left, top, size, palette, color=None, fonts=None)` | name = semantic key | Place a named icon at `(left, top)` with `size×size` bounding box. Native MSO_SHAPE auto-shape when available (`arrow-right`, `lightning`, `database`, `warning`, `decision`, `molecule`, `sun`, `moon`, `gear`, `star`, `heart`, `cloud`, `document`, `brace-*`, …) — recolorable + scalable + editable in PowerPoint. Unicode-glyph fallback for `check`, `x`, `info`, `dna`, `microscope`, `flask`, `chart`, `lock`, etc. Color defaults to `palette["accent"]`. (todo 004 §C) |
+| `h.icon_names()` | — | Sorted list of every icon name `h.icon()` accepts. Call at runtime when the agent needs to pick one. |
 
 All Keynote-safe (RGBA → RGB JPEG ≤ 1920px normalization happens inside
 the image helpers).

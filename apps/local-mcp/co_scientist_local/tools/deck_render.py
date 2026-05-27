@@ -572,15 +572,30 @@ _TITLE_PT = 32
 _LINE_SPACING = 1.22
 
 _DEFAULT_TYPE_SCALE = {
+    # ─── legacy keys (kept for back-compat with existing callers) ────
     "title": _TITLE_PT,        # content-slide title
     "head": _HEAD_PT,          # body markdown # heading
     "body": _BODY_PT,          # body bullets / paragraphs
     "hybrid_body": 18,         # narrower body box → smaller body type
     "hybrid_head": 22,
-    "cover_title": 40,         # title slide hero
+    "cover_title": 40,         # title slide hero (kept; new code: display_cover)
     "cover_subtitle": 20,
     "caption": 12,             # region captions
     "line_spacing": _LINE_SPACING,
+    # ─── semantic role keys (todo 004 §E — canonical naming) ─────────
+    # New code is encouraged to use these by *role* instead of by
+    # arbitrary pixel size. Old keys above stay as informal aliases.
+    "display_cover":    48,    # cover slide title (slide 1)
+    "display_hero":     44,    # thesis / takeaway hero line
+    "display_chapter":  56,    # mid-deck chapter divider
+    "headline_section": 28,    # in-slide section header
+    "title_slide":      _TITLE_PT,   # standard slide title
+    "body_large":       22,    # generous body
+    "body_standard":    _BODY_PT,    # standard body
+    "body_small":       16,    # small body / dense lists
+    "label_tag":        12,    # pills, tags
+    "label_caption":    12,    # figure captions
+    "scale_ratio":      1.25,  # perfect-fourth ratio (relationship constant)
 }
 
 
@@ -596,11 +611,13 @@ def _theme_type_scale(concept: str | None) -> dict:
     """
     kv = _parse_concept(concept)
     out = dict(_DEFAULT_TYPE_SCALE)
+    # Float-valued keys; everything else (point sizes) coerces to int.
+    float_keys = {"line_spacing", "scale_ratio"}
     for k in out:
         if k in kv:
             try:
                 out[k] = (
-                    float(kv[k]) if k == "line_spacing" else int(float(kv[k]))
+                    float(kv[k]) if k in float_keys else int(float(kv[k]))
                 )
             except (ValueError, TypeError):
                 pass  # malformed value → keep default
@@ -930,6 +947,8 @@ def _build_code_namespace(slide, row, state, slug, tmpd, *,
         image_figure=_image_from_figure,
         grid=_h.grid,                       # todo 004 §D — design grid
         SPACING_UNIT_PT=_h.SPACING_UNIT_PT,  # 8pt vertical rhythm
+        icon=_h.icon,                       # todo 004 §C — iconography
+        icon_names=_h.icon_names,           # list available icon names
     )
     # Whole-slide patterns (todo 004 §B, 006) — bound as `p`.
     p = SimpleNamespace(
