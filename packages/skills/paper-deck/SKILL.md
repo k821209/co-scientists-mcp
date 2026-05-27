@@ -356,6 +356,12 @@ HELPERS  (h.* — primitives)
   h.icon(slide, name, *, left, top, size, palette,        # MSO_SHAPE or glyph
          color=None, fonts=None)
   h.icon_names() -> list[str]                             # vocabulary
+  h.deck_chrome(slide, *, palette, fonts, type_scale,     # eyebrow + footer
+                sw, sh, eyebrow="", page_number=None,     # + page number
+                total=None, footer="")                    # (todo 009 B)
+  h.table(slide, *, headers, rows, left, top, width,      # native pptx TABLE
+          height, palette, fonts, type_scale,             # (todo 009 C)
+          first_col_emphasis=False)
   h.image_path([slide,] path, *, left, top, width,        # embed local PNG
                height, fit="contain")
   h.image_region([slide,] region_id, *, left, top, width, # row.regions[id]
@@ -423,6 +429,11 @@ INTENT PATTERNS  (p.* — design treatment)
       callout, note="", palette, fonts, type_scale,
       sw, sh)
                        # callout: {x, y, w, h}, all in [0,1]
+  p.gantt_chart(slide, *, items=..., periods=None,        # under title
+                period_count=None, palette, fonts,         # todo 009 D
+                type_scale, sw, sh)
+                       # items: list[{label, start, span}]
+                       # legacy alias: activities=
 ```
 
 Contract rules:
@@ -561,6 +572,7 @@ an intent pattern above if a more loaded design fits:
 | `p.title_two_content(slide, *, title, left, right)` | under title | (4) Two Content | Generic 2-column body, each `{heading?, body?, bullets?}`. Mirrored — for emphasized comparison use `before_after_split`; for pros/cons use `contrast_pair`. |
 | `p.title_and_image_grid(slide, *, title, images, cols=2)` | under title | (4) Two Content extended / (9) Picture with Caption | N images in a `cols`-column grid (1 = half-bleed, 2 = side-by-side, 4 = 2×2). Optional per-image captions. |
 | `p.figure_full(slide, *, image_path=None, image_callable=None, caption="")` | under title | (9) Picture with Caption (figure-only) | Single figure that owns the FULL grid (~85% slide height); caption rides in the bottom-margin strip outside the grid. ~17% more figure area vs `row_span=4` + caption-in-row-6 layouts. Pass `image_path` for filesystem PNGs or `image_callable=lambda **kw: h.image_figure(slide, N, **kw)` for paper figures. (todo 008 §A) |
+| `p.gantt_chart(slide, *, items, periods=None, period_count=None)` | under title | Timeline matrix | Activity rows × period columns with accent-colored bars at each row's `{start, span}`. Zebra-striped rows + period labels + left-aligned activity labels. Pair with `h.deck_chrome` for proposal rhythm. items: `[{label, start, span}]` (1-indexed). (todo 009 D) |
 
 **Two-step selection** (todo 006 — the 2D matrix):
 
@@ -655,11 +667,25 @@ that slide to plain text (title + body) and records the error in
 the export result's `code_errors[]`. The deck still exports. After
 seeing an error, fix the snippet and re-export.
 
-**Don't reinvent** — the `h.*` helpers cover ~90% of the layouts you'll
-need. Drop to raw `slide.shapes.add_textbox(...)` only when no helper
-fits. Keep snippets **declarative** (helper calls + a few coordinates),
-not procedural (don't write loops that compute positions when
-`card_grid(cols=N)` already does).
+**Patterns are a starting point, not a ceiling.** (todo 009.) The 14
+patterns above cover the *common* shapes of a slide; they don't cover
+proposal pages, Gantt charts, personnel tables, or any other layout
+where the content asks for 30+ shapes hand-composed. Real decks
+(e.g., a 13-page funded-grant proposal) have **30–70 shapes per
+content slide**. Our toy patterns produce ~10–15. The gap is the
+agent's compose budget per slide, not python-pptx's capability.
+
+So:
+- **Use a pattern when the content fits it** — title + 3 KPIs?
+  `p.metric_tile_row`. Title + workflow? `p.flow_pipeline`.
+- **Go bespoke when the content asks** — proposal density,
+  multi-section equipment lists, hand-tuned comparisons. Compose
+  directly with `h.text` / `h.card` / `h.icon` / `slide.shapes
+  .add_shape` / `h.table`. The pattern catalog isn't a wall.
+- **Density signals you're on the right track.** When a content slide
+  ends up at ~25–60 shapes, that's usually *good* — it means every
+  inch of the slide carries information. The bad case is 60 shapes
+  with no hierarchy; not 60 shapes by themselves.
 
 **Image placeholder workflow for code slides.** When a `code` slide
 needs images (a paper figure, an AI-generated diagram, a code-shape

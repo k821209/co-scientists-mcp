@@ -2237,6 +2237,140 @@ def test_hero_with_trailing_evidence_tight_on_short_content():
         )
 
 
+# ─── Deck chrome + table + gantt (todo 009) ─────────────────────────────
+
+
+def test_deck_chrome_adds_eyebrow_footer_pagenumber(state, tmp_path, monkeypatch):
+    """h.deck_chrome adds the 3 chrome pieces (eyebrow upper-left,
+    footer bottom-left, page-number bottom-right) on top of an
+    existing slide. Each is its own textbox."""
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    slug = _setup(state)
+    decks.update_deck(state, slug, "d", concept="accent: #1f3a8a")
+    decks.add_slide(
+        state, slug, "d", slide_number=1, role="content",
+        title="chrome demo", notes="n", render_mode="code",
+        code=(
+            "h.accent_stripe(slide, palette=palette, sw=sw)\n"
+            "h.title_block(slide, title, palette=palette, fonts=fonts,\n"
+            "              type_scale=type_scale, sw=sw, sh=sh)\n"
+            "h.deck_chrome(slide, palette=palette, fonts=fonts,\n"
+            "              type_scale=type_scale, sw=sw, sh=sh,\n"
+            "              eyebrow='HOW · 추진 방법',\n"
+            "              footer='기러기류 마커 발굴 · ㈜디보',\n"
+            "              page_number=5, total=13)\n"
+        ),
+    )
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    assert res["code_errors"] == [], res["code_errors"]
+    flat = " ".join(
+        sh.text_frame.text for sh in Presentation(str(out)).slides[0].shapes
+        if sh.has_text_frame
+    )
+    assert "HOW · 추진 방법" in flat
+    assert "기러기류 마커 발굴" in flat
+    assert "5 / 13" in flat
+
+
+def test_native_table_emits_real_pptx_table(state, tmp_path, monkeypatch):
+    """h.table emits a real MSO_SHAPE_TYPE.TABLE (editable native
+    PowerPoint table), not a card_grid stand-in."""
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+    slug = _setup(state)
+    decks.add_slide(
+        state, slug, "d", slide_number=1, role="content",
+        title="table demo", notes="n", render_mode="code",
+        code=(
+            "h.accent_stripe(slide, palette=palette, sw=sw)\n"
+            "h.title_block(slide, title, palette=palette, fonts=fonts,\n"
+            "              type_scale=type_scale, sw=sw, sh=sh)\n"
+            "h.table(slide,\n"
+            "  headers=['주요 활동', 'M1', 'M2', 'M3'],\n"
+            "  rows=[['시료 QC', '■', '', ''],\n"
+            "        ['HMW DNA 추출', '■', '■', ''],\n"
+            "        ['시퀀싱', '', '■', '■']],\n"
+            "  left=Inches(0.5), top=Inches(2),\n"
+            "  width=Inches(12), height=Inches(3),\n"
+            "  palette=palette, fonts=fonts, type_scale=type_scale,\n"
+            "  first_col_emphasis=True)\n"
+        ),
+    )
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    assert res["code_errors"] == [], res["code_errors"]
+    slide = Presentation(str(out)).slides[0]
+    tables = [sh for sh in slide.shapes
+              if sh.shape_type == MSO_SHAPE_TYPE.TABLE]
+    assert len(tables) == 1
+    tbl = tables[0].table
+    # Headers + 3 body rows = 4 rows; 4 cols
+    assert len(tbl.rows) == 4
+    assert len(tbl.columns) == 4
+    # Header cell text survived
+    assert tbl.cell(0, 0).text == "주요 활동"
+    assert tbl.cell(0, 1).text == "M1"
+    # Body
+    assert tbl.cell(1, 0).text == "시료 QC"
+
+
+def test_gantt_chart_pattern_lays_out_activities(state, tmp_path, monkeypatch):
+    """p.gantt_chart produces one bar per activity, positioned by
+    {start, span} across the period columns. Bars are accent-colored
+    rounded rectangles (todo 009 D)."""
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+    slug = _setup(state)
+    decks.add_slide(
+        state, slug, "d", slide_number=1, role="content",
+        title="gantt demo", notes="n", render_mode="code",
+        code=(
+            "h.accent_stripe(slide, palette=palette, sw=sw)\n"
+            "h.title_block(slide, title, palette=palette, fonts=fonts,\n"
+            "              type_scale=type_scale, sw=sw, sh=sh)\n"
+            "p.gantt_chart(slide, items=[\n"
+            "  {'label': '착수보고 및 계획 확정',     'start': 1, 'span': 1},\n"
+            "  {'label': '시료 QC, HMW DNA 추출',  'start': 1, 'span': 2},\n"
+            "  {'label': 'PacBio HiFi 시퀀싱',      'start': 2, 'span': 2},\n"
+            "  {'label': 'ONT PromethION 시퀀싱',   'start': 2, 'span': 2},\n"
+            "  {'label': 'K-mer 어셈블리',          'start': 3, 'span': 2},\n"
+            "  {'label': '매핑 / 변이 호출',         'start': 4, 'span': 3},\n"
+            "  {'label': '종 특이적 마커 후보 도출', 'start': 7, 'span': 2}],\n"
+            "  period_count=8,\n"
+            "  palette=palette, fonts=fonts, type_scale=type_scale,\n"
+            "  sw=sw, sh=sh)\n"
+        ),
+    )
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    assert res["code_errors"] == [], res["code_errors"]
+    slide = Presentation(str(out)).slides[0]
+    # 7 activity bars + zebra row backgrounds for rows 1/3/5 (3 zebra)
+    # + ~10 chrome shapes (top stripe + title + title rule). All bars
+    # are ROUNDED_RECTANGLE. Just check that we got >= 7 bars.
+    from pptx.enum.shapes import MSO_SHAPE_TYPE as _T
+    bars = [
+        sh for sh in slide.shapes
+        if sh.shape_type == _T.AUTO_SHAPE
+        and sh.auto_shape_type is not None
+        and "ROUND" in str(sh.auto_shape_type)
+    ]
+    assert len(bars) >= 7, f"expected ≥7 gantt bars, got {len(bars)}"
+    # Activity labels survived
+    flat = " ".join(
+        sh.text_frame.text for sh in slide.shapes if sh.has_text_frame
+    )
+    for token in ("착수보고", "PacBio HiFi", "M1", "M8"):
+        assert token in flat
+
+
 # ─── Reference corpus (todo 004 §F) ─────────────────────────────────────
 
 

@@ -1063,6 +1063,8 @@ def _build_code_namespace(slide, row, state, slug, tmpd, *,
         estimate_text_width_pt=_h.estimate_text_width_pt,
         text=_h.text,                       # todo 007 §D — one-call textbox
         Cell=_h.Cell,                       # Grid.cell() return type
+        deck_chrome=_h.deck_chrome,         # todo 009 B — eyebrow/footer/page
+        table=_h.table,                     # todo 009 C — native pptx table
     )
     # Whole-slide patterns (todo 004 §B, 006) — bound as `p`.
     p = SimpleNamespace(
@@ -1083,6 +1085,7 @@ def _build_code_namespace(slide, row, state, slug, tmpd, *,
         title_two_content=_p.title_two_content,
         title_and_image_grid=_p.title_and_image_grid,
         figure_full=_p.figure_full,         # todo 008 §A
+        gantt_chart=_p.gantt_chart,         # todo 009 D
     )
 
     return {

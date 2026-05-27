@@ -73,6 +73,13 @@
       "do": "Image owns the **full grid** (rows 1–6 ≈ 85% of slide height). Caption tucks into the 0.6\" bottom-margin strip OUTSIDE the grid, in muted body italics. Wins back ~17% of figure area vs the old row_span=4 + caption-in-row-6 layout (todo 008 §A).",
       "dont": "Don't waste a grid row as 'breathing space' between figure and caption — the bottom margin already does that job. Don't let the caption run > 120 chars; 1 line preferred, 2 max."
     },
+    "gantt_chart": {
+      "file": "gantt_chart.png",
+      "title": "추진 일정 (M1–M8) 및 업무 분장",
+      "owns_slide": false,
+      "do": "Activity rows × period columns with accent-colored bars at each row's `{start, span}`. Zebra row backgrounds + period labels across the top + label column on the left. Pair with `h.deck_chrome` (eyebrow / footer / page number) for proposal-grade rhythm. Use for project timelines, parallel workstreams, multi-month delivery plans.",
+      "dont": "Don't squeeze long Korean activity labels into a narrow label column — keep labels ≤ ~20 chars or let them wrap. Don't stack > ~12 rows; readability falls off."
+    },
     "title_and_image_grid": {
       "file": "title_and_image_grid.png",
       "title": "Multi-image overview",

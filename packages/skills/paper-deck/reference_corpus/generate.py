@@ -242,6 +242,42 @@ REFERENCES = [
         "let the caption run > 120 chars; 1 line preferred, 2 max.",
     ),
     (
+        "gantt_chart.png", "gantt_chart",
+        "추진 일정 (M1–M8) 및 업무 분장",
+        (PREAMBLE
+         + "h.deck_chrome(slide, palette=palette, fonts=fonts,\n"
+           "              type_scale=type_scale, sw=sw, sh=sh,\n"
+           "              eyebrow='WHEN · 7개월 병렬 운영',\n"
+           "              footer='참조 사업 · ㈜디보',\n"
+           "              page_number=9, total=13)\n"
+           "p.gantt_chart(slide, items=[\n"
+           "  {'label': '착수보고 및 계획 확정',    'start': 1, 'span': 1},\n"
+           "  {'label': '시료 QC, HMW DNA 추출', 'start': 1, 'span': 2},\n"
+           "  {'label': 'PacBio HiFi 시퀀싱',     'start': 2, 'span': 2},\n"
+           "  {'label': 'ONT PromethION 시퀀싱',  'start': 2, 'span': 2},\n"
+           "  {'label': 'DNBSEQ-G99 시퀀싱',      'start': 2, 'span': 3},\n"
+           "  {'label': 'K-mer / 어셈블리',        'start': 3, 'span': 2},\n"
+           "  {'label': 'Assembly QC',            'start': 4, 'span': 2},\n"
+           "  {'label': '매핑 / 변이 호출',        'start': 4, 'span': 3},\n"
+           "  {'label': '중간보고',                'start': 5, 'span': 1},\n"
+           "  {'label': 'Introgression / Fst',    'start': 6, 'span': 2},\n"
+           "  {'label': '종 특이적 마커 도출',     'start': 7, 'span': 2},\n"
+           "  {'label': '최종 보고서',             'start': 7, 'span': 2}],\n"
+           "  period_count=8,\n"
+           "  palette=palette, fonts=fonts, type_scale=type_scale,\n"
+           "  sw=sw, sh=sh)\n"),
+        False,
+        "Activity rows × period columns with accent-colored bars at "
+        "each row's `{start, span}`. Zebra row backgrounds + period "
+        "labels across the top + label column on the left. Pair with "
+        "`h.deck_chrome` (eyebrow / footer / page number) for "
+        "proposal-grade rhythm. Use for project timelines, parallel "
+        "workstreams, multi-month delivery plans.",
+        "Don't squeeze long Korean activity labels into a narrow label "
+        "column — keep labels ≤ ~20 chars or let them wrap. Don't "
+        "stack > ~12 rows; readability falls off.",
+    ),
+    (
         "title_and_image_grid.png", "title_and_image_grid",
         "Multi-image overview",
         PREAMBLE + (

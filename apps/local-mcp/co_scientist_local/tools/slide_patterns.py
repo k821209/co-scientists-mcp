@@ -965,6 +965,111 @@ def numbered_milestone_arc(slide, *, items=None, milestones=None,
                    anchor=MSO_ANCHOR.TOP)
 
 
+# ─── gantt_chart (todo 009 D) ─────────────────────────────────────────────
+
+
+def gantt_chart(slide, *, items=None, activities=None,
+                periods: list[str] = None, period_count: int = None,
+                palette, fonts, type_scale, sw, sh):
+    """Horizontal Gantt chart — activity rows × period columns, with
+    accent-colored bars positioned at each activity's start + span
+    (todo 009 D). Use for project timelines, multi-month work plans,
+    parallel-stage rollouts.
+
+    Contract: **Goes under a title_block.** Pattern starts at
+    `_BODY_TOP`. Pair with `h.deck_chrome` (eyebrow + page number)
+    above for proposal-grade rhythm.
+
+    Items (canonical, or legacy `activities=`):
+        list[{label, start, span}] where `start` is 1-indexed period
+        and `span` is the number of periods the bar covers.
+        Example: {"label": "착수보고 및 계획 확정", "start": 1, "span": 1}
+
+    Period labels: pass either `periods=["M1", "M2", …]` directly OR
+    `period_count=8` (auto-labels M1..MN). Defaults to M1..M8.
+    """
+    items = _resolve_items("gantt_chart", items, activities=activities)
+    if not items:
+        return
+    if periods is None:
+        n = int(period_count) if period_count else 8
+        periods = [f"M{i + 1}" for i in range(n)]
+    n_periods = len(periods)
+
+    body_top = _BODY_TOP
+    body_left = _SIDE_MARGIN
+    body_w = sw - 2 * _SIDE_MARGIN
+    body_bottom = sh - _BOTTOM_MARGIN - Inches(0.3)
+    body_h = body_bottom - body_top
+
+    # Label column on the left = 32% of body width
+    label_w = int(body_w * 0.32)
+    timeline_left = body_left + label_w + Pt(8)
+    timeline_w = body_w - label_w - Pt(8)
+    col_w = timeline_w / n_periods
+
+    # Header row height = ~1.6× label_pt
+    label_pt = type_scale.get("label_tag", 12)
+    body_pt = max(11, type_scale.get("body_small",
+                                       type_scale.get("body", 20) - 4))
+    header_h = Pt(label_pt * 2)
+    rows_top = body_top + header_h + Pt(6)
+    row_h = (body_bottom - rows_top) // max(1, len(items))
+
+    fg = palette["foreground"]
+    fg_muted = _muted(fg)
+    accent = palette["accent"]
+
+    # Period labels across the top
+    for c, label in enumerate(periods):
+        cx = timeline_left + int(col_w * c)
+        _emit_text(slide, label,
+                   left=cx, top=body_top,
+                   width=int(col_w), height=header_h,
+                   size_pt=label_pt, color=fg,
+                   font_name=fonts.get("display"), bold=True,
+                   align=PP_ALIGN.CENTER)
+
+    # Activity rows
+    for r, item in enumerate(items):
+        label_text = _item_get(item, "label", "tag", "title", "text",
+                                default="")
+        start = int(item.get("start", 1)) if isinstance(item, dict) else 1
+        span = int(item.get("span", 1)) if isinstance(item, dict) else 1
+        start = max(1, min(n_periods, start))
+        span = max(1, min(n_periods - start + 1, span))
+
+        ry = rows_top + r * row_h
+        # Zebra: alternate rows get a subtle muted-tint background
+        if r % 2 == 1:
+            zebra = slide.shapes.add_shape(
+                MSO_SHAPE.RECTANGLE, body_left, ry, body_w, row_h,
+            )
+            zebra.line.fill.background()
+            zebra.fill.solid()
+            zebra.fill.fore_color.rgb = palette.get("surface", palette["background"])
+            zebra.shadow.inherit = False
+        # Label
+        _emit_text(slide, label_text,
+                   left=body_left + Pt(4), top=ry,
+                   width=label_w - Pt(8), height=row_h,
+                   size_pt=body_pt, color=fg,
+                   font_name=fonts.get("body"),
+                   anchor=MSO_ANCHOR.MIDDLE)
+        # Bar
+        bx = timeline_left + int(col_w * (start - 1)) + Pt(2)
+        bw = int(col_w * span) - Pt(4)
+        bar_h = max(Pt(10), int(row_h * 0.45))
+        by = ry + (row_h - bar_h) // 2
+        bar = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE, bx, by, bw, bar_h,
+        )
+        bar.line.fill.background()
+        bar.fill.solid()
+        bar.fill.fore_color.rgb = accent
+        bar.shadow.inherit = False
+
+
 # ─── figure_full (todo 008 §A) ────────────────────────────────────────────
 
 

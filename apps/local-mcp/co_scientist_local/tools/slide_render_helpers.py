@@ -447,6 +447,149 @@ def title_block(slide, text: str, *, palette, fonts, type_scale, sw, sh,
     return box
 
 
+def deck_chrome(slide, *, palette, fonts, type_scale, sw, sh,
+                eyebrow: str = "",
+                page_number: int = None, total: int = None,
+                footer: str = ""):
+    """Deck-level chrome (todo 009 B): one call per slide adds the
+    semantic eyebrow label upper-left + footer label bottom-left +
+    page-number bottom-right. Use AFTER `h.accent_stripe` +
+    `h.title_block` so the eyebrow sits above the title and the
+    footer/page sit below the body.
+
+    Skip the args you don't need — `eyebrow=""` leaves the eyebrow
+    off, `page_number=None` skips the page number, `footer=""` skips
+    the footer.
+    """
+    cap_pt = type_scale.get("caption", 12)
+    label_pt = type_scale.get("label_tag", cap_pt)
+    fg_muted = palette.get("muted")
+    accent = palette["accent"]
+
+    # Eyebrow: above the title (todo 009 — semantic navigation label
+    # like "HOW · 추진 방법" or "WHY · 다른 제안과의 결정적 차이").
+    if eyebrow:
+        eyb = slide.shapes.add_textbox(
+            Inches(0.7), Inches(0.22),
+            sw - Inches(1.4), Pt(label_pt * 1.6),
+        )
+        tf = eyb.text_frame
+        tf.word_wrap = False
+        _autoshrink(tf)
+        p = tf.paragraphs[0]
+        p.alignment = PP_ALIGN.LEFT
+        run = p.add_run()
+        run.text = eyebrow.upper()
+        run.font.size = Pt(label_pt)
+        run.font.bold = True
+        run.font.color.rgb = accent
+        if fonts.get("body"):
+            run.font.name = fonts["body"]
+
+    # Footer: bottom-left, muted body type (deck title / project name).
+    if footer:
+        ft = slide.shapes.add_textbox(
+            Inches(0.5), sh - Inches(0.35),
+            sw - Inches(2.5), Pt(cap_pt * 1.8),
+        )
+        tf = ft.text_frame
+        tf.word_wrap = False
+        p = tf.paragraphs[0]
+        run = p.add_run()
+        run.text = footer
+        run.font.size = Pt(cap_pt)
+        if fg_muted is not None:
+            run.font.color.rgb = fg_muted
+        if fonts.get("body"):
+            run.font.name = fonts["body"]
+
+    # Page number: bottom-right (e.g. "5 / 13").
+    if page_number is not None:
+        pgs = (f"{page_number} / {total}" if total is not None
+               else f"{page_number}")
+        pn = slide.shapes.add_textbox(
+            sw - Inches(1.5), sh - Inches(0.35),
+            Inches(1.0), Pt(cap_pt * 1.8),
+        )
+        tf = pn.text_frame
+        tf.word_wrap = False
+        p = tf.paragraphs[0]
+        p.alignment = PP_ALIGN.RIGHT
+        run = p.add_run()
+        run.text = pgs
+        run.font.size = Pt(cap_pt)
+        if fg_muted is not None:
+            run.font.color.rgb = fg_muted
+        if fonts.get("body"):
+            run.font.name = fonts["body"]
+
+
+def table(slide, *, headers: list[str], rows: list[list[str]],
+          left, top, width, height,
+          palette, fonts, type_scale,
+          first_col_emphasis: bool = False):
+    """Native python-pptx `MSO_SHAPE_TYPE.TABLE` — a real, editable
+    PowerPoint table (todo 009 C). For tabular data (personnel,
+    equipment, timelines, parameter sweeps) the native table beats
+    re-implementing rows with card_grid: cells nudge + resize properly
+    in the editor, headers + body get distinct styling, and the
+    structure is grep-able.
+
+    Headers render in display font + accent color. Body cells in body
+    font + foreground. `first_col_emphasis=True` styles the first
+    column in display font (useful for personnel / timeline labels).
+
+    Returns the table shape so the caller can post-tweak (column
+    widths, individual cell merges, etc.) if needed.
+    """
+    cols = len(headers)
+    n_rows = len(rows) + 1   # +1 for header row
+    shape = slide.shapes.add_table(
+        n_rows, cols, left, top, width, height,
+    )
+    tbl = shape.table
+
+    head_pt = max(11, type_scale.get("label_tag", 12))
+    body_pt = max(10, type_scale.get("body_small",
+                                       type_scale.get("body", 20) - 4))
+    fg = palette["foreground"]
+    accent = palette["accent"]
+    # Header row
+    for c, header in enumerate(headers):
+        cell = tbl.cell(0, c)
+        cell.text = ""
+        tf = cell.text_frame
+        p = tf.paragraphs[0]
+        run = p.add_run()
+        run.text = str(header)
+        run.font.size = Pt(head_pt)
+        run.font.bold = True
+        run.font.color.rgb = accent
+        if fonts.get("display"):
+            run.font.name = fonts["display"]
+    # Body rows
+    for r, row in enumerate(rows, start=1):
+        for c in range(cols):
+            cell = tbl.cell(r, c)
+            cell.text = ""
+            value = row[c] if c < len(row) else ""
+            tf = cell.text_frame
+            p = tf.paragraphs[0]
+            run = p.add_run()
+            run.text = str(value)
+            run.font.size = Pt(body_pt)
+            run.font.color.rgb = fg
+            font_name = (
+                fonts.get("display") if (first_col_emphasis and c == 0)
+                else fonts.get("body")
+            )
+            if font_name:
+                run.font.name = font_name
+            if first_col_emphasis and c == 0:
+                run.font.bold = True
+    return shape
+
+
 def text(slide, content: str, *, left, top, width, height,
          palette, size_pt: int = 20, color=None, font_name=None,
          bold: bool = False, italic: bool = False, align=None,
