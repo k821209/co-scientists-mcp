@@ -1763,6 +1763,124 @@ def test_image_figure_accepts_slide_first_positional(state, tmp_path, monkeypatc
     assert len(pics) == 2  # both forms succeeded
 
 
+# ─── Tier 2: items canonical + dict shape detection (todo 007 axis 2) ──
+
+
+def test_patterns_accept_items_canonical_name(state, tmp_path, monkeypatch):
+    """Every list-of-items pattern accepts `items=` as the canonical
+    kwarg (todo 007 axis 2). Legacy names (evidence / tiles / steps /
+    milestones) still work as aliases — covered elsewhere by the
+    `_UNDER_TITLE_PATTERNS` suite."""
+    pytest.importorskip("pptx")
+    slug = _setup(state)
+    decks.update_deck(state, slug, "d", concept="accent: #b58900")
+    decks.add_slide(
+        state, slug, "d", slide_number=1, role="content",
+        title="items canonical", notes="n", render_mode="code",
+        code=(
+            "h.accent_stripe(slide, palette=palette, sw=sw)\n"
+            "h.title_block(slide, title, palette=palette, fonts=fonts,\n"
+            "              type_scale=type_scale, sw=sw, sh=sh)\n"
+            "# hero — items as list[str]\n"
+            "p.hero_with_trailing_evidence(slide,\n"
+            "  headline='canonical hero', items=['e1', 'e2', 'e3'],\n"
+            "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"
+        ),
+    )
+    decks.add_slide(
+        state, slug, "d", slide_number=2, role="content",
+        title="items via flow", notes="n", render_mode="code",
+        code=(
+            "p.flow_pipeline(slide, items=[\n"
+            "  {'tag': 'A', 'body': 'first'},\n"
+            "  {'tag': 'B', 'body': 'second'},\n"
+            "  {'tag': 'C', 'body': 'third'}],\n"
+            "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"
+        ),
+    )
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    assert res["code_errors"] == [], res["code_errors"]
+    assert res["code_slides"] == 2
+
+
+def test_metric_tile_row_accepts_dict_items(state, tmp_path, monkeypatch):
+    """`metric_tile_row` accepts dict-shaped items alongside tuples —
+    {value, label, unit} OR canonical {tag, body, unit} (todo 007 axis 2)."""
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    slug = _setup(state)
+    decks.add_slide(
+        state, slug, "d", slide_number=1, role="result",
+        title="metric dicts", notes="n", render_mode="code",
+        code=(
+            "p.metric_tile_row(slide, items=[\n"
+            "  {'value': '30', 'label': 'seconds', 'unit': 's'},\n"
+            "  {'tag': '500', 'body': 'accessions'},\n"          # canonical
+            "  ('150', 'fold speedup', '×'),\n"                    # tuple ok
+            "], palette=palette, fonts=fonts, type_scale=type_scale,\n"
+            "   sw=sw, sh=sh)\n"
+        ),
+    )
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    assert res["code_errors"] == [], res["code_errors"]
+    flat = " ".join(
+        sh.text_frame.text for sh in Presentation(str(out)).slides[0].shapes
+        if sh.has_text_frame
+    )
+    for token in ("30", "seconds", "500", "accessions", "150", "fold speedup"):
+        assert token in flat
+
+
+def test_passing_both_items_and_legacy_alias_raises(state):
+    """Loud error when caller passes both `items` and the legacy alias
+    (catches typo / partial-rename mistakes)."""
+    from co_scientist_local.tools import slide_patterns
+    from pptx import Presentation
+    pytest.importorskip("pptx")
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    with pytest.raises(TypeError, match="pass `items` OR"):
+        slide_patterns.flow_pipeline(
+            slide, items=[{"tag": "A", "body": "x"}],
+            steps=[{"tag": "B", "body": "y"}],
+            palette={}, fonts={}, type_scale={}, sw=0, sh=0,
+        )
+
+
+def test_numbered_milestone_arc_canonical_body_field(state, tmp_path, monkeypatch):
+    """numbered_milestone_arc accepts both `note` (legacy) and `body`
+    (canonical) inside each item dict (todo 007 axis 2)."""
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    slug = _setup(state)
+    decks.add_slide(
+        state, slug, "d", slide_number=1, role="background",
+        title="milestone canonical body", notes="n", render_mode="code",
+        code=(
+            "p.numbered_milestone_arc(slide, items=[\n"
+            "  {'tag': 'A', 'body': 'canonical body field'},\n"   # canonical
+            "  {'tag': 'B', 'note': 'legacy note field'},\n"      # legacy
+            "  {'tag': 'C', 'body': 'mixed works'}],\n"
+            "  palette=palette, fonts=fonts, type_scale=type_scale,\n"
+            "  sw=sw, sh=sh)\n"
+        ),
+    )
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    assert res["code_errors"] == [], res["code_errors"]
+    flat = " ".join(
+        sh.text_frame.text for sh in Presentation(str(out)).slides[0].shapes
+        if sh.has_text_frame
+    )
+    assert "canonical body field" in flat
+    assert "legacy note field" in flat
+
+
 # ─── Text autofit (Korean-aware) ─────────────────────────────────────────
 
 

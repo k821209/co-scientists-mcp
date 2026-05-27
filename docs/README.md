@@ -23,7 +23,7 @@ reference the commit that shipped it. Currently open:
 - [004 — Design methodology for code slides](todo/004_design_methodology_for_code_slides.md) (shipped 2026-05-26 / 2026-05-27 — §A critique + §B patterns + §C iconography + §D grid + §E type roles + §G design-language; §F deferred)
 - [005 — Pattern library quality](todo/005_pattern_library_quality.md) (closed 2026-05-26 — bugs A/B/C fixed, contracts added, integration tests landed)
 - [006 — Slide typology + layout effects](todo/006_slide_typology_and_layout_effects.md) (shipped 2026-05-26 — 4 structural patterns + SKILL 2-axis matrix + §5c layout effects)
-- [007 — Pattern + helper API consistency](todo/007_pattern_library_api_consistency.md) (Tier 1 shipped 2026-05-27 — palette full / h.text / Cell / slide-first images / overlap fix / roles; Tier 2 list-param rename + Tier 3 API reference table open)
+- [007 — Pattern + helper API consistency](todo/007_pattern_library_api_consistency.md) (closed 2026-05-27 — Tier 1 palette/h.text/Cell/slide-first/overlap/roles + Tier 2 items canonical + dict shape detection + Tier 3 SKILL quick-reference table)
 
 ### Architecture decisions (ADRs)
 

@@ -106,6 +106,52 @@ def _emit_text(slide, text, *, left, top, width, height,
     return tb
 
 
+def _resolve_items(name: str, items, **legacy_aliases):
+    """Per todo 007 Tier 2 — every list-of-items parameter is canonically
+    called `items`. Patterns that historically named the slot something
+    else (evidence / tiles / steps / milestones) accept the old name as
+    an alias. Raise TypeError loudly when both are passed (caller
+    confusion) or neither (missing required input).
+
+    Returns the resolved list.
+    """
+    explicit_legacy = {k: v for k, v in legacy_aliases.items()
+                       if v is not None}
+    if items is not None and explicit_legacy:
+        raise TypeError(
+            f"{name}: pass `items` OR one of "
+            f"{sorted(legacy_aliases)} — got both"
+        )
+    if items is not None:
+        return list(items)
+    if len(explicit_legacy) == 1:
+        return list(next(iter(explicit_legacy.values())))
+    if len(explicit_legacy) > 1:
+        raise TypeError(
+            f"{name}: multiple legacy aliases passed — pick one of "
+            f"{sorted(explicit_legacy)} or `items`"
+        )
+    raise TypeError(
+        f"{name}() requires `items` (or legacy alias: "
+        f"{', '.join(sorted(legacy_aliases))})"
+    )
+
+
+def _item_get(item, *keys, default=""):
+    """For canonical-shape items: walk a tuple of key aliases and return
+    the first non-None value. e.g. `_item_get(it, 'tag', 'title', 'value')`
+    accepts `{tag: …}`, `{title: …}`, or `{value: …}` interchangeably so
+    the same dict shape works across patterns with different historical
+    naming."""
+    if not isinstance(item, dict):
+        return default
+    for k in keys:
+        v = item.get(k)
+        if v is not None and v != "":
+            return v
+    return default
+
+
 def _accent_rule(slide, *, left, top, width, height, color):
     rect = slide.shapes.add_shape(
         MSO_SHAPE.RECTANGLE, left, top, width, height,
@@ -121,7 +167,7 @@ def _accent_rule(slide, *, left, top, width, height, color):
 
 
 def hero_with_trailing_evidence(slide, *, headline: str,
-                                 evidence: list[str],
+                                 items=None, evidence=None,
                                  palette, fonts, type_scale, sw, sh):
     """Thesis / takeaway slide. Asymmetric: large headline on the left
     (~⅔ width), small numbered evidence column on the right. Tension
@@ -133,8 +179,18 @@ def hero_with_trailing_evidence(slide, *, headline: str,
 
     Content limits:
         headline: max ~60 chars; wraps to 3 lines.
-        evidence: 2–4 items, each max ~80 chars (wraps to 2 lines).
+        items (canonical) or evidence (legacy alias): 2–4 items, each
+            a string (≤ ~80 chars) OR a dict `{body, …}` (the `body`
+            field is used).
     """
+    items = _resolve_items("hero_with_trailing_evidence",
+                            items, evidence=evidence)
+    # Accept both list[str] and list[{body}] shapes (todo 007 axis 2).
+    items = [
+        it if isinstance(it, str)
+        else _item_get(it, "body", "tag", "text")
+        for it in items
+    ]
     headline_pt = max(36, type_scale.get("cover_title", 40) - 4)
     body_pt = type_scale.get("body", 20) - 2
     label_pt = type_scale.get("caption", 12)
@@ -162,8 +218,8 @@ def hero_with_trailing_evidence(slide, *, headline: str,
                font_name=fonts.get("body"), bold=True)
 
     ev_top = body_top + Pt(label_pt * 2.8)
-    ev_h_each = (body_h - Pt(label_pt * 2.8)) // max(1, len(evidence))
-    for i, line in enumerate(evidence):
+    ev_h_each = (body_h - Pt(label_pt * 2.8)) // max(1, len(items))
+    for i, line in enumerate(items):
         y = ev_top + i * ev_h_each
         # Thin accent number
         _emit_text(slide, f"{i + 1:02d}",
@@ -243,7 +299,7 @@ def chapter_divider(slide, *, chapter_label: str, summary: str = "",
 # ─── 3. metric_tile_row ───────────────────────────────────────────────────
 
 
-def metric_tile_row(slide, *, tiles: list[tuple],
+def metric_tile_row(slide, *, items=None, tiles=None,
                     palette, fonts, type_scale, sw, sh,
                     top=None, height=None):
     """KPI / quantitative summary — a row of large numbers with thin
@@ -254,29 +310,42 @@ def metric_tile_row(slide, *, tiles: list[tuple],
     by default (use `top=` to override).
 
     Content limits:
-        tiles: 3–5 items. Each label ≤ ~24 chars (1 line).
-            Tuple shape: (value, label) or (value, label, unit).
+        items (canonical) or tiles (legacy alias): 3–5 items, each in
+            ONE of these shapes (auto-detected):
+                - tuple `(value, label)` or `(value, label, unit)`
+                - dict `{value, label, unit?}`
+                - dict `{tag, body, unit?}` (canonical aligned shape —
+                  tag = value, body = label)
+            Label ≤ ~24 chars (1 line).
     """
-    if not tiles:
+    items = _resolve_items("metric_tile_row", items, tiles=tiles)
+    if not items:
         return
     top = _BODY_TOP + Inches(0.5) if top is None else top
     height = Inches(3.0) if height is None else height
     side_margin = _SIDE_MARGIN
     usable = sw - 2 * side_margin
     gap = Pt(_h.SPACING_UNIT_PT * 3)
-    tile_w = (usable - gap * (len(tiles) - 1)) // len(tiles)
+    tile_w = (usable - gap * (len(items) - 1)) // len(items)
 
     value_pt = max(48, type_scale.get("cover_title", 40) + 8)
     unit_pt = type_scale.get("head", 26)
     label_pt = type_scale.get("caption", 12)
 
     fg_muted = _muted(palette["foreground"])
-    for i, tile in enumerate(tiles):
-        if len(tile) == 3:
-            value, label, unit = tile
+    for i, tile in enumerate(items):
+        # Shape detection: tuple-as-tile OR dict-as-tile (canonical)
+        if isinstance(tile, (tuple, list)):
+            if len(tile) == 3:
+                value, label, unit = tile
+            else:
+                value, label = tile[0], tile[1]
+                unit = ""
         else:
-            value, label = tile
-            unit = ""
+            value = _item_get(tile, "value", "tag")
+            label = _item_get(tile, "label", "body")
+            unit = _item_get(tile, "unit", default="")
+        unit = unit or ""
         left = side_margin + i * (tile_w + gap)
         # Value (huge number, accent color)
         _emit_text(slide, str(value),
@@ -305,7 +374,8 @@ def metric_tile_row(slide, *, tiles: list[tuple],
 # ─── 4. evidence_stack ────────────────────────────────────────────────────
 
 
-def evidence_stack(slide, *, claim: str, evidence: list[dict],
+def evidence_stack(slide, *, claim: str,
+                   items=None, evidence=None,
                    palette, fonts, type_scale, sw, sh):
     """Claim + 2-3 supporting facts. Top: the claim in display type.
     Bottom: stacked evidence rows, each with a small accent tag-pill
@@ -316,9 +386,10 @@ def evidence_stack(slide, *, claim: str, evidence: list[dict],
 
     Content limits:
         claim: ≤ ~80 chars; wraps to 2 lines max at claim_pt size.
-        evidence: 2–4 items, each {tag (≤ ~10 chars), body (≤ ~120
-            chars; wraps to 2 lines)}.
+        items (canonical) or evidence (legacy alias): 2–4 items, each
+            `{tag (≤ ~10 chars), body (≤ ~120 chars, 2 lines max)}`.
     """
+    items = _resolve_items("evidence_stack", items, evidence=evidence)
     claim_pt = max(28, type_scale.get("head", 26) + 4)
     tag_pt = type_scale.get("caption", 12)
     body_pt = type_scale.get("body", 20)
@@ -337,13 +408,13 @@ def evidence_stack(slide, *, claim: str, evidence: list[dict],
                  color=palette["accent"])
 
     stack_top = rule_top + Pt(16)
-    row_h = (sh - stack_top - _BOTTOM_MARGIN) // max(1, len(evidence))
+    row_h = (sh - stack_top - _BOTTOM_MARGIN) // max(1, len(items))
     tag_w = Inches(1.6)
     fg_muted = _muted(palette["foreground"])
-    for i, item in enumerate(evidence):
+    for i, item in enumerate(items):
         y = stack_top + i * row_h
-        tag = (item.get("tag") or "").upper()
-        body = item.get("body") or ""
+        tag = str(_item_get(item, "tag", "title")).upper()
+        body = _item_get(item, "body", "note", "text")
         if tag:
             pill = slide.shapes.add_shape(
                 MSO_SHAPE.ROUNDED_RECTANGLE,
@@ -378,7 +449,7 @@ def evidence_stack(slide, *, claim: str, evidence: list[dict],
 # ─── 5. flow_pipeline ─────────────────────────────────────────────────────
 
 
-def flow_pipeline(slide, *, steps: list[dict],
+def flow_pipeline(slide, *, items=None, steps=None,
                   palette, fonts, type_scale, sw, sh):
     """Horizontal process flow. Each step is a small card with a
     numbered tag + body; right-pointing arrows connect consecutive
@@ -388,15 +459,16 @@ def flow_pipeline(slide, *, steps: list[dict],
     title_block BEFORE. Pattern starts at `_BODY_TOP + 0.4"`.
 
     Content limits:
-        steps: 3–5 items. tag ≤ ~12 chars, body ≤ ~80 chars (wraps to
-            3 lines).
+        items (canonical) or steps (legacy alias): 3–5 items, each
+            `{tag (≤ ~12 chars), body (≤ ~80 chars, 3 lines)}`.
     """
-    if not steps:
+    items = _resolve_items("flow_pipeline", items, steps=steps)
+    if not items:
         return
     side = _SIDE_MARGIN
     top = _BODY_TOP + Inches(0.4)
     height = sh - top - _BOTTOM_MARGIN
-    n = len(steps)
+    n = len(items)
     gap = Inches(0.3)
     arrow_w = Pt(_h.SPACING_UNIT_PT * 5)
     usable = sw - 2 * side - arrow_w * (n - 1) - gap * (n - 1)
@@ -406,7 +478,7 @@ def flow_pipeline(slide, *, steps: list[dict],
     body_pt = type_scale.get("body", 20) - 2
     fg_muted = _muted(palette["foreground"])
 
-    for i, step in enumerate(steps):
+    for i, step in enumerate(items):
         left = side + i * (step_w + arrow_w + gap)
         # Step card
         card = slide.shapes.add_shape(
@@ -429,13 +501,13 @@ def flow_pipeline(slide, *, steps: list[dict],
                    color=palette["accent"],
                    font_name=fonts.get("display"), bold=True)
         # Tag
-        _emit_text(slide, step.get("tag") or "",
+        _emit_text(slide, _item_get(step, "tag", "title"),
                    left=left + Pt(12), top=top + Pt(tag_pt * 1.6),
                    width=step_w - Pt(24), height=Pt(tag_pt * 1.5),
                    size_pt=tag_pt, color=palette["foreground"],
                    font_name=fonts.get("display"), bold=True)
         # Body
-        _emit_text(slide, step.get("body") or "",
+        _emit_text(slide, _item_get(step, "body", "note", "text"),
                    left=left + Pt(12), top=top + Pt(tag_pt * 3.4),
                    width=step_w - Pt(24),
                    height=height - Pt(tag_pt * 3.6),
@@ -753,7 +825,7 @@ def quadrant_map(slide, *, items: list[dict], axes: dict,
 # ─── 9. numbered_milestone_arc ────────────────────────────────────────────
 
 
-def numbered_milestone_arc(slide, *, milestones: list[dict],
+def numbered_milestone_arc(slide, *, items=None, milestones=None,
                             palette, fonts, type_scale, sw, sh):
     """Progressive timeline. Equal-width slots across the body area;
     each slot has a numbered circle on a horizontal baseline + a tag +
@@ -766,12 +838,14 @@ def numbered_milestone_arc(slide, *, milestones: list[dict],
     title_block BEFORE. Pattern starts at y = `_BODY_TOP`.
 
     Content limits:
-        milestones: 3–6 items. Each tag ≤ ~14 chars at tag size
-            (wraps to 2 lines max); note ≤ ~60 chars (3 lines max).
+        items (canonical) or milestones (legacy alias): 3–6 items, each
+            `{tag (≤ ~14 chars), body or note (≤ ~60 chars, 3 lines)}`.
     """
-    if not milestones:
+    items = _resolve_items("numbered_milestone_arc",
+                            items, milestones=milestones)
+    if not items:
         return
-    n = len(milestones)
+    n = len(items)
 
     fg = palette["foreground"]
     fg_muted = _muted(fg)
@@ -807,7 +881,7 @@ def numbered_milestone_arc(slide, *, milestones: list[dict],
                      color=fg_muted)
 
     # Per-milestone slot
-    for i, m in enumerate(milestones):
+    for i, m in enumerate(items):
         slot_left = margin + i * slot_w
         slot_cx = slot_left + slot_w // 2
 
@@ -853,7 +927,7 @@ def numbered_milestone_arc(slide, *, milestones: list[dict],
         text_w = slot_w - Pt(8)
         # Tag: room for up to 2 wrapped lines
         tag_h = Pt(tag_pt * 1.5 * 2)
-        _emit_text(slide, m.get("tag") or "",
+        _emit_text(slide, _item_get(m, "tag", "title"),
                    left=text_left, top=text_top,
                    width=text_w, height=tag_h,
                    size_pt=tag_pt, color=fg,
@@ -862,7 +936,7 @@ def numbered_milestone_arc(slide, *, milestones: list[dict],
                    anchor=MSO_ANCHOR.TOP)
         # Note: the rest of the slot
         note_top = text_top + tag_h + Pt(4)
-        _emit_text(slide, m.get("note") or "",
+        _emit_text(slide, _item_get(m, "body", "note", "text"),
                    left=text_left, top=note_top,
                    width=text_w,
                    height=body_bottom - note_top,

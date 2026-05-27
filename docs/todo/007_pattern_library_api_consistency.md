@@ -5,7 +5,7 @@
 
 **Audience:** co-scientist-local MCP / Claude Code harness dev team.
 **Filed by:** Yang Jae Kang, project `ai-breeding`, 2026-05-27.
-**Status:** Tier 1 shipped 2026-05-27 (palette full exposure, h.text helper, Cell namedtuple, image helpers slide-first, before_after_split overlap fix, extended _VALID_ROLES). Tier 2 (rename list params to `items` + canonical `{tag, body}` shape) and Tier 3 (single API reference table in SKILL) open.
+**Status:** Tier 1 + 2 + 3 all shipped 2026-05-27.
 
 ## Resolution log
 
@@ -17,7 +17,17 @@
   - **Axis 3** — `Grid.cell()` returns a `Cell` namedtuple with both tuple-unpacking AND `.left / .top / .width / .height` attribute access. Existing `left, top, w, h = g.cell(...)` callers unchanged.
   - **§D (h.text)** — new `h.text(slide, content, *, left, top, width, height, palette, size_pt=20, color=None, ...)` one-call textbox helper. Drops the `add_textbox + text_frame + paragraph + run + font` ceremony to one line; autofit-shrinks Korean-aware by default.
   - paper-deck SKILL §3 concept template gains `muted` / `secondary` / `highlight` rows; §5a helper catalog gains `h.text` row + slide-optional notes on image helpers + Cell namedtuple + 7-key palette explainer.
-- **Open** — Tier 2: rename every list-of-items parameter to `items` with back-compat aliases (`evidence` / `tiles` / `steps` / `milestones` keep working as deprecated names); canonical `{tag, body}` dict shape with shape-detection accepting both old and new forms. Tier 3: a single-page API reference table in SKILL §5a so the agent doesn't grep the source on first-use.
+- **2026-05-27 (later that day)** — Tier 2 shipped. `_resolve_items(name, items, **legacy_aliases)` resolves the canonical `items=` kwarg against legacy names — raises `TypeError` loudly if both are passed (catches partial renames). `_item_get(item, *keys)` walks alias keys inside dict items so the canonical `{tag, body}` shape works alongside historical `{title, body}` / `{tag, note}` / `{value, label, unit}` forms.
+  Updated patterns:
+  - `hero_with_trailing_evidence(items=...)` — accepts `list[str]` OR `list[{body, ...}]`. Legacy alias: `evidence=`.
+  - `evidence_stack(items=...)` — `list[{tag, body|note|text}]`. Legacy: `evidence=`.
+  - `flow_pipeline(items=...)` — `list[{tag|title, body|note|text}]`. Legacy: `steps=`.
+  - `metric_tile_row(items=...)` — `list[tuple OR {value|tag, label|body, unit?}]`. Legacy: `tiles=`.
+  - `numbered_milestone_arc(items=...)` — `list[{tag, body|note}]`. Legacy: `milestones=`.
+  - `card_grid` already used `items=`; now also accepts `{tag, body}` alongside `{title, body}`.
+  4 new tests cover `items` canonical use, dict-shape detection on `metric_tile_row`, the both-passed `TypeError`, and `body`/`note` alias on `numbered_milestone_arc`. 387 total passing.
+
+- **2026-05-27 (Tier 3)** — paper-deck SKILL §5a gains a single grep-able "Quick reference — every callable at a glance" code block listing every helper + pattern with their canonical signature + contract / item shape / legacy aliases in one place. The agent now greps SKILL for `h.image_figure` or `p.evidence_stack` instead of grepping the source on first use.
 
 6 new tests, 383 total — covers extended roles, Cell namedtuple unpacking + attribute access, `h.text` one-call shape, 7-key palette in exec namespace, image_figure slide-first / closure forms, theme_colors explicit override of optional keys.
 **Related:** [005 — Pattern library quality](./005_pattern_library_quality.md) (this is the *next layer* of the same complaint — 005 catalogued visual defects, 006 catalogues API-shape defects).

@@ -590,9 +590,10 @@ def card(slide, *, left, top, width, height, title: str, body: str,
 def card_grid(slide, items, *, left, top, width, height,
               palette, fonts, type_scale,
               cols: int = 2, gap_pt: int = 12):
-    """Lay out `items` (list of dicts with `title` + `body`) as a grid
-    of `card()`s with `cols` columns. Rows are derived from len(items).
-    Returns the list of per-card dicts."""
+    """Lay out `items` (list of dicts with `title` + `body`, or the
+    canonical `tag` + `body` — both accepted, todo 007 axis 2) as a
+    grid of `card()`s with `cols` columns. Rows are derived from
+    `len(items)`. Returns the list of per-card dicts."""
     n = len(items)
     if n == 0:
         return []
@@ -605,9 +606,16 @@ def card_grid(slide, items, *, left, top, width, height,
         r, c = i // cols, i % cols
         cl = left + c * (cell_w + gap)
         ct = top + r * (cell_h + gap)
+        # Accept either {title, body} (historical) or {tag, body} (canonical).
+        title = (item.get("title") if isinstance(item, dict) else None) \
+                or (item.get("tag") if isinstance(item, dict) else None) \
+                or ""
+        body = (item.get("body") if isinstance(item, dict) else None) \
+               or (item.get("note") if isinstance(item, dict) else None) \
+               or ""
         out.append(card(
             slide, left=cl, top=ct, width=cell_w, height=cell_h,
-            title=item.get("title", ""), body=item.get("body", ""),
+            title=title, body=body,
             palette=palette, fonts=fonts, type_scale=type_scale,
         ))
     return out

@@ -293,6 +293,126 @@ namespace, and the snippet adds shapes/textboxes/images to the slide
 natively. Result: editable PPTX, visually-rich layout, your design
 choices.
 
+**Quick reference — every callable at a glance** (todo 007 Tier 3).
+Grep this block to find the right helper / pattern without reading
+source. All signatures are *current* — legacy parameter names noted
+where they still work.
+
+```text
+NAMESPACE (always bound in code snippets)
+  slide, title, body, notes, row
+  palette = {accent, background, foreground, surface, muted,
+             secondary, highlight}    # 7 RGBColor keys, todo 007
+  fonts   = {display, body, mono}
+  type_scale = {legacy: title/head/body/cover_title/caption/...
+                 canonical roles: display_chapter/cover/hero,
+                                  headline_section, title_slide,
+                                  body_large/standard/small,
+                                  label_tag/caption, scale_ratio}
+  aspect, sw, sh, Pt, Inches, Emu, MSO_SHAPE, PP_ALIGN, MSO_ANCHOR,
+  RGBColor
+
+HELPERS  (h.* — primitives)
+  h.accent_stripe(slide, *, palette, sw)                 # top stripe
+  h.title_block(slide, text, *, palette, fonts,           # themed title
+                type_scale, sw, sh, cover=False,
+                accent_rule=True)
+  h.bullet_list(slide, items, *, palette, fonts,          # bulleted column
+                type_scale, left, top, width, height,
+                bullet="•")
+  h.card(slide, *, left, top, width, height, title, body, # single card
+         palette, fonts, type_scale, accent_top=True)
+  h.card_grid(slide, items, *, left, top, width, height,  # N-card grid
+              palette, fonts, type_scale, cols=2, gap_pt=12)
+            # items: list[{title|tag, body|note}]
+  h.pull_quote(slide, text, *, palette, fonts, type_scale, # accent bar + italic
+               left, top, width, height)
+  h.text(slide, content, *, left, top, width, height,    # one-call textbox
+         palette, size_pt=20, color=None, bold=False,
+         italic=False, align=None, anchor=None,
+         line_spacing=1.22, autofit=True, min_pt=10,
+         fonts=None)                                      # todo 007 §D
+  h.icon(slide, name, *, left, top, size, palette,        # MSO_SHAPE or glyph
+         color=None, fonts=None)
+  h.icon_names() -> list[str]                             # vocabulary
+  h.image_path([slide,] path, *, left, top, width,        # embed local PNG
+               height, fit="contain")
+  h.image_region([slide,] region_id, *, left, top, width, # row.regions[id]
+                 height, fit="contain")
+  h.image_figure([slide,] figure_number, *, left, top,    # paper figure
+                 width, height, fit="contain")
+  h.grid(*, sw, sh, cols=12, rows=6, ...) -> Grid         # design grid
+       grid.cell(col, span=1, row=1, row_span=1) -> Cell  # (left,top,w,h)
+                                                           # OR .left/.top/...
+  h.SPACING_UNIT_PT = 8                                   # 8pt rhythm
+  h.autofit_pt(text, *, max_width_emu, max_height_emu,    # Korean-aware
+               start_pt, line_spacing=1.22, min_pt=10)
+  h.estimate_text_width_pt(text, font_pt)
+
+STRUCTURAL PATTERNS  (p.* — content shape, PowerPoint master layouts)
+  p.title_slide(slide, *, title, subtitle="", eyebrow="", # OWNS SLIDE
+                palette, fonts, type_scale, sw, sh)
+  p.title_and_body(slide, *, title, body, lead="",        # under title
+                   palette, fonts, type_scale, sw, sh)
+  p.title_two_content(slide, *, title, left, right,       # under title
+                      palette, fonts, type_scale, sw, sh)
+  p.title_and_image_grid(slide, *, title, images, cols=2, # under title
+                         palette, fonts, type_scale, sw, sh)
+
+INTENT PATTERNS  (p.* — design treatment)
+  p.chapter_divider(slide, *, chapter_label, summary="",  # OWNS SLIDE
+                    palette, fonts, type_scale, sw, sh)
+  p.hero_with_trailing_evidence(slide, *, headline,       # under title
+      items=..., palette, fonts, type_scale, sw, sh)
+                       # items: list[str | {body}]
+                       # legacy alias: evidence=
+  p.metric_tile_row(slide, *, items=..., palette, fonts,  # under title
+      type_scale, sw, sh, top=None, height=None)
+                       # items: list[tuple | {value/tag, label/body, unit?}]
+                       # legacy alias: tiles=
+  p.evidence_stack(slide, *, claim, items=..., palette,   # under title
+      fonts, type_scale, sw, sh)
+                       # items: list[{tag, body}]
+                       # legacy alias: evidence=
+  p.flow_pipeline(slide, *, items=..., palette, fonts,    # under title
+      type_scale, sw, sh)
+                       # items: list[{tag, body}]
+                       # legacy alias: steps=
+  p.before_after_split(slide, *, before, after,           # under title
+      transition_label="", palette, fonts, type_scale,
+      sw, sh)
+                       # before / after: {title, body}
+  p.contrast_pair(slide, *, left_item, right_item,        # under title
+      axis_label="", palette, fonts, type_scale, sw, sh)
+                       # *_item: {title, pros: list[str], cons: list[str]}
+  p.quadrant_map(slide, *, items, axes,                   # under title
+      palette, fonts, type_scale, sw, sh)
+                       # items: list[{label, x, y}]
+                       # axes:  {x, y, x_low?, x_high?}
+  p.numbered_milestone_arc(slide, *, items=..., palette,  # under title
+      fonts, type_scale, sw, sh)
+                       # items: list[{tag, body | note}]
+                       # legacy alias: milestones=
+  p.zoom_in_callout(slide, *, context_image_path,         # under title
+      callout, note="", palette, fonts, type_scale,
+      sw, sh)
+                       # callout: {x, y, w, h}, all in [0,1]
+```
+
+Contract rules:
+- **owns slide** patterns: do NOT call `h.accent_stripe` / `h.title_
+  block` before — the pattern is the slide.
+- **under title** patterns: DO call the preamble first; pattern
+  content starts at `_BODY_TOP` ≈ Inches(1.85).
+- Every text-emitting helper autofits Korean-aware (`h.autofit_pt`)
+  so dense body content can't overflow its box (todo 005 + autofit
+  follow-up).
+- Every list-of-items parameter is canonically `items=`. Legacy
+  names (`evidence` / `tiles` / `steps` / `milestones`) still work
+  as aliases. Passing both raises `TypeError`.
+- Image helpers (`h.image_*`) accept slide as the first positional
+  arg OR rely on the closure-bound `slide`. Both forms work.
+
 Why not just render the markdown `body`? Because markdown's grammar
 is too thin to capture slide *design* — punchline placement, figure
 position, "is this a list or a card grid", colored callouts, KPI
