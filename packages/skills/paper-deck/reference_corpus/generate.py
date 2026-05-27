@@ -122,20 +122,23 @@ REFERENCES = [
         PREAMBLE + (
             "p.hero_with_trailing_evidence(slide,\n"
             "  headline='Two weeks of bespoke pipeline collapse to 30 seconds.',\n"
-            "  items=['500 accessions integrated',\n"
-            "         '4 modalities (geno / pheno / image / env)',\n"
-            "         'Provenance trail on every query'],\n"
+            "  items=['500 accessions integrated across geno / pheno / image / env',\n"
+            "         'Four modalities trained into a single joint embedding',\n"
+            "         'Provenance trail attached to every query — auditable end-to-end'],\n"
             "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"
         ),
         False,
-        "Big headline LEFT (~62% width), tight evidence column RIGHT — "
-        "asymmetric on purpose. Numbered evidence (01 / 02 / 03) reads "
-        "as a journal-quality footnote. Use for thesis / takeaway / "
-        "result slides where one sentence is the message and 2-4 quick "
-        "facts back it up.",
-        "Don't center the headline — left-alignment + intentional right-"
-        "side whitespace earns the contrast. Don't write 5+ evidence "
-        "items; 3 is the sweet spot.",
+        "Use when the headline is *long* (≥ 3 wrapped lines) AND each "
+        "evidence item is ≥ 50 chars (todo 008 §C). The asymmetric "
+        "left-headline / right-numbered-column layout needs long "
+        "content on both sides to earn its weight — short items "
+        "leave a visible deadspace gap in the right column.",
+        "Don't pick this for short tagged 3-item content (headline ≤ 2 "
+        "lines, items < 50 chars) — `evidence_stack` packs the same "
+        "shape into ~⅔ the vertical space without the asymmetric "
+        "whitespace reservation. The pattern auto-tightens row height "
+        "for short content as a rescue, but the layout-fit answer is "
+        "to pick the other pattern.",
     ),
     (
         "metric_tile_row.png", "metric_tile_row",
@@ -220,6 +223,23 @@ REFERENCES = [
         "Don't use this for equal-weight comparisons (`title_two_content` "
         "or `contrast_pair`). Don't put long paragraphs on either side — "
         "≤ ~140 chars each, 4 lines max.",
+    ),
+    (
+        "figure_full.png", "figure_full",
+        "Reference architecture (figure-only slide)",
+        PREAMBLE + (
+            "p.figure_full(slide, image_path=REF_TILE_BLUE,\n"
+            "  caption='Fig 3 · LLM (사고) ↔ MCP (도구) ↔ Harness (운영). 자연어가 결정, MCP가 다리, harness가 운영.',\n"
+            "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"
+        ),
+        False,
+        "Image owns the **full grid** (rows 1–6 ≈ 85% of slide height). "
+        "Caption tucks into the 0.6\" bottom-margin strip OUTSIDE the "
+        "grid, in muted body italics. Wins back ~17% of figure area "
+        "vs the old row_span=4 + caption-in-row-6 layout (todo 008 §A).",
+        "Don't waste a grid row as 'breathing space' between figure "
+        "and caption — the bottom margin already does that job. Don't "
+        "let the caption run > 120 chars; 1 line preferred, 2 max.",
     ),
     (
         "title_and_image_grid.png", "title_and_image_grid",

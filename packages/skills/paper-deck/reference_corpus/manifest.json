@@ -35,8 +35,8 @@
       "file": "hero_with_trailing_evidence.png",
       "title": "Thesis with supporting evidence",
       "owns_slide": false,
-      "do": "Big headline LEFT (~62% width), tight evidence column RIGHT — asymmetric on purpose. Numbered evidence (01 / 02 / 03) reads as a journal-quality footnote. Use for thesis / takeaway / result slides where one sentence is the message and 2-4 quick facts back it up.",
-      "dont": "Don't center the headline — left-alignment + intentional right-side whitespace earns the contrast. Don't write 5+ evidence items; 3 is the sweet spot."
+      "do": "Use when the headline is *long* (≥ 3 wrapped lines) AND each evidence item is ≥ 50 chars (todo 008 §C). The asymmetric left-headline / right-numbered-column layout needs long content on both sides to earn its weight — short items leave a visible deadspace gap in the right column.",
+      "dont": "Don't pick this for short tagged 3-item content (headline ≤ 2 lines, items < 50 chars) — `evidence_stack` packs the same shape into ~⅔ the vertical space without the asymmetric whitespace reservation. The pattern auto-tightens row height for short content as a rescue, but the layout-fit answer is to pick the other pattern."
     },
     "metric_tile_row": {
       "file": "metric_tile_row.png",
@@ -65,6 +65,13 @@
       "owns_slide": false,
       "do": "Muted left panel (history / problem), accent-bordered right panel (solution / future). A single right-arrow + short label between. The asymmetric weight (left muted, right vibrant) carries the *direction of improvement* visually.",
       "dont": "Don't use this for equal-weight comparisons (`title_two_content` or `contrast_pair`). Don't put long paragraphs on either side — ≤ ~140 chars each, 4 lines max."
+    },
+    "figure_full": {
+      "file": "figure_full.png",
+      "title": "Reference architecture (figure-only slide)",
+      "owns_slide": false,
+      "do": "Image owns the **full grid** (rows 1–6 ≈ 85% of slide height). Caption tucks into the 0.6\" bottom-margin strip OUTSIDE the grid, in muted body italics. Wins back ~17% of figure area vs the old row_span=4 + caption-in-row-6 layout (todo 008 §A).",
+      "dont": "Don't waste a grid row as 'breathing space' between figure and caption — the bottom margin already does that job. Don't let the caption run > 120 chars; 1 line preferred, 2 max."
     },
     "title_and_image_grid": {
       "file": "title_and_image_grid.png",

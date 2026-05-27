@@ -2121,6 +2121,122 @@ def test_pattern_zoom_in_callout(state, tmp_path, monkeypatch):
     assert "zoom note" in txt
 
 
+# ─── figure_full + hero adaptive (todo 008) ─────────────────────────────
+
+
+def test_figure_full_renders_image_and_caption(state, tmp_path, monkeypatch):
+    """`p.figure_full` embeds one PICTURE that fills the body area + a
+    caption textbox in the bottom margin (todo 008 §A)."""
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+    from pptx.util import Inches as _I
+
+    slug = _setup(state)
+    img = tmp_path / "fig.png"
+    img.write_bytes(_PNG_1x1)
+    decks.add_slide(
+        state, slug, "d", slide_number=1, role="figure",
+        title="figure-full demo", notes="n", render_mode="code",
+        code=(
+            "h.accent_stripe(slide, palette=palette, sw=sw)\n"
+            "h.title_block(slide, title, palette=palette, fonts=fonts,\n"
+            "              type_scale=type_scale, sw=sw, sh=sh)\n"
+            f"p.figure_full(slide, image_path={str(img)!r},\n"
+            "  caption='Fig 1 · the only figure on this slide',\n"
+            "  palette=palette, fonts=fonts, type_scale=type_scale,\n"
+            "  sw=sw, sh=sh)\n"
+        ),
+    )
+    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
+    out = tmp_path / "deck.pptx"
+    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
+    assert res["code_errors"] == [], res["code_errors"]
+    slide = Presentation(str(out)).slides[0]
+    # Exactly one picture (the figure), one caption textbox containing
+    # "Fig 1 · …"
+    pics = [sh for sh in slide.shapes
+            if sh.shape_type == MSO_SHAPE_TYPE.PICTURE]
+    assert len(pics) == 1
+    # The picture occupies more than 60% of the slide height (full-grid).
+    sh_total = Presentation(str(out)).slide_height
+    assert pics[0].height > sh_total * 0.55, \
+        f"figure should fill the body area; got {pics[0].height}/{sh_total}"
+    flat = " ".join(s.text_frame.text for s in slide.shapes if s.has_text_frame)
+    assert "Fig 1 · the only figure on this slide" in flat
+
+
+def test_figure_full_requires_exactly_one_image_source(state, tmp_path):
+    """Loud error when caller passes neither or both image-source kwargs."""
+    from co_scientist_local.tools import slide_patterns
+    from pptx import Presentation
+    pytest.importorskip("pptx")
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    with pytest.raises(TypeError, match="EXACTLY ONE"):
+        slide_patterns.figure_full(
+            slide, palette={"foreground": None, "accent": None},
+            fonts={}, type_scale={}, sw=0, sh=0,
+        )
+
+
+def test_hero_with_trailing_evidence_tight_on_short_content():
+    """Per todo 008 §C3 — `hero_with_trailing_evidence` should NOT
+    spread short items across the full slide height. The pattern
+    auto-switches to a tight per-item row height when avg item
+    length < 50 chars."""
+    # We can't easily measure shape coordinates without rendering, so
+    # use the export path and check that the right-column textboxes are
+    # closer together than the slide-height-divided naïve placement.
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    from co_scientist_local.backends.memory import InMemoryBackend
+    from co_scientist_local.state import State
+    s = State(project_id="x", owner_uid="u", backend=InMemoryBackend())
+    papers.create_paper(s, title="t")
+    decks.create_deck(s, "t", title="d", deck_id="d")
+    decks.add_slide(
+        s, "t", "d", slide_number=1, role="thesis",
+        title="hero short", notes="n", render_mode="code",
+        code=(
+            "h.accent_stripe(slide, palette=palette, sw=sw)\n"
+            "h.title_block(slide, title, palette=palette, fonts=fonts,\n"
+            "              type_scale=type_scale, sw=sw, sh=sh)\n"
+            "p.hero_with_trailing_evidence(slide,\n"
+            "  headline='Short thesis line.',\n"
+            "  items=['Speed', 'Breadth', 'Provenance'],\n"
+            "  palette=palette, fonts=fonts, type_scale=type_scale,\n"
+            "  sw=sw, sh=sh)\n"
+        ),
+    )
+    import tempfile, pathlib as _p
+    with tempfile.TemporaryDirectory() as tmpd:
+        out = _p.Path(tmpd) / "deck.pptx"
+        deck_render._pdf_via_soffice = lambda _x: None   # monkey-skip
+        res = deck_render.export_deck_to_pptx(
+            s, "t", "d", output_path=str(out),
+        )
+        assert res["code_errors"] == [], res["code_errors"]
+        slide = Presentation(str(out)).slides[0]
+        # Collect right-column evidence number boxes ("01" / "02" / "03")
+        ev_runs = [
+            sh for sh in slide.shapes
+            if sh.has_text_frame
+            and sh.text_frame.text.strip() in {"01", "02", "03"}
+        ]
+        assert len(ev_runs) == 3
+        ys = sorted(sh.top for sh in ev_runs)
+        gap_01_02 = ys[1] - ys[0]
+        # Without the adaptive fix, gap ≈ body_h / 3 ≈ Inches(1.7) = ~1.5M EMU.
+        # With the adaptive fix (short content → row_h ≈ body_pt * 4.2pt =
+        # ~84pt ≈ 1.07M EMU), gap should be substantially smaller.
+        from pptx.util import Inches as _I
+        assert gap_01_02 < _I(1.4), (
+            f"hero should tighten row gap for short content; got "
+            f"gap={gap_01_02} EMU between '01' and '02'"
+        )
+
+
 # ─── Reference corpus (todo 004 §F) ─────────────────────────────────────
 
 

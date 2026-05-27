@@ -173,6 +173,16 @@ def hero_with_trailing_evidence(slide, *, headline: str,
     (~⅔ width), small numbered evidence column on the right. Tension
     between the two earns the contrast.
 
+    **Use when** (todo 008 §C): the headline wraps to ≥ 3 lines AND
+    evidence items average ≥ 50 chars each. The asymmetry needs *long*
+    content on both sides to earn its weight. For shorter tagged
+    content (headline ≤ 2 lines, items < 50 chars), prefer
+    `evidence_stack` — it packs the same semantic shape into ~⅔ the
+    vertical space without the asymmetric whitespace reservation.
+    When called with short content the pattern auto-tightens the
+    evidence-row height (≈ body_pt × 4.2 per row) so items huddle
+    near the top of the column instead of being launched apart.
+
     Contract: **Goes under a title_block.** Call h.accent_stripe(slide)
     and h.title_block(slide, ...) BEFORE this pattern. The pattern
     starts at y = `_BODY_TOP` (≈ 1.85"), below the title bar.
@@ -218,7 +228,16 @@ def hero_with_trailing_evidence(slide, *, headline: str,
                font_name=fonts.get("body"), bold=True)
 
     ev_top = body_top + Pt(label_pt * 2.8)
-    ev_h_each = (body_h - Pt(label_pt * 2.8)) // max(1, len(items))
+    # Adapt the per-item row height to content length (todo 008 §C3) —
+    # when items are short (≤ ~50 chars avg), pack them tight near the
+    # top of the column with body_pt-based row height instead of
+    # spreading them to fill the whole slide (which used to leave ~⅓
+    # of the right column as deadspace between two-line items).
+    avg_chars = sum(len(str(it)) for it in items) / max(1, len(items))
+    if avg_chars < 50:
+        ev_h_each = Pt(body_pt * 4.2)   # ≤ 2 wrapped lines + gap
+    else:
+        ev_h_each = (body_h - Pt(label_pt * 2.8)) // max(1, len(items))
     for i, line in enumerate(items):
         y = ev_top + i * ev_h_each
         # Thin accent number
@@ -944,6 +963,85 @@ def numbered_milestone_arc(slide, *, items=None, milestones=None,
                    font_name=fonts.get("body"),
                    align=PP_ALIGN.CENTER, line_spacing=1.2,
                    anchor=MSO_ANCHOR.TOP)
+
+
+# ─── figure_full (todo 008 §A) ────────────────────────────────────────────
+
+
+def figure_full(slide, *, image_path: str = None, image_callable=None,
+                caption: str = "",
+                palette, fonts, type_scale, sw, sh):
+    """Figure-only slide. The image fills the entire body area (rows
+    1–6 of the 12-col grid — ~85% of the slide height); the caption
+    rides in the bottom-margin strip OUTSIDE the grid, in muted body
+    italics.
+
+    Wins back ~17% of figure area vs the canonical `row_span=4` +
+    caption-in-row-6 layout that earlier corpus exemplars used
+    (todo 008 §A).
+
+    Contract: **Goes under a title_block.** Call h.accent_stripe +
+    h.title_block BEFORE. Image area starts at `_BODY_TOP`.
+
+    Pass EXACTLY ONE image source:
+        - `image_path` (str): a filesystem path. The pattern embeds
+            via Keynote-safe normalization (RGBA→RGB JPEG ≤ 1920px).
+        - `image_callable`: a callable that takes `slide, *, left,
+            top, width, height` and adds the picture. Use this when
+            embedding a paper figure or region from inside a code
+            slide, e.g.
+                p.figure_full(slide,
+                    image_callable=lambda **kw: h.image_figure(slide, 3, **kw),
+                    caption="Fig 3 · ...", palette=palette, fonts=fonts,
+                    type_scale=type_scale, sw=sw, sh=sh)
+
+    Content limits:
+        caption: ≤ ~120 chars; 1 line preferred, 2 max.
+    """
+    if (image_path is None) == (image_callable is None):
+        raise TypeError(
+            "figure_full requires EXACTLY ONE of `image_path` or "
+            "`image_callable`"
+        )
+    img_top = _BODY_TOP
+    margin = _SIDE_MARGIN
+    img_left = margin
+    img_w = sw - 2 * margin
+    cap_h = Inches(0.55) if caption else Inches(0.0)
+    # Image owns the full grid + everything down to the caption strip.
+    img_h = sh - img_top - cap_h - Inches(0.05)
+
+    if image_path is not None:
+        img_buf = _normalize_for_helper(image_path)
+        pic = slide.shapes.add_picture(
+            img_buf, img_left, img_top, width=img_w, height=img_h,
+        )
+        # Contain-fit (letterbox; never crop).
+        pic_ar = (pic.width / pic.height) if pic.height else 1
+        box_ar = (img_w / img_h) if img_h else 1
+        if pic_ar > box_ar:
+            new_w = img_w
+            new_h = int(img_w / pic_ar)
+        else:
+            new_h = img_h
+            new_w = int(img_h * pic_ar)
+        pic.width = new_w
+        pic.height = new_h
+        pic.left = img_left + (img_w - new_w) // 2
+        pic.top = img_top + (img_h - new_h) // 2
+    else:
+        # image_callable is responsible for embedding into the given box.
+        image_callable(slide, left=img_left, top=img_top,
+                       width=img_w, height=img_h)
+
+    if caption:
+        _emit_text(slide, caption,
+                   left=margin, top=sh - Inches(0.5),
+                   width=sw - 2 * margin, height=Pt(34),
+                   size_pt=type_scale.get("caption", 12),
+                   color=_muted(palette["foreground"]),
+                   font_name=fonts.get("body"),
+                   italic=True, align=PP_ALIGN.CENTER)
 
 
 # ─── 10. zoom_in_callout ──────────────────────────────────────────────────

@@ -120,6 +120,15 @@ mcp__co_scientist__update_deck(
       bg: #fafaf7  surface: #ffffff  text: #1a1a1a  accent: #b58900
       muted: #6c757d  secondary: #2e7d32  highlight: #ee5500
     Typography:
+      # English-only audience: Inter is fine. For ANY deck whose audience
+      # is Korean / Japanese / Chinese (or whose body text mixes scripts),
+      # use the matching Noto Sans CJK family — its Latin glyphs are co-
+      # designed to share metrics with the CJK script. Pretendard's Latin
+      # is taller / heavier than its Hangul and creates a visible seam in
+      # mixed-script body text (todo 008 §B).
+      #   Korean   audience: display: Noto Sans KR  body: Noto Sans KR
+      #   Japanese audience: display: Noto Sans JP  body: Noto Sans JP
+      #   Chinese  audience: display: Noto Sans SC  body: Noto Sans SC
       display: Inter Bold     body: Inter Regular     mono: JetBrains Mono
     Type scale:
       # legacy keys (still honored)
@@ -157,6 +166,18 @@ Override any of them per deck:
 
 Avoid going below 14pt — the export's auto-shrink (TEXT_TO_SHAPE) will
 already step down when individual slides overrun.
+
+**Mixed-script typography** (todo 008 §B). When the deck's body text
+mixes Latin and CJK in the same paragraph (typical for Korean academic
+talks that use English jargon like "BLUP", "GWAS", "MCP"), the
+**Latin glyphs need to share metrics with the CJK script** or the two
+read as collaged from different fonts. Google's **Noto Sans** pan-CJK
+families do this by design — Noto Sans KR / JP / SC ship Latin
+glyphs co-designed with the matching Hangul / Kana / Hanzi. Pretendard
+and Inter look great in isolation but their Latin glyphs are taller
+and heavier than the Hangul they sit next to, so "MCP가 다리" reads
+with a visible seam between "MCP" and "가". The default for any non-
+English audience should be the matching Noto Sans family.
 
 The `Design language:` block is the deck's **design constitution** —
 free-text rules every slide answers to (todo 004 §G). Not parsed by
@@ -358,6 +379,11 @@ STRUCTURAL PATTERNS  (p.* — content shape, PowerPoint master layouts)
                       palette, fonts, type_scale, sw, sh)
   p.title_and_image_grid(slide, *, title, images, cols=2, # under title
                          palette, fonts, type_scale, sw, sh)
+  p.figure_full(slide, *, image_path=None,                # under title
+                image_callable=None, caption="",
+                palette, fonts, type_scale, sw, sh)
+                       # Pass ONE of image_path / image_callable.
+                       # Full-grid figure + caption in bottom margin.
 
 INTENT PATTERNS  (p.* — design treatment)
   p.chapter_divider(slide, *, chapter_label, summary="",  # OWNS SLIDE
@@ -534,6 +560,7 @@ an intent pattern above if a more loaded design fits:
 | `p.title_and_body(slide, *, title, body, lead="")` | under title | (2) Title and Content (plain) | The most common slide: title + bulleted body. Body sits in a 60% left column with 40% intentional whitespace on the right (focus discipline). Optional `lead` sentence in display type. |
 | `p.title_two_content(slide, *, title, left, right)` | under title | (4) Two Content | Generic 2-column body, each `{heading?, body?, bullets?}`. Mirrored — for emphasized comparison use `before_after_split`; for pros/cons use `contrast_pair`. |
 | `p.title_and_image_grid(slide, *, title, images, cols=2)` | under title | (4) Two Content extended / (9) Picture with Caption | N images in a `cols`-column grid (1 = half-bleed, 2 = side-by-side, 4 = 2×2). Optional per-image captions. |
+| `p.figure_full(slide, *, image_path=None, image_callable=None, caption="")` | under title | (9) Picture with Caption (figure-only) | Single figure that owns the FULL grid (~85% slide height); caption rides in the bottom-margin strip outside the grid. ~17% more figure area vs `row_span=4` + caption-in-row-6 layouts. Pass `image_path` for filesystem PNGs or `image_callable=lambda **kw: h.image_figure(slide, N, **kw)` for paper figures. (todo 008 §A) |
 
 **Two-step selection** (todo 006 — the 2D matrix):
 

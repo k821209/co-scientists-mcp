@@ -1082,6 +1082,7 @@ def _build_code_namespace(slide, row, state, slug, tmpd, *,
         title_and_body=_p.title_and_body,
         title_two_content=_p.title_two_content,
         title_and_image_grid=_p.title_and_image_grid,
+        figure_full=_p.figure_full,         # todo 008 §A
     )
 
     return {
