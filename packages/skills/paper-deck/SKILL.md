@@ -672,6 +672,34 @@ So:
   inch of the slide carries information. The bad case is 60 shapes
   with no hierarchy; not 60 shapes by themselves.
 
+**Go bespoke when... (todo 011 explicit triggers).** Any of the
+following content signals tells you to STOP reaching for a pattern
+and compose directly. Each is a slide that single-pattern calls
+*cannot* produce at proposal grade:
+
+| Signal in content brief | Why no pattern fits |
+|---|---|
+| 3+ structured comparison sections (e.g. "3 platforms × {mode, spec, tag}") | `card_grid` tops out at title+body; can't hold mode/spec/tag layered per card |
+| Personnel page (N people × {role, percentage, expertise}) | Need 3-field row × N — no pattern; compose with rectangles + h.text |
+| Equipment list with sections (sequencing / HPC / storage / …) | Multi-section nested-bullet structure; patterns are flat |
+| Gantt or roadmap with parallel workstreams | Use `p.gantt_chart` BUT pair with chrome + extra annotation rows hand-added |
+| Slide carries TWO independent dense compositions side-by-side (e.g. personnel + equipment) | Patterns assume ONE composition per slide |
+| KPI tiles + supporting figure on the same slide | `p.metric_tile_row` doesn't take a figure; compose tiles + figure side-by-side |
+| Architecture / system diagram with custom topology | No pattern covers arbitrary node-edge structures |
+
+Worked example: see `reference_corpus/proposal_dense.png` (3 platform
+cards + 5-stage pipeline + target metrics, ~50 shapes) and
+`reference_corpus/personnel_equipment.png` (4-row personnel table +
+3-section equipment list, ~60 shapes). The full source of both
+exemplars lives in `reference_corpus/generate.py` — Read it before
+authoring a dense slide; the canonical density vocabulary lives there.
+
+**Chrome is the default for content slides.** Every exemplar in the
+corpus carries `h.deck_chrome` (eyebrow + footer + page number) —
+your code slides should too. Pair the agent-decided eyebrow with the
+slide's role (e.g. `role="method"` → `eyebrow="HOW · …"`,
+`role="result"` → `eyebrow="WHAT · …"`).
+
 **Image placeholder workflow for code slides.** When a `code` slide
 needs images (a paper figure, an AI-generated diagram, a code-shape
 PNG), **declare them as regions[] up front** instead of hardcoding
@@ -896,6 +924,8 @@ for png in res["slide_pngs"]:
 | Typographic discipline | Type hierarchy clear; ≤ 4 sizes; consistent? |
 | Color discipline | ≤ 3 colors, used semantically? |
 | Visual storytelling | Is there a story device (contrast, progression, arrow), or is it a static composition? |
+| **Density** (todo 011) | If this is a *content* slide (not title / chapter divider / qa), does it have ≥ 20 shapes? Toy density (single pattern call, ~10 shapes) on a slide with proposal-grade content = automatic FAIL of this category. Rewrite **bespoke** referencing `reference_corpus/proposal_dense.png` or `personnel_equipment.png` for the canonical density. |
+| **Chrome** (todo 011) | Does the slide carry `h.deck_chrome` (eyebrow + footer + page number)? Content slides without chrome look orphaned in the deck. Title slide / chapter divider are exempt. |
 
 For each category that scores < 4: write one specific complaint
 ("S3's headline is centered, killing the asymmetric tension a thesis

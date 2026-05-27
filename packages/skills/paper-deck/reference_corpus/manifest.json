@@ -86,6 +86,20 @@
       "owns_slide": false,
       "do": "N images in a `cols`-column grid with italic captions below each. 2×2 = comparison (peers, no order). N×1 row = progression (left → right reads as sequence). Captions stay in body type, never display.",
       "dont": "Don't use a grid for one hero image (`h.image_*` full-bleed). Don't pile in 6+ tiles — they get small and lose weight. Don't skip captions; the grid needs labeling to land."
+    },
+    "proposal_dense": {
+      "file": "proposal_dense.png",
+      "title": "Part 1 — 참조 유전체 구축 (3중 플랫폼 전략)",
+      "owns_slide": false,
+      "do": "**Bespoke** — NOT a pattern call. ~50 shapes hand-composed from h.* primitives: 3-platform comparison cards (top half) + 5-stage pipeline row + target-metrics line + deck chrome. Use as the reference rendering whenever the slide's content asks for *proposal-grade density* (3+ structured comparison sections / multiple coordinated layouts / equipment lists / personnel pages). Read this exemplar's source in `reference_corpus/generate.py` for the canonical density vocabulary.",
+      "dont": "Don't shoehorn this kind of content into a single pattern (`card_grid` / `metric_tile_row` / etc.). Pattern calls top out at ~15 shapes; the content here needs ~50. The right answer is to compose directly — that's the whole point of `code` mode."
+    },
+    "personnel_equipment": {
+      "file": "personnel_equipment.png",
+      "title": "수행 인력 및 보유 장비",
+      "owns_slide": false,
+      "do": "**Bespoke** — NOT a pattern call. ~60 shapes hand-composed: LEFT half is a 4-row personnel table (name + role + percentage + expertise), RIGHT half is a multi-section equipment list (sequencing / HPC / storage). Use as the reference whenever the slide carries TWO independent dense compositions side-by-side (personnel + infrastructure, methodology + outputs, criteria + verification).",
+      "dont": "Don't try to fit two independent tabular blocks into `title_two_content` — that pattern's panels are equally weighted with simple bullet lists, not multi-row labeled structures. When each side has its own internal layout, compose them bespoke side-by-side."
     }
   }
 }

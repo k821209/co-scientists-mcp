@@ -33,9 +33,21 @@ from PIL import Image
 
 
 PREAMBLE = (
+    # Deck chrome defaults — each entry can override before PREAMBLE
+    # by assigning EYE / FOOTER / PAGE / TOTAL. (todo 011 — every
+    # exemplar carries chrome so the agent learns chrome is part of
+    # every slide, not an optional add-on.)
+    "try:\n  EYE\nexcept NameError:\n  EYE = ''\n"
+    "try:\n  FOOTER\nexcept NameError:\n  FOOTER = 'Reference corpus · paper-deck'\n"
+    "try:\n  PAGE\nexcept NameError:\n  PAGE = 1\n"
+    "try:\n  TOTAL\nexcept NameError:\n  TOTAL = 12\n"
     "h.accent_stripe(slide, palette=palette, sw=sw)\n"
     "h.title_block(slide, title, palette=palette, fonts=fonts,\n"
     "              type_scale=type_scale, sw=sw, sh=sh)\n"
+    "h.deck_chrome(slide, palette=palette, fonts=fonts,\n"
+    "              type_scale=type_scale, sw=sw, sh=sh,\n"
+    "              eyebrow=EYE, footer=FOOTER,\n"
+    "              page_number=PAGE, total=TOTAL)\n"
 )
 
 
@@ -244,13 +256,11 @@ REFERENCES = [
     (
         "gantt_chart.png", "gantt_chart",
         "추진 일정 (M1–M8) 및 업무 분장",
-        (PREAMBLE
-         + "h.deck_chrome(slide, palette=palette, fonts=fonts,\n"
-           "              type_scale=type_scale, sw=sw, sh=sh,\n"
-           "              eyebrow='WHEN · 7개월 병렬 운영',\n"
-           "              footer='참조 사업 · ㈜디보',\n"
-           "              page_number=9, total=13)\n"
-           "p.gantt_chart(slide, items=[\n"
+        ("EYE = 'WHEN · 7개월 병렬 운영'\n"
+         "FOOTER = '참조 사업 · ㈜디보'\n"
+         "PAGE = 9; TOTAL = 13\n"
+         + PREAMBLE
+         + "p.gantt_chart(slide, items=[\n"
            "  {'label': '착수보고 및 계획 확정',    'start': 1, 'span': 1},\n"
            "  {'label': '시료 QC, HMW DNA 추출', 'start': 1, 'span': 2},\n"
            "  {'label': 'PacBio HiFi 시퀀싱',     'start': 2, 'span': 2},\n"
@@ -297,6 +307,228 @@ REFERENCES = [
         "Don't use a grid for one hero image (`h.image_*` full-bleed). "
         "Don't pile in 6+ tiles — they get small and lose weight. Don't "
         "skip captions; the grid needs labeling to land.",
+    ),
+    # ─── Dense bespoke exemplars (todo 011) ───────────────────────────
+    # These two slides show what a proposal-grade content slide actually
+    # looks like — 40–60 shapes, hand-composed from h.* primitives.
+    # NO single pattern call. The agent reads these and learns: when the
+    # content asks for density, GO BESPOKE.
+    (
+        "proposal_dense.png", "proposal_dense",
+        "Part 1 — 참조 유전체 구축 (3중 플랫폼 전략)",
+        ("EYE = 'HOW · 추진 방법'\n"
+         "FOOTER = '기러기류 종 특이적 마커 발굴 · ㈜디보'\n"
+         "PAGE = 5; TOTAL = 13\n"
+         + PREAMBLE
+         + """
+# ── 3 platform comparison cards (top half) ────────────────────────────
+g = h.grid(sw=sw, sh=sh, cols=12, rows=6,
+           margin_top=Inches(2.0), margin_bot=Inches(0.6))
+plats = [
+    {"name": "PacBio HiFi",     "mode": "외주 시퀀싱", "spec": "≥30×, Q30+",   "tag": "단일 리드 정확도"},
+    {"name": "ONT PromethION",  "mode": "자체 운영",   "spec": "≥20×, R10.4.1, Q20+", "tag": "Ultra-long (>100 kb), 복원서열 통과"},
+    {"name": "DNBSEQ-G99",      "mode": "자체 운영",   "spec": "Short-read",    "tag": "Hybrid polishing + k-mer QC"},
+]
+for i, plat in enumerate(plats):
+    cell = g.cell(col=1 + i*4, span=4, row=1, row_span=2)
+    # Card body + top accent stripe (hand-composed; NOT a pattern call)
+    box = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,
+        cell.left, cell.top, cell.width, cell.height)
+    box.fill.solid(); box.fill.fore_color.rgb = palette["surface"]
+    box.line.color.rgb = palette["accent"]; box.line.width = Pt(0.75)
+    box.shadow.inherit = False
+    stripe = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,
+        cell.left, cell.top, cell.width, Pt(4))
+    stripe.line.fill.background()
+    stripe.fill.solid(); stripe.fill.fore_color.rgb = palette["accent"]
+    stripe.shadow.inherit = False
+    h.text(slide, plat["name"],
+           left=cell.left + Pt(10), top=cell.top + Pt(10),
+           width=cell.width - Pt(20), height=Pt(28),
+           palette=palette, size_pt=18, bold=True,
+           font_name=fonts.get("display"))
+    h.text(slide, plat["mode"],
+           left=cell.left + Pt(10), top=cell.top + Pt(38),
+           width=cell.width - Pt(20), height=Pt(18),
+           palette=palette, size_pt=11, color=palette["muted"],
+           font_name=fonts.get("body"))
+    h.text(slide, plat["spec"],
+           left=cell.left + Pt(10), top=cell.top + Pt(62),
+           width=cell.width - Pt(20), height=Pt(20),
+           palette=palette, size_pt=14, bold=True,
+           font_name=fonts.get("body"))
+    h.text(slide, plat["tag"],
+           left=cell.left + Pt(10), top=cell.top + Pt(88),
+           width=cell.width - Pt(20), height=Pt(40),
+           palette=palette, size_pt=11, color=palette["muted"],
+           font_name=fonts.get("body"))
+
+# ── 5-stage pipeline row (hand-composed) ──────────────────────────────
+stages = ["시료 QC HMW DNA", "라이브러리 시퀀싱", "K-mer (Meryl/GS2)",
+          "de novo (Verkko)", "Hybrid Polishing"]
+h.text(slide, "어셈블리 파이프라인 (척추동물 reference-grade 표준 접근)",
+       left=Inches(0.6), top=Inches(4.5),
+       width=Inches(12), height=Pt(20),
+       palette=palette, size_pt=13, bold=True,
+       font_name=fonts.get("display"))
+stage_top = Inches(4.85)
+stage_h = Inches(0.7)
+stage_total_w = sw - Inches(1.2)
+stage_w = (stage_total_w - Pt(8) * (len(stages) - 1)) // len(stages)
+for i, s in enumerate(stages):
+    sx = Inches(0.6) + i * (stage_w + Pt(8))
+    box = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,
+        sx, stage_top, stage_w, stage_h)
+    box.fill.solid(); box.fill.fore_color.rgb = palette["background"]
+    box.line.color.rgb = palette["secondary"]; box.line.width = Pt(0.75)
+    box.shadow.inherit = False
+    h.text(slide, f"{i+1}", left=sx + Pt(6), top=stage_top + Pt(4),
+           width=Pt(20), height=Pt(20),
+           palette=palette, size_pt=10, bold=True,
+           color=palette["secondary"], font_name=fonts.get("display"))
+    h.text(slide, s, left=sx + Pt(6), top=stage_top + Pt(22),
+           width=stage_w - Pt(12), height=stage_h - Pt(24),
+           palette=palette, size_pt=11, font_name=fonts.get("body"))
+
+# ── Target metrics line at the bottom ─────────────────────────────────
+h.text(slide, "▶ 목표 산출물",
+       left=Inches(0.6), top=Inches(5.8),
+       width=Inches(2.0), height=Pt(20),
+       palette=palette, size_pt=12, bold=True,
+       color=palette["accent"], font_name=fonts.get("display"))
+h.text(slide, "Contig N50 ≥ 5 Mb · BUSCO(aves_odb10) C ≥ 95% · Mercury QV ≥ 40 · scaffold/T2T-급 chromosome-level reference + Mitogenome",
+       left=Inches(2.6), top=Inches(5.8),
+       width=sw - Inches(3.2), height=Pt(34),
+       palette=palette, size_pt=11, color=palette["foreground"],
+       font_name=fonts.get("body"))
+"""),
+        False,
+        "**Bespoke** — NOT a pattern call. ~50 shapes hand-composed "
+        "from h.* primitives: 3-platform comparison cards (top half) + "
+        "5-stage pipeline row + target-metrics line + deck chrome. "
+        "Use as the reference rendering whenever the slide's content "
+        "asks for *proposal-grade density* (3+ structured comparison "
+        "sections / multiple coordinated layouts / equipment lists / "
+        "personnel pages). Read this exemplar's source in "
+        "`reference_corpus/generate.py` for the canonical density "
+        "vocabulary.",
+        "Don't shoehorn this kind of content into a single pattern "
+        "(`card_grid` / `metric_tile_row` / etc.). Pattern calls top "
+        "out at ~15 shapes; the content here needs ~50. The "
+        "right answer is to compose directly — that's the whole point "
+        "of `code` mode.",
+    ),
+    (
+        "personnel_equipment.png", "personnel_equipment",
+        "수행 인력 및 보유 장비",
+        ("EYE = 'WHO · 사업 수행 능력'\n"
+         "FOOTER = '기러기류 종 특이적 마커 발굴 · ㈜디보'\n"
+         "PAGE = 10; TOTAL = 13\n"
+         + PREAMBLE
+         + """
+# ── LEFT half: personnel table (hand-composed) ────────────────────────
+h.text(slide, "수행 조직 (4명 : 박사 2 + 석사 2)",
+       left=Inches(0.6), top=Inches(2.0),
+       width=Inches(5.8), height=Pt(20),
+       palette=palette, size_pt=13, bold=True,
+       font_name=fonts.get("display"))
+people = [
+    {"name": "강양재",   "role": "연구책임자 (PI)", "pct": "20%",
+     "expertise": "박사 · 농학 · 분석 총괄 → 어셈블리 · 변이 · 마커 발굴 검토"},
+    {"name": "박진하",   "role": "시퀀싱 · 실험 책임자", "pct": "50%",
+     "expertise": "석사 · DNA QC · 라이브러리 · ONT/DNBSEQ 직접 운영"},
+    {"name": "유준일",   "role": "자문 · 분석 백업", "pct": "20%",
+     "expertise": "박사 · 정형성 데이터 처리 · 변이 호출 보조"},
+    {"name": "이유희",   "role": "행정 지원 · 실험 보조", "pct": "10%",
+     "expertise": "석사 · 보고서 작성 · 시료 운영 · 보관"},
+]
+y = Inches(2.4)
+for p in people:
+    box = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,
+        Inches(0.6), y, Inches(5.8), Inches(0.85))
+    box.fill.solid(); box.fill.fore_color.rgb = palette["surface"]
+    box.line.color.rgb = palette["muted"]; box.line.width = Pt(0.5)
+    box.shadow.inherit = False
+    # Top-row: name + percentage; bottom-row: role + expertise
+    h.text(slide, p["name"],
+           left=Inches(0.7), top=y + Pt(4),
+           width=Inches(1.4), height=Pt(20),
+           palette=palette, size_pt=13, bold=True,
+           font_name=fonts.get("display"))
+    h.text(slide, p["pct"],
+           left=Inches(5.5), top=y + Pt(4),
+           width=Inches(0.7), height=Pt(20),
+           palette=palette, size_pt=14, bold=True,
+           color=palette["accent"], font_name=fonts.get("display"))
+    h.text(slide, p["role"],
+           left=Inches(2.1), top=y + Pt(4),
+           width=Inches(3.3), height=Pt(20),
+           palette=palette, size_pt=11, color=palette["muted"],
+           font_name=fonts.get("body"))
+    h.text(slide, p["expertise"],
+           left=Inches(0.7), top=y + Pt(26),
+           width=Inches(5.5), height=Inches(0.45),
+           palette=palette, size_pt=10, color=palette["foreground"],
+           font_name=fonts.get("body"))
+    y = y + Inches(0.95)
+
+# ── RIGHT half: equipment list with sections (hand-composed) ──────────
+h.text(slide, "보유 장비 — 시퀀싱 · HPC · 스토리지",
+       left=Inches(6.9), top=Inches(2.0),
+       width=Inches(6.0), height=Pt(20),
+       palette=palette, size_pt=13, bold=True,
+       font_name=fonts.get("display"))
+sections = [
+    ("A. 시퀀싱", [
+        ("ONT PromethION P24", "Long-read · 참조유전체"),
+        ("MGI DNBSEQ-G99",     "Short-read · 6종 재서열"),
+        ("DELL Precision 3680 + RTX", "Nanopore 베이스콜링"),
+    ]),
+    ("B. HPC (Flagship)", [
+        ("ASUS ESC8000A-E12",     "512 cores · 1024 GiB RAM"),
+        ("RTX 6000 · 6 노트",      "GATK GenomicsDB joint"),
+    ]),
+    ("C. 스토리지", [
+        ("Synology RS3621",     "146 TiB · 6 노드"),
+        ("DELL MD1200",          "90 TiB"),
+        ("DELL MD1400",          "164 TiB"),
+    ]),
+]
+y = Inches(2.4)
+for title_text, items in sections:
+    h.text(slide, title_text,
+           left=Inches(6.9), top=y,
+           width=Inches(5.8), height=Pt(16),
+           palette=palette, size_pt=11, bold=True,
+           color=palette["secondary"], font_name=fonts.get("display"))
+    y = y + Pt(18)
+    for name, spec in items:
+        h.text(slide, name,
+               left=Inches(7.05), top=y,
+               width=Inches(2.6), height=Pt(16),
+               palette=palette, size_pt=10, bold=True,
+               font_name=fonts.get("body"))
+        h.text(slide, spec,
+               left=Inches(9.7), top=y,
+               width=Inches(3.0), height=Pt(16),
+               palette=palette, size_pt=10, color=palette["muted"],
+               font_name=fonts.get("body"))
+        y = y + Pt(15)
+    y = y + Pt(6)
+"""),
+        False,
+        "**Bespoke** — NOT a pattern call. ~60 shapes hand-composed: "
+        "LEFT half is a 4-row personnel table (name + role + percentage "
+        "+ expertise), RIGHT half is a multi-section equipment list "
+        "(sequencing / HPC / storage). Use as the reference whenever "
+        "the slide carries TWO independent dense compositions side-by-"
+        "side (personnel + infrastructure, methodology + outputs, "
+        "criteria + verification).",
+        "Don't try to fit two independent tabular blocks into "
+        "`title_two_content` — that pattern's panels are equally "
+        "weighted with simple bullet lists, not multi-row labeled "
+        "structures. When each side has its own internal layout, "
+        "compose them bespoke side-by-side.",
     ),
 ]
 
