@@ -687,6 +687,73 @@ def text(slide, content: str, *, left, top, width, height,
     return tb
 
 
+def vstack(slide, lines, *, left, top, width, palette,
+           fonts=None, gap_pt: int = 4):
+    """Stack text lines vertically with auto-measured heights (todo 014
+    vstack-fix). Eliminates the "two textboxes at the same (left, top)
+    overlap" bug pattern that breaks bespoke compositions — pass a list
+    of styled-line dicts and the helper places each one beneath the
+    previous, computing per-line height via `measure_text_height_pt`.
+
+    Each `lines` item is a dict with keys:
+      text        (str, required; empty/missing → renders as a gap)
+      size_pt     (int, default 14)
+      color       (RGBColor or palette key like "muted"/"accent", default
+                   palette["foreground"])
+      bold        (bool, default False)
+      italic      (bool, default False)
+      font_name   (str or "display"/"body", default body)
+      align       (PP_ALIGN, default LEFT)
+      line_spacing(float, default 1.22)
+      pad_top_pt  (int, extra gap before this line in pt, default 0)
+
+    Returns the y of the bottom of the stack — pass `top=returned_y +
+    Pt(...)` to chain the next region. Use this whenever you would
+    otherwise call `h.text(...)` twice with hand-computed `top` values
+    for layouts like "number eyebrow + label below" or "title +
+    subtitle + body".
+    """
+    y = top
+    fill_default = palette.get("foreground") if palette else None
+    fonts = fonts or {}
+    for item in lines:
+        if not isinstance(item, dict):
+            item = {"text": str(item)}
+        pad_top = item.get("pad_top_pt", 0)
+        if pad_top:
+            y += Pt(pad_top)
+        body = item.get("text", "") or ""
+        if not body.strip():
+            # Empty/missing text → emit a gap proportional to size.
+            size_pt = item.get("size_pt", 14)
+            y += Pt(int(size_pt * 0.8) + gap_pt)
+            continue
+        size_pt = item.get("size_pt", 14)
+        item_line_spacing = item.get("line_spacing", 1.22)
+        color = item.get("color")
+        if isinstance(color, str) and palette:
+            color = palette.get(color, color)
+        if color is None:
+            color = fill_default
+        font_name = item.get("font_name")
+        if font_name in ("display", "body"):
+            font_name = fonts.get(font_name)
+        natural_pt = measure_text_height_pt(
+            body, max_width_emu=width, font_pt=size_pt,
+            line_spacing=item_line_spacing,
+        )
+        line_h = Pt(int(natural_pt) + 4)
+        text(slide, body, left=left, top=y, width=width, height=line_h,
+             palette=palette, size_pt=size_pt, color=color,
+             font_name=font_name, bold=item.get("bold", False),
+             italic=item.get("italic", False),
+             align=item.get("align"),
+             line_spacing=item_line_spacing,
+             fonts=fonts)
+        y += line_h + Pt(gap_pt)
+    return y
+
+
 def bullet_list(slide, items, *, palette, fonts, type_scale,
                 left, top, width, height, bullet: str = "•",
                 pack: bool = True):

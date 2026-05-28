@@ -383,6 +383,13 @@ HELPERS  (h.* — primitives)
          italic=False, align=None, anchor=None,
          line_spacing=1.22, autofit=True, min_pt=10,
          fonts=None)                                      # todo 007 §D
+  h.vstack(slide, lines, *, left, top, width, palette,    # auto-stack lines
+           fonts=None, gap_pt=4)                          # ← USE THIS when
+            # lines: list[{text, size_pt?, color?, bold?,    you'd otherwise
+            # italic?, font_name?, align?, line_spacing?,    call h.text twice
+            # pad_top_pt?}] — auto-measures each line's     with hand-computed
+            # height; returns final_y for chaining.         top values (todo
+                                                            # 014 vstack-fix)
   h.icon(slide, name, *, left, top, size, palette,        # MSO_SHAPE or glyph
          color=None, fonts=None)
   h.icon_names() -> list[str]                             # vocabulary
@@ -935,6 +942,35 @@ preview pipeline) doesn't fully honor that, so the autofit ensures
 the PNG matches the slide. The minimum fall-back is ~12pt for body,
 ~16pt for headings — if you see autofit hitting min, the right fix
 is to **drop content**, not to expand the box.
+
+**Text-on-text overlap (todo 014 vstack-fix)** — the *other* overlap
+class: when bespoke code places two textboxes at the SAME `(left,
+top)` and they superimpose. Symptom looks like one character on top
+of another (e.g., a step number "01" overlapping the first hangul of
+its label). Cause: you wrote two `h.text(...)` calls with hand-
+computed `top` values and reused the same `top` by accident, OR you
+didn't increment `top` by the first line's measured height.
+
+Fix: **use `h.vstack(slide, lines, ...)` whenever you would
+otherwise call `h.text` twice with hand-computed `top` values for a
+stacked layout** (number eyebrow + label below, title + subtitle +
+body, callout headline + body, etc.). `h.vstack` measures each
+line's natural height and increments `y` between items, returning
+the bottom `y` for chaining downstream content. Eliminates the whole
+"forgot to advance y" class of overlap bugs.
+
+```python
+# WRONG — both textboxes at the same y; "01" overlaps the label.
+h.text(slide, f"{i+1:02d}", left=x, top=y, width=w, height=Pt(20), ...)
+h.text(slide, label,        left=x, top=y, width=w, height=Pt(20), ...)
+
+# RIGHT — vstack handles the y advancement.
+final_y = h.vstack(slide, [
+    {"text": f"{i+1:02d}", "size_pt": 14, "color": "muted", "bold": True},
+    {"text": label,        "size_pt": 16, "bold": True},
+], left=x, top=y, width=w, palette=palette, fonts=fonts)
+# downstream items go at `final_y + Pt(...)`.
+```
 
 ### 5c. Compositional effects — why arrangement matters (todo 006)
 
