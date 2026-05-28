@@ -444,6 +444,16 @@ def title_block(slide, text: str, *, palette, fonts, type_scale, sw, sh,
     top = Inches(0.45) if top is None else top
     width = sw - Inches(1.4) if width is None else width
     height = Inches(1.0) if height is None else height
+    title_pt_start = type_scale.get("title", 32)
+    # Autofit (todo 014 title-fix): without this, long titles silently
+    # wrap to 2 lines under soffice (visible in p.13 "Harness 네 가지
+    # primitive — 대화가 소프트웨어가 되는 / 방식"). min_pt=20 keeps
+    # titles readable; if even 20pt overflows the box width, we accept
+    # the wrap.
+    title_pt = autofit_pt(
+        text or "", max_width_emu=width, max_height_emu=height,
+        start_pt=title_pt_start, line_spacing=1.05, min_pt=20,
+    )
     box = slide.shapes.add_textbox(left, top, width, height)
     tf = box.text_frame
     tf.word_wrap = True
@@ -452,15 +462,26 @@ def title_block(slide, text: str, *, palette, fonts, type_scale, sw, sh,
     p.line_spacing = 1.05
     run = p.add_run()
     run.text = text or ""
-    run.font.size = Pt(type_scale.get("title", 32))
+    run.font.size = Pt(title_pt)
     run.font.bold = True
     run.font.color.rgb = palette["foreground"]
     if fonts.get("display"):
         run.font.name = fonts["display"]
     if accent_rule:
+        # Measure actual title height and position the rule at a
+        # consistent Pt(8) gap below the LAST rendered line — fixes both
+        # "orphaned floating rule" (single-line title, current behavior
+        # left a ~Inches(0.5) gap) and "rule looks like underline of
+        # the 2nd line" (wrapped title, current behavior put the rule
+        # ~Pt(5) below the wrap). (todo 014 title-fix.)
+        title_natural_pt = measure_text_height_pt(
+            text or "", max_width_emu=width,
+            font_pt=title_pt, line_spacing=1.05,
+        )
+        rule_top = top + Pt(int(title_natural_pt) + 8)
         rule = slide.shapes.add_shape(
             MSO_SHAPE.RECTANGLE, left + Inches(0.02),
-            top + height + Pt(2), Inches(2.2), Pt(4),
+            rule_top, Inches(2.2), Pt(4),
         )
         rule.line.fill.background()
         rule.fill.solid()
