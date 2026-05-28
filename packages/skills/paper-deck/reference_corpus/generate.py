@@ -610,10 +610,21 @@ def main() -> int:
         return 1
 
     # Move + rename PNGs from slide_001.png etc. → pattern-name.png
-    for i, (fname, *_rest) in enumerate(REFERENCES, start=1):
+    # Also stamp shape_count on each manifest entry so the agent sees
+    # density as a measurable property (todo 011 — agent reads the
+    # manifest and learns "proposal_dense=~50 shapes, evidence_stack=
+    # ~12 shapes" before authoring its own slide).
+    from pptx import Presentation as _P
+    pptx_doc = _P(str(pptx_out))
+    for i, (fname, pattern, *_rest) in enumerate(REFERENCES, start=1):
         src = pathlib.Path(res["slide_pngs"][i - 1]["local_path"])
         dst = corpus_dir / fname
         shutil.copy(src, dst)
+        # Total shape count on the corresponding slide (1-indexed →
+        # zero-indexed in python-pptx)
+        manifest["patterns"][pattern]["shape_count"] = len(
+            pptx_doc.slides[i - 1].shapes
+        )
     (corpus_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",

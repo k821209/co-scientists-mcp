@@ -96,3 +96,36 @@ A future deck export should show:
 If point #2 still holds in a future deck (toy density dominates), the
 agent isn't reading the corpus before composing — that's a SKILL §5
 flow issue, not a corpus issue. File a follow-up.
+
+## Follow-up (later same day 2026-05-28)
+
+User reported: even on a fresh session the next deck looked toy
+again. **The patterns' existence is the force.** Capability didn't
+change; the agent's default behaviour didn't either, because:
+
+- §5a's pattern catalog (14 patterns, two big tables, ~150 lines of
+  visual footprint) is what the agent grep's first.
+- "Go bespoke when…" was AFTER the catalog in the file. The agent
+  read the menu before reading the warning.
+- Pattern entries have "When to use" lines that read as broad
+  recommendations ("use for thesis / takeaway") rather than narrow
+  exact-fit conditions.
+
+So this todo gets a second-pass fix:
+
+1. **§5 opener now explicitly states the default**: "Content slides
+   are BESPOKE by default — target ≥ 25 shapes per slide. Patterns
+   are narrow shortcuts."
+2. **§5a reorganised**: "Go bespoke when…" trigger table + worked-
+   example pointers MOVED to the top of §5a, BEFORE the pattern
+   catalog. The catalog now lives under "## Pattern shortcuts —
+   narrow use only" with a banner saying "When in doubt: bespoke."
+3. **Manifest gains `shape_count` per entry.** The agent reads
+   `proposal_dense = 42 shapes` next to `evidence_stack = 13 shapes`
+   and sees density as a measurable property they consciously
+   target.
+4. **§9 critique density bar raised** from 20 → 25 shapes for
+   content slides. Pattern + chrome ≈ 15 shapes → automatic FAIL.
+
+The capability is still the same. The visible defaults are
+materially different.

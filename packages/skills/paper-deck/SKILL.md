@@ -219,14 +219,28 @@ signals → code, figure_number → paper-figure, prompt → ai-image,
 otherwise → text). Pass an explicit `render_mode` only when you want
 to lock the strategy at outline time (rare).
 
-### 5. Design + author each slide (todo 010)
+### 5. Design + author each slide
+
+> **Content slides are BESPOKE by default — target ≥ 25 shapes per
+> slide, composed from `h.*` primitives.** Patterns (`p.*`) are
+> narrow shortcuts for *exact-fit* cases only (a 3-step workflow with
+> nothing else on the slide; a single chapter divider). When the
+> content has any of the §5a "Go bespoke when…" signals — proposal-
+> grade density, multi-section structure, two compositions side-by-
+> side, etc. — **do NOT call a single pattern**. Compose directly
+> from `h.text` + `slide.shapes.add_shape` + `h.deck_chrome` like
+> `reference_corpus/proposal_dense.png` and `personnel_equipment.png`.
+> Pattern-fits-everything is the toy-density failure mode (todo 011).
 
 Now you go slide-by-slide. For each slide:
 
 1. **Read the brief** (role + title + body intent + notes from §4).
-2. **Decide the design** based on the content. The catalog in §5a is a
-   menu — pick the structural type (title-slide / title+body /
-   title+image / title+N-images / hybrid) and the intent treatment
+2. **Decide the design** based on the content. Default to bespoke
+   composition; only fall back to a single pattern when the content
+   is a clean exact-fit case (see §5a's "Use only when…" criteria).
+   `reference_corpus/proposal_dense.png` and `personnel_equipment.png`
+   are the canonical density references — Read them before authoring
+   any non-trivial content slide.
    (`chapter_divider` / `metric_tile_row` / `flow_pipeline` /
    `figure_full` / `gantt_chart` / …). If no pattern fits, **go
    bespoke** — compose with `h.text` / `h.card` / `h.icon` /
@@ -514,6 +528,44 @@ h.pull_quote(slide, "Take-home line",
              left=left, top=top, width=w_, height=h_)
 ```
 
+## ⚠️  Bespoke is the default — go bespoke when… (todo 011)
+
+> Most content slides are NOT a single-pattern fit. Default to
+> bespoke composition with `h.*` primitives + `slide.shapes.add_shape`.
+> The pattern catalog comes AFTER this section as narrow shortcuts.
+
+**Trigger table** — any of these signals in the slide brief means
+**do NOT call a pattern**; compose directly:
+
+| Signal in content brief | Why no pattern fits |
+|---|---|
+| 3+ structured comparison sections (e.g. "3 platforms × {mode, spec, tag}") | `card_grid` tops out at title+body; can't hold mode/spec/tag layered per card |
+| Personnel page (N people × {role, percentage, expertise}) | Need 3-field row × N — no pattern; compose with rectangles + h.text |
+| Equipment list with sections (sequencing / HPC / storage / …) | Multi-section nested-bullet structure; patterns are flat |
+| Gantt or roadmap with parallel workstreams | Use `p.gantt_chart` BUT pair with chrome + extra annotation rows hand-added |
+| Slide carries TWO independent dense compositions side-by-side (e.g. personnel + equipment) | Patterns assume ONE composition per slide |
+| KPI tiles + supporting figure on the same slide | `p.metric_tile_row` doesn't take a figure; compose tiles + figure side-by-side |
+| Architecture / system diagram with custom topology | No pattern covers arbitrary node-edge structures |
+
+**Worked examples — Read these before authoring**:
+- `reference_corpus/proposal_dense.png` (~50 shapes; source in
+  `reference_corpus/generate.py` under `"proposal_dense"`)
+- `reference_corpus/personnel_equipment.png` (~60 shapes; source ditto)
+
+The canonical density vocabulary lives in those two snippets. Mirror
+the structure; adapt the content. **Chrome (`h.deck_chrome`) is part
+of every content slide** — never skip it.
+
+If the brief has none of the trigger signals AND fits one of the
+patterns below cleanly, you can use a single pattern call. But check
+the pattern's "Use ONLY when…" line — most are tighter than they
+look.
+
+## Pattern shortcuts — narrow use only
+
+> Each pattern below now lists an explicit "Use ONLY when…" condition.
+> The condition is tight on purpose. When in doubt: bespoke.
+
 **`p.*` whole-slide pattern catalog** (todo 004 §B + 005) — these are
 *designed compositions*, not primitives. Each pattern bundles a
 designer's compositional decisions (grid placement, type hierarchy,
@@ -661,44 +713,20 @@ content slide**. Our toy patterns produce ~10–15. The gap is the
 agent's compose budget per slide, not python-pptx's capability.
 
 So:
-- **Use a pattern when the content fits it** — title + 3 KPIs?
-  `p.metric_tile_row`. Title + workflow? `p.flow_pipeline`.
-- **Go bespoke when the content asks** — proposal density,
-  multi-section equipment lists, hand-tuned comparisons. Compose
-  directly with `h.text` / `h.card` / `h.icon` / `slide.shapes
-  .add_shape` / `h.table`. The pattern catalog isn't a wall.
+- **Default to bespoke** — see the "Go bespoke when…" trigger table
+  near the top of §5a (right before the pattern catalog).
+- **Use a pattern only when the content is an exact fit** — each
+  pattern's "Use ONLY when…" line in the catalog is intentionally
+  tight. If your brief overflows that condition, you're in bespoke
+  territory.
 - **Density signals you're on the right track.** When a content slide
-  ends up at ~25–60 shapes, that's usually *good* — it means every
-  inch of the slide carries information. The bad case is 60 shapes
-  with no hierarchy; not 60 shapes by themselves.
-
-**Go bespoke when... (todo 011 explicit triggers).** Any of the
-following content signals tells you to STOP reaching for a pattern
-and compose directly. Each is a slide that single-pattern calls
-*cannot* produce at proposal grade:
-
-| Signal in content brief | Why no pattern fits |
-|---|---|
-| 3+ structured comparison sections (e.g. "3 platforms × {mode, spec, tag}") | `card_grid` tops out at title+body; can't hold mode/spec/tag layered per card |
-| Personnel page (N people × {role, percentage, expertise}) | Need 3-field row × N — no pattern; compose with rectangles + h.text |
-| Equipment list with sections (sequencing / HPC / storage / …) | Multi-section nested-bullet structure; patterns are flat |
-| Gantt or roadmap with parallel workstreams | Use `p.gantt_chart` BUT pair with chrome + extra annotation rows hand-added |
-| Slide carries TWO independent dense compositions side-by-side (e.g. personnel + equipment) | Patterns assume ONE composition per slide |
-| KPI tiles + supporting figure on the same slide | `p.metric_tile_row` doesn't take a figure; compose tiles + figure side-by-side |
-| Architecture / system diagram with custom topology | No pattern covers arbitrary node-edge structures |
-
-Worked example: see `reference_corpus/proposal_dense.png` (3 platform
-cards + 5-stage pipeline + target metrics, ~50 shapes) and
-`reference_corpus/personnel_equipment.png` (4-row personnel table +
-3-section equipment list, ~60 shapes). The full source of both
-exemplars lives in `reference_corpus/generate.py` — Read it before
-authoring a dense slide; the canonical density vocabulary lives there.
-
-**Chrome is the default for content slides.** Every exemplar in the
-corpus carries `h.deck_chrome` (eyebrow + footer + page number) —
-your code slides should too. Pair the agent-decided eyebrow with the
-slide's role (e.g. `role="method"` → `eyebrow="HOW · …"`,
-`role="result"` → `eyebrow="WHAT · …"`).
+  ends up at ~25–60 shapes, that's *good* — every inch carries info.
+  The bad case is 60 shapes with no hierarchy; not 60 shapes by
+  themselves.
+- **Chrome is part of every content slide.** `h.deck_chrome(eyebrow,
+  footer, page_number, total)` after `h.title_block`. Pair the
+  eyebrow with the slide's role (`role="method"` → `eyebrow="HOW ·
+  …"`, `role="result"` → `eyebrow="WHAT · …"`).
 
 **Image placeholder workflow for code slides.** When a `code` slide
 needs images (a paper figure, an AI-generated diagram, a code-shape
@@ -924,7 +952,7 @@ for png in res["slide_pngs"]:
 | Typographic discipline | Type hierarchy clear; ≤ 4 sizes; consistent? |
 | Color discipline | ≤ 3 colors, used semantically? |
 | Visual storytelling | Is there a story device (contrast, progression, arrow), or is it a static composition? |
-| **Density** (todo 011) | If this is a *content* slide (not title / chapter divider / qa), does it have ≥ 20 shapes? Toy density (single pattern call, ~10 shapes) on a slide with proposal-grade content = automatic FAIL of this category. Rewrite **bespoke** referencing `reference_corpus/proposal_dense.png` or `personnel_equipment.png` for the canonical density. |
+| **Density** (todo 011) | If this is a *content* slide (not title / chapter divider / qa), does it have ≥ **25** shapes? Toy density (single pattern call ≈ 10 shapes; pattern + chrome ≈ 15) on a slide with proposal-grade content = automatic FAIL. Rewrite **bespoke** referencing `reference_corpus/proposal_dense.png` (~50 shapes) or `personnel_equipment.png` (~60 shapes) — Read those PNGs + their source in `reference_corpus/generate.py` before the rewrite. |
 | **Chrome** (todo 011) | Does the slide carry `h.deck_chrome` (eyebrow + footer + page number)? Content slides without chrome look orphaned in the deck. Title slide / chapter divider are exempt. |
 
 For each category that scores < 4: write one specific complaint
