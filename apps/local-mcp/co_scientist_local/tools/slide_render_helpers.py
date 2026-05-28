@@ -656,15 +656,18 @@ def text(slide, content: str, *, left, top, width, height,
 
 
 def bullet_list(slide, items, *, palette, fonts, type_scale,
-                left, top, width, height, bullet: str = "•"):
+                left, top, width, height, bullet: str = "•",
+                pack: bool = True):
     """A vertical bulleted list. `items` is a list of strings; each
     becomes one paragraph at the deck's body type (autofit-shrunk if
     the items don't fit at the start size). Pass bullet="" for a
-    plain paragraph list."""
-    box = slide.shapes.add_textbox(left, top, width, height)
-    tf = box.text_frame
-    tf.word_wrap = True
-    _autoshrink(tf)
+    plain paragraph list.
+
+    When `pack=True` (default, todo 014 D-fix v2), the textbox shrinks
+    to natural content height — caller reads `box.height` after the
+    call for the actual emitted height (so a wrapper rectangle can be
+    sized to match). Pass `pack=False` for fixed-rectangle behavior.
+    """
     body_pt = type_scale.get("body", 20)
     line_spacing = type_scale.get("line_spacing", 1.22)
     rendered = [(f"{bullet} {it}" if bullet else str(it)) for it in items]
@@ -674,6 +677,21 @@ def bullet_list(slide, items, *, palette, fonts, type_scale,
         start_pt=body_pt, line_spacing=line_spacing,
         min_pt=max(10, body_pt - 8),
     )
+    if pack and rendered:
+        natural_pt = sum(
+            measure_text_height_pt(line, max_width_emu=width,
+                                   font_pt=actual_pt,
+                                   line_spacing=line_spacing)
+            for line in rendered
+        ) + (len(rendered) - 1) * 4  # space_after between paragraphs (pt)
+        natural_h = Pt(int(natural_pt) + 4)
+        used_h = min(height, natural_h) if natural_h < height else height
+    else:
+        used_h = height
+    box = slide.shapes.add_textbox(left, top, width, used_h)
+    tf = box.text_frame
+    tf.word_wrap = True
+    _autoshrink(tf)
     first = True
     for line in rendered:
         para = tf.paragraphs[0] if first else tf.add_paragraph()
@@ -773,11 +791,21 @@ def card(slide, *, left, top, width, height, title: str, body: str,
     bf.word_wrap = True
     _autoshrink(bf)
     if body:
+        # Body autofit (todo 014 B-fix): soffice doesn't honor
+        # MSO_AUTO_SIZE.TEXT_TO_SHAPE during PDF preview, so an
+        # over-tall body would wrap silently past the card's bottom
+        # edge. Run the Korean-aware autofit so the chosen pt actually
+        # fits inside body_h before render.
+        body_actual_pt = autofit_pt(
+            body, max_width_emu=inner_w, max_height_emu=body_h,
+            start_pt=body_pt, line_spacing=line_spacing,
+            min_pt=max(9, body_pt - 6),
+        )
         p = bf.paragraphs[0]
         p.line_spacing = line_spacing
         run = p.add_run()
         run.text = body
-        run.font.size = Pt(body_pt)
+        run.font.size = Pt(body_actual_pt)
         run.font.color.rgb = palette["foreground"]
         if fonts.get("body"):
             run.font.name = fonts["body"]
@@ -856,22 +884,39 @@ def card_grid(slide, items, *, left, top, width, height,
 
 def pull_quote(slide, text: str, *, palette, fonts, type_scale,
                left, top, width, height,
-               bar_pt: int = 4, gap_pt: int = 10):
+               bar_pt: int = 4, gap_pt: int = 10,
+               pack: bool = True):
     """An emphasis block: vertical accent bar + italic text. Use for a
-    punchline / take-home line you want the audience to focus on."""
+    punchline / take-home line you want the audience to focus on.
+
+    When `pack=True` (default, todo 014 D-fix v2), the accent bar and
+    textbox shrink to natural content height when text is shorter than
+    the requested rectangle — otherwise the bar floats above empty
+    space below the quote. Return gains `height_used` for downstream
+    layout. Pass `pack=False` for fixed-rectangle behavior.
+    """
+    body_pt = type_scale.get("body", 20)
+    line_spacing = type_scale.get("line_spacing", 1.22)
+    quote_pt = max(body_pt, int(body_pt * 1.1))
+    text_left = left + Pt(bar_pt) + Pt(gap_pt)
+    text_width = width - Pt(bar_pt) - Pt(gap_pt)
+    natural_pt = measure_text_height_pt(
+        text or "", max_width_emu=text_width, font_pt=quote_pt,
+        line_spacing=line_spacing,
+    )
+    natural_h = Pt(int(natural_pt) + 4) if (text or "").strip() else Pt(0)
+    used_h = (
+        min(height, natural_h) if pack and natural_h < height and natural_h > 0
+        else height
+    )
     bar = slide.shapes.add_shape(
-        MSO_SHAPE.RECTANGLE, left, top, Pt(bar_pt), height,
+        MSO_SHAPE.RECTANGLE, left, top, Pt(bar_pt), used_h,
     )
     bar.line.fill.background()
     bar.fill.solid()
     bar.fill.fore_color.rgb = palette["accent"]
     bar.shadow.inherit = False
-    body_pt = type_scale.get("body", 20)
-    quote_pt = max(body_pt, int(body_pt * 1.1))
-    tb = slide.shapes.add_textbox(
-        left + Pt(bar_pt) + Pt(gap_pt), top,
-        width - Pt(bar_pt) - Pt(gap_pt), height,
-    )
+    tb = slide.shapes.add_textbox(text_left, top, text_width, used_h)
     tf = tb.text_frame
     tf.word_wrap = True
     _autoshrink(tf)
@@ -881,7 +926,7 @@ def pull_quote(slide, text: str, *, palette, fonts, type_scale,
             continue
         p = tf.paragraphs[0] if first else tf.add_paragraph()
         first = False
-        p.line_spacing = type_scale.get("line_spacing", 1.22)
+        p.line_spacing = line_spacing
         run = p.add_run()
         run.text = line.strip()
         run.font.size = Pt(quote_pt)
@@ -889,4 +934,4 @@ def pull_quote(slide, text: str, *, palette, fonts, type_scale,
         run.font.color.rgb = palette["foreground"]
         if fonts.get("body"):
             run.font.name = fonts["body"]
-    return {"bar": bar, "text_box": tb}
+    return {"bar": bar, "text_box": tb, "height_used": used_h}
