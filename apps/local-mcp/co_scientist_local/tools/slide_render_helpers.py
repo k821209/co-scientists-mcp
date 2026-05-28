@@ -468,20 +468,31 @@ def title_block(slide, text: str, *, palette, fonts, type_scale, sw, sh,
     if fonts.get("display"):
         run.font.name = fonts["display"]
     if accent_rule:
-        # Measure actual title height and position the rule at a
-        # consistent Pt(8) gap below the LAST rendered line — fixes both
-        # "orphaned floating rule" (single-line title, current behavior
-        # left a ~Inches(0.5) gap) and "rule looks like underline of
-        # the 2nd line" (wrapped title, current behavior put the rule
-        # ~Pt(5) below the wrap). (todo 014 title-fix.)
+        # Position the rule with enough vertical gap that it reads as a
+        # *floating accent below the title* rather than an underline of
+        # the title's first words. The previous tight gap (Pt(8) below
+        # measured height) made short titles look underlined; restore
+        # the old "loose accent" position for 1-line titles, and only
+        # push the rule lower when the title actually wraps. (todo 014
+        # title-fix v2.)
         title_natural_pt = measure_text_height_pt(
             text or "", max_width_emu=width,
             font_pt=title_pt, line_spacing=1.05,
         )
-        rule_top = top + Pt(int(title_natural_pt) + 8)
+        rule_top = max(
+            top + height + Pt(2),                       # original floor
+            top + Pt(int(title_natural_pt) + 20),       # wrap fallback
+        )
+        # Width: extend to the title's visible width so the rule never
+        # appears to underline only a prefix of a long title. Falls
+        # back to Inches(2.2) for short titles. Capped at the title
+        # box width.
+        title_visible_pt = estimate_text_width_pt(text or "", title_pt)
+        rule_w = max(Inches(2.2), Pt(int(title_visible_pt) + 4))
+        rule_w = min(rule_w, width)
         rule = slide.shapes.add_shape(
             MSO_SHAPE.RECTANGLE, left + Inches(0.02),
-            rule_top, Inches(2.2), Pt(4),
+            rule_top, rule_w, Pt(4),
         )
         rule.line.fill.background()
         rule.fill.solid()
