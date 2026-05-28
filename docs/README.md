@@ -28,6 +28,7 @@ reference the commit that shipped it. Currently open:
 - [009 — Pattern ceiling, deck chrome, density](todo/009_pattern_ceiling_deck_chrome_density.md) (closed 2026-05-27 — invert SKILL nudge + h.deck_chrome + h.table + p.gantt_chart + dense corpus exemplar; closes capability gap to original co-scientist)
 - [010 — Defer mode decision to authoring time](todo/010_defer_mode_decision_to_authoring.md) (closed 2026-05-28 — `render_mode` optional, inferred from populated fields; SKILL flow has agent design per slide instead of pre-committing at outline)
 - [011 — Visual prior shift: density + chrome](todo/011_visual_prior_density_chrome.md) (closed 2026-05-28 — corpus chrome'd on every exemplar + 2 dense bespoke exemplars + SKILL "Go bespoke when" trigger table + §9 critique rubric flags toy-density + missing-chrome)
+- [012 — Strip structural templating](todo/012_strip_structural_templating.md) (closed 2026-05-28 — §4 "Standard role sequence" table replaced with 5 example deck shapes + "derive from YOUR paper, not from a template" warning; §3 Arc reframed as placeholder; corpus is now a density gym, not a content shopping mall)
 
 ### Architecture decisions (ADRs)
 

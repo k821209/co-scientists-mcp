@@ -151,8 +151,14 @@ mcp__co_scientist__update_deck(
         chapter-divider pattern distinct from interior slides.
       Iconography: leave room for accent icons (filed for follow-up,
         todo 004 §C); for now use accent-colored shapes as visual anchors.
+    # Arc is the narrative spine YOU choose for THIS talk. Don't copy
+    # the line below — derive it from the paper. Example arcs below;
+    # remix freely.
+    #   "question → data → answer → caveat → next"      (lab seminar)
+    #   "why → what → how → who → when → take-home"     (proposal pitch)
+    #   "context → finding → mechanism → caveat → so-what"  (single paper)
     Arc:
-      problem → setup → result → implications → questions
+      [the arc that fits THIS paper / talk; pick one or write your own]
   """,
 )
 ```
@@ -192,20 +198,45 @@ block. Defaults to use if you don't write one:
 
 ### 4. Outline slides
 
-Standard role sequence, scaled to duration:
+> ⚠️ **Derive the outline from YOUR paper, not from a template.**
+> There is NO "standard slide sequence" — different talks have
+> wildly different shapes. A funded-grant proposal looks nothing
+> like a lab seminar, which looks nothing like a chapter divider
+> for a textbook. Read the paper's `prepare_export` output + the
+> figures + tables, decide what story THIS paper tells, and build
+> the outline that fits THAT story. The reference corpus and the
+> role enum are *menu items*, not a default deck shape.
 
-| Role         | When | Typical role count for 20-min talk |
-| ------------ | ---- | ----------------------------------- |
-| `title`      | always | 1 |
-| `outline`    | optional, ≥15 min | 0–1 |
-| `background` | always | 1–2 |
-| `method`     | always | 1–2 |
-| `result`     | one per main figure | clamp to `len(figs)` |
-| `discussion` | optional | 1 |
-| `conclusion` | always | 1 |
-| `qa`         | optional | 1 |
+**Roles available** (pick whatever fits YOUR story; don't force the
+full menu):
 
-Adjust to duration: each slide ≈ 1–2 minutes; 20 min ≈ 12–15 slides.
+`title` · `outline` · `background` · `hook` · `thesis` · `section`
+· `question` · `method` · `result` · `figure` · `image` · `content`
+· `discussion` · `conclusion` · `qa` · `custom`
+
+Some example deck shapes (NONE of these is *the* canonical shape —
+pick or remix based on the talk type):
+
+- **Lab seminar (20 min) on a single paper.** Title → background
+  (1) → method (1) → result (1 per main figure, clamp to actual
+  figure count) → discussion (1) → take-home (1).
+- **Conference talk (15 min) on a methodology.** Title → motivation
+  (1–2) → method (2–3) → key result with figure (1) → conclusion (1).
+- **Grant proposal pitch (10 min).** Title → why / problem (1) →
+  what we propose (1–2) → how / methodology (2–3) → who / capability
+  (1) → when / timeline (1, often a Gantt) → take-home (1).
+- **Departmental review (30 min).** Title → outline → 3 chapter
+  dividers each followed by 2–3 content slides → discussion → qa.
+- **One-figure result deep-dive (5 min).** Title → context (1) →
+  full-bleed figure (1) → take-home (1).
+
+The role names + counts in those examples are *illustrative*. Mix,
+drop, repeat, invent. `role="custom"` is there because nothing else
+might fit your slide's purpose; use it freely.
+
+**Duration math**: each content slide ≈ 1–2 minutes (more for dense
+proposal pages; less for chapter dividers). A 20-min talk lands at
+~12–15 slides; a 5-min lightning at 3–5. Don't pad to meet a count.
 
 **Don't commit to render_mode here (todo 010).** Outline is the
 *content-brief* step — each slide gets `role + title + body intent +
@@ -547,14 +578,26 @@ h.pull_quote(slide, "Take-home line",
 | KPI tiles + supporting figure on the same slide | `p.metric_tile_row` doesn't take a figure; compose tiles + figure side-by-side |
 | Architecture / system diagram with custom topology | No pattern covers arbitrary node-edge structures |
 
-**Worked examples — Read these before authoring**:
-- `reference_corpus/proposal_dense.png` (~50 shapes; source in
-  `reference_corpus/generate.py` under `"proposal_dense"`)
-- `reference_corpus/personnel_equipment.png` (~60 shapes; source ditto)
+**Density references — these prove what 30–60 shapes LOOKS like.
+They are NOT templates to copy.** (todo 011 v2.)
 
-The canonical density vocabulary lives in those two snippets. Mirror
-the structure; adapt the content. **Chrome (`h.deck_chrome`) is part
-of every content slide** — never skip it.
+- `reference_corpus/proposal_dense.png` (42 shapes; source in
+  `reference_corpus/generate.py` under `"proposal_dense"`)
+- `reference_corpus/personnel_equipment.png` (47 shapes; source
+  ditto)
+
+Mirror the **technique** (h.text + slide.shapes.add_shape composed
+into cohesive sections, accent stripes, multi-section blocks). Do
+NOT mirror the **content** — those exemplars happen to be a Korean
+grant proposal; your slide's content comes from YOUR paper. If your
+paper has no platform comparison, your slide has no platform
+comparison; if it has no personnel page, you don't make one. The
+corpus is a *density gym*, not a content shopping mall.
+
+**Chrome (`h.deck_chrome`) is part of every content slide** — never
+skip it. But the eyebrow text comes from YOUR talk's sections (not
+necessarily WHY / HOW / WHAT / WHO — those are one team's
+convention).
 
 If the brief has none of the trigger signals AND fits one of the
 patterns below cleanly, you can use a single pattern call. But check
