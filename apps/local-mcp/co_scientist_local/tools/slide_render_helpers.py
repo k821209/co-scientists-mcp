@@ -223,6 +223,28 @@ def estimate_text_width_pt(text: str, font_pt: int) -> float:
     return sum(_char_width_factor(ord(c)) * font_pt for c in text)
 
 
+def measure_text_height_pt(text: str, *, max_width_emu, font_pt: int,
+                            line_spacing: float = 1.22) -> float:
+    """Estimated rendered height (in pt) of `text` wrapped to
+    `max_width_emu` at `font_pt`. Used by content-driven sizing so a
+    card or box can shrink to its content instead of stretching to fill
+    a caller-provided rectangle. Korean-aware via `estimate_text_width_pt`.
+    Empty / whitespace text returns 0.
+    """
+    if not text or not text.strip():
+        return 0.0
+    width_pt = max(1, max_width_emu / 12700)
+    lines_raw = [ln for ln in text.splitlines() if ln.strip()]
+    if not lines_raw:
+        return 0.0
+    total_lines = 0
+    for ln in lines_raw:
+        w = estimate_text_width_pt(ln, font_pt)
+        wraps = max(1, int((w + width_pt - 1) // width_pt))
+        total_lines += wraps
+    return total_lines * font_pt * line_spacing
+
+
 def autofit_pt(text: str, *, max_width_emu, max_height_emu, start_pt: int,
                 line_spacing: float = 1.22, min_pt: int = 10) -> int:
     """Largest pt in [min_pt, start_pt] at which `text` fits inside an
@@ -669,13 +691,50 @@ def bullet_list(slide, items, *, palette, fonts, type_scale,
 
 def card(slide, *, left, top, width, height, title: str, body: str,
          palette, fonts, type_scale,
-         accent_top: bool = True, accent_height_pt: int = 4):
+         accent_top: bool = True, accent_height_pt: int = 4,
+         pack: bool = True):
     """A single titled card: rectangle + optional top accent stripe +
-    title (bold) + body. Returns dict(card, title_box, body_box)."""
+    title (bold) + body.
+
+    When `pack=True` (default, todo 014 D-fix), the card SHRINKS to fit
+    its content — if `pad + title_h + body_natural_h + pad < height`,
+    the card rectangle's height becomes content-driven. This kills the
+    "title at top, body at top, big empty space at the bottom" failure
+    where a tall card holds short content. Pass `pack=False` to keep a
+    fixed-height card (e.g. uniform-grid alignment); `card_grid` uses
+    this internally after measuring max content height across the grid.
+
+    Returns dict(card, title_box, body_box, height_used) — `height_used`
+    is the actual emitted height (== `height` when pack=False or
+    content overflows; less when shrunk).
+    """
     bg = palette.get("surface", palette["background"])
     border = palette["accent"]
+    title_pt = max(14, type_scale.get("head", 26) - 4)
+    body_pt = max(12, type_scale.get("body", 20) - 4)
+    line_spacing = type_scale.get("line_spacing", 1.22)
+    pad = Pt(10)
+    inner_w = width - 2 * pad
+    title_h_natural_pt = (
+        measure_text_height_pt(title or "", max_width_emu=inner_w,
+                               font_pt=title_pt, line_spacing=1.1)
+    )
+    title_h = Pt(max(int(title_pt * 1.6), int(title_h_natural_pt) + 4))
+    body_h_natural_pt = (
+        measure_text_height_pt(body or "", max_width_emu=inner_w,
+                               font_pt=body_pt, line_spacing=line_spacing)
+    )
+    body_natural_h = Pt(int(body_h_natural_pt) + 4) if body else Pt(0)
+
+    natural_card_h = pad + title_h + body_natural_h + pad
+    card_h = (
+        min(height, natural_card_h) if pack and natural_card_h < height
+        else height
+    )
+    body_h = card_h - pad - title_h - pad
+
     card_shape = slide.shapes.add_shape(
-        MSO_SHAPE.RECTANGLE, left, top, width, height,
+        MSO_SHAPE.RECTANGLE, left, top, width, card_h,
     )
     card_shape.fill.solid()
     card_shape.fill.fore_color.rgb = bg
@@ -692,13 +751,8 @@ def card(slide, *, left, top, width, height, title: str, body: str,
         stripe.fill.fore_color.rgb = palette["accent"]
         stripe.shadow.inherit = False
 
-    title_pt = max(14, type_scale.get("head", 26) - 4)
-    body_pt = max(12, type_scale.get("body", 20) - 4)
-    pad = Pt(10)
-    title_h = Pt(int(title_pt * 1.6))
-
     tb = slide.shapes.add_textbox(
-        left + pad, top + pad, width - 2 * pad, title_h,
+        left + pad, top + pad, inner_w, title_h,
     )
     tf = tb.text_frame
     tf.word_wrap = True
@@ -713,21 +767,22 @@ def card(slide, *, left, top, width, height, title: str, body: str,
 
     bb = slide.shapes.add_textbox(
         left + pad, top + pad + title_h,
-        width - 2 * pad, height - 2 * pad - title_h,
+        inner_w, body_h,
     )
     bf = bb.text_frame
     bf.word_wrap = True
     _autoshrink(bf)
     if body:
         p = bf.paragraphs[0]
-        p.line_spacing = type_scale.get("line_spacing", 1.22)
+        p.line_spacing = line_spacing
         run = p.add_run()
         run.text = body
         run.font.size = Pt(body_pt)
         run.font.color.rgb = palette["foreground"]
         if fonts.get("body"):
             run.font.name = fonts["body"]
-    return {"card": card_shape, "title_box": tb, "body_box": bb}
+    return {"card": card_shape, "title_box": tb, "body_box": bb,
+            "height_used": card_h}
 
 
 def card_grid(slide, items, *, left, top, width, height,
@@ -736,30 +791,65 @@ def card_grid(slide, items, *, left, top, width, height,
     """Lay out `items` (list of dicts with `title` + `body`, or the
     canonical `tag` + `body` — both accepted, todo 007 axis 2) as a
     grid of `card()`s with `cols` columns. Rows are derived from
-    `len(items)`. Returns the list of per-card dicts."""
+    `len(items)`.
+
+    Cells share a uniform height for grid alignment. The shared height
+    is min(requested_cell_h, max(natural card heights)) — i.e. the
+    grid tightens to its content when there's room (todo 014 D-fix),
+    eliminating the under-fill where short content sits at the top of
+    a tall card. Caller can rely on the returned cards' `height_used`
+    + the grid's `top` + emitted gaps to position downstream shapes.
+    """
     n = len(items)
     if n == 0:
         return []
     rows = (n + cols - 1) // cols
     gap = Pt(gap_pt)
     cell_w = (width - gap * (cols - 1)) // cols
-    cell_h = (height - gap * (rows - 1)) // rows
+    requested_cell_h = (height - gap * (rows - 1)) // rows
+
+    title_pt = max(14, type_scale.get("head", 26) - 4)
+    body_pt = max(12, type_scale.get("body", 20) - 4)
+    line_spacing = type_scale.get("line_spacing", 1.22)
+    pad = Pt(10)
+    inner_w = cell_w - 2 * pad
+
+    def _resolve_text(item, primary, fallback):
+        return ((item.get(primary) if isinstance(item, dict) else None)
+                or (item.get(fallback) if isinstance(item, dict) else None)
+                or "")
+
+    natural_heights = []
+    for item in items:
+        title = _resolve_text(item, "title", "tag")
+        body = _resolve_text(item, "body", "note")
+        title_h_pt = measure_text_height_pt(
+            title, max_width_emu=inner_w, font_pt=title_pt, line_spacing=1.1
+        )
+        title_h = max(int(title_pt * 1.6), int(title_h_pt) + 4)
+        body_h = (
+            int(measure_text_height_pt(
+                body, max_width_emu=inner_w,
+                font_pt=body_pt, line_spacing=line_spacing,
+            )) + 4
+        ) if body else 0
+        natural_heights.append(Pt(title_h + body_h) + 2 * pad)
+
+    cell_h = min(requested_cell_h, max(natural_heights)) if natural_heights \
+        else requested_cell_h
+
     out = []
     for i, item in enumerate(items):
         r, c = i // cols, i % cols
         cl = left + c * (cell_w + gap)
         ct = top + r * (cell_h + gap)
-        # Accept either {title, body} (historical) or {tag, body} (canonical).
-        title = (item.get("title") if isinstance(item, dict) else None) \
-                or (item.get("tag") if isinstance(item, dict) else None) \
-                or ""
-        body = (item.get("body") if isinstance(item, dict) else None) \
-               or (item.get("note") if isinstance(item, dict) else None) \
-               or ""
+        title = _resolve_text(item, "title", "tag")
+        body = _resolve_text(item, "body", "note")
         out.append(card(
             slide, left=cl, top=ct, width=cell_w, height=cell_h,
             title=title, body=body,
             palette=palette, fonts=fonts, type_scale=type_scale,
+            pack=False,
         ))
     return out
 
