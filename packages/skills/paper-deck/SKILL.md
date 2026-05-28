@@ -378,6 +378,17 @@ HELPERS  (h.* — primitives)
             # items: list[{title|tag, body|note}]
   h.pull_quote(slide, text, *, palette, fonts, type_scale, # accent bar + italic
                left, top, width, height)
+               # blank line in `text` = explicit half-line gap
+  h.callout(slide, *, left, top, width, fill, palette,    # filled callout —
+            items=None, headline="", body="",              # auto-sizes its bg
+            fonts=None, type_scale=None, pad_pt=14,        # rect to content
+            gap_pt=6, min_height=None, text_color=None,    # height. Use this
+            border_color=None, border_pt=0)                # for dark/light
+            # `items` is a vstack-style list[{text,         # callout boxes
+            # size_pt?, color?, bold?, italic?, ...}]      # instead of drawing
+            # OR pass headline= / body= shortcuts.          # rect+text manually
+            # text_color auto-picks foreground/surface     # (todo 014 callout-
+            # by background luminance.                      # fix)
   h.text(slide, content, *, left, top, width, height,    # one-call textbox
          palette, size_pt=20, color=None, bold=False,
          italic=False, align=None, anchor=None,

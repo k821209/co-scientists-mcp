@@ -754,6 +754,117 @@ def vstack(slide, lines, *, left, top, width, palette,
     return y
 
 
+def callout(slide, *, left, top, width, fill,
+            palette, items=None,
+            headline: str = "", body: str = "",
+            fonts=None, type_scale=None,
+            pad_pt: int = 14, gap_pt: int = 6,
+            min_height=None, text_color=None,
+            border_color=None, border_pt: float = 0):
+    """Filled callout box whose background rectangle auto-sizes to fit
+    its content (todo 014 callout-fix). Fixes the failure where bespoke
+    code drew a fixed-size rect first, then placed text inside that
+    overflowed the bottom (visible in v3 p.15 right "Next step" dark
+    box where the closing sentence got clipped).
+
+    Two ways to pass content:
+    - `items=[{text, size_pt?, color?, bold?, italic?, font_name?,
+       align?, line_spacing?, pad_top_pt?}, …]` — same dict shape as
+       `h.vstack`. Use this when you have ≥3 stacked elements or
+       custom styling per line.
+    - `headline=` and/or `body=` — convenience for the common
+      "small bold headline + body paragraph" callout. Resolves to:
+        items=[
+          {text: headline, size_pt: 13, bold: True, color: text_color},
+          {text: body,     size_pt: 14,            color: text_color},
+        ]
+
+    `fill` is the background RGBColor (e.g., `palette["foreground"]`
+    for a dark callout; `palette["surface"]` for a light one).
+    `text_color` defaults to `palette["surface"]` for dark fills and
+    `palette["foreground"]` for light fills (auto-detected by
+    relative luminance).
+
+    Returns `{"box": rect, "height_used": emu}`.
+    """
+    if items is None:
+        items = []
+        if headline:
+            items.append({
+                "text": headline, "size_pt": 13, "bold": True,
+                "color": text_color,
+            })
+        if body:
+            items.append({
+                "text": body, "size_pt": 14,
+                "color": text_color,
+            })
+
+    pad = Pt(pad_pt)
+    inner_w = width - 2 * pad
+    line_spacing_default = (
+        type_scale.get("line_spacing", 1.22) if type_scale else 1.22
+    )
+
+    # Pre-measure total content height in pt, mirroring vstack's
+    # per-line height math so the box exactly contains the stack.
+    content_pt = 0
+    last_i = len(items) - 1
+    for i, item in enumerate(items):
+        if not isinstance(item, dict):
+            item = {"text": str(item)}
+        pad_top = item.get("pad_top_pt", 0)
+        if pad_top:
+            content_pt += pad_top
+        body_text = item.get("text", "") or ""
+        size_pt = item.get("size_pt", 14)
+        item_ls = item.get("line_spacing", line_spacing_default)
+        if not body_text.strip():
+            content_pt += int(size_pt * 0.8) + gap_pt
+            continue
+        natural_pt = measure_text_height_pt(
+            body_text, max_width_emu=inner_w, font_pt=size_pt,
+            line_spacing=item_ls,
+        )
+        content_pt += int(natural_pt) + 4
+        if i < last_i:
+            content_pt += gap_pt
+
+    needed_h = Pt(content_pt) + 2 * pad
+    box_h = max(min_height, needed_h) if min_height else needed_h
+
+    bg = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE, left, top, width, box_h,
+    )
+    if border_pt > 0 and border_color is not None:
+        bg.line.color.rgb = border_color
+        bg.line.width = Pt(border_pt)
+    else:
+        bg.line.fill.background()
+    bg.fill.solid()
+    bg.fill.fore_color.rgb = fill
+    bg.shadow.inherit = False
+
+    # If text_color wasn't set, pick foreground or surface based on
+    # the fill's luminance (so the body remains readable on either
+    # dark or light callout backgrounds).
+    if text_color is None and palette:
+        r, g, b = fill[0], fill[1], fill[2]
+        luma = (0.299 * r + 0.587 * g + 0.114 * b)
+        text_color = (
+            palette.get("surface", palette.get("background"))
+            if luma < 128 else palette.get("foreground")
+        )
+        for item in items:
+            if item.get("color") is None:
+                item["color"] = text_color
+
+    vstack(slide, items, left=left + pad, top=top + pad,
+           width=inner_w, palette=palette, fonts=fonts, gap_pt=gap_pt)
+
+    return {"box": bg, "height_used": box_h}
+
+
 def bullet_list(slide, items, *, palette, fonts, type_scale,
                 left, top, width, height, bullet: str = "•",
                 pack: bool = True):
@@ -988,6 +1099,12 @@ def pull_quote(slide, text: str, *, palette, fonts, type_scale,
     """An emphasis block: vertical accent bar + italic text. Use for a
     punchline / take-home line you want the audience to focus on.
 
+    Multi-line input: each non-empty line becomes one paragraph.
+    **A blank line in the input adds an explicit half-line gap after
+    the previous paragraph** (todo 014 pull_quote polish) — use this
+    when you want a visual break between two parts of the quote
+    without using two separate `pull_quote` calls.
+
     When `pack=True` (default, todo 014 D-fix v2), the accent bar and
     textbox shrink to natural content height when text is shorter than
     the requested rectangle — otherwise the bar floats above empty
@@ -999,11 +1116,18 @@ def pull_quote(slide, text: str, *, palette, fonts, type_scale,
     quote_pt = max(body_pt, int(body_pt * 1.1))
     text_left = left + Pt(bar_pt) + Pt(gap_pt)
     text_width = width - Pt(bar_pt) - Pt(gap_pt)
-    natural_pt = measure_text_height_pt(
-        text or "", max_width_emu=text_width, font_pt=quote_pt,
+    half_gap_pt = int(quote_pt * 0.6)
+    # Measure natural height: account for blank-line gaps in the input
+    # so packing reserves the right space for them.
+    raw_lines = (text or "").splitlines()
+    non_empty = [ln for ln in raw_lines if ln.strip()]
+    blank_count = max(0, sum(1 for ln in raw_lines if not ln.strip()) - 0)
+    natural_pt_text = measure_text_height_pt(
+        "\n".join(non_empty), max_width_emu=text_width, font_pt=quote_pt,
         line_spacing=line_spacing,
     )
-    natural_h = Pt(int(natural_pt) + 4) if (text or "").strip() else Pt(0)
+    natural_pt_total = natural_pt_text + blank_count * half_gap_pt
+    natural_h = Pt(int(natural_pt_total) + 4) if non_empty else Pt(0)
     used_h = (
         min(height, natural_h) if pack and natural_h < height and natural_h > 0
         else height
@@ -1020,12 +1144,24 @@ def pull_quote(slide, text: str, *, palette, fonts, type_scale,
     tf.word_wrap = True
     _autoshrink(tf)
     first = True
-    for line in (text or "").splitlines():
+    pending_gap = False
+    last_para = None
+    for line in raw_lines:
         if not line.strip():
+            # Blank line in input → add half-line gap after the
+            # previous paragraph (rather than silently skipping).
+            if last_para is not None:
+                last_para.space_after = Pt(half_gap_pt)
+                pending_gap = False  # already applied to last_para
+            else:
+                pending_gap = True  # apply to the next paragraph as space_before
             continue
         p = tf.paragraphs[0] if first else tf.add_paragraph()
         first = False
         p.line_spacing = line_spacing
+        if pending_gap:
+            p.space_before = Pt(half_gap_pt)
+            pending_gap = False
         run = p.add_run()
         run.text = line.strip()
         run.font.size = Pt(quote_pt)
@@ -1033,4 +1169,5 @@ def pull_quote(slide, text: str, *, palette, fonts, type_scale,
         run.font.color.rgb = palette["foreground"]
         if fonts.get("body"):
             run.font.name = fonts["body"]
+        last_para = p
     return {"bar": bar, "text_box": tb, "height_used": used_h}
