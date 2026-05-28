@@ -654,10 +654,21 @@ an intent pattern above if a more loaded design fits:
 | `p.figure_full(slide, *, image_path=None, image_callable=None, caption="")` | under title | (9) Picture with Caption (figure-only) | Single figure that owns the FULL grid (~85% slide height); caption rides in the bottom-margin strip outside the grid. ~17% more figure area vs `row_span=4` + caption-in-row-6 layouts. Pass `image_path` for filesystem PNGs or `image_callable=lambda **kw: h.image_figure(slide, N, **kw)` for paper figures. (todo 008 §A) |
 | `p.gantt_chart(slide, *, items, periods=None, period_count=None)` | under title | Timeline matrix | Activity rows × period columns with accent-colored bars at each row's `{start, span}`. Zebra-striped rows + period labels + left-aligned activity labels. Pair with `h.deck_chrome` for proposal rhythm. items: `[{label, start, span}]` (1-indexed). (todo 009 D) |
 
-**Two-step selection** (todo 006 — the 2D matrix):
+**Three-step selection** (todo 013 — bespoke-first):
 
-1. **Structural type first** — pick by content *shape*. What do you
-   have to put on this slide?
+0. **Trigger-table check FIRST.** Re-read the "Go bespoke when…"
+   table at the top of §5a against this slide's content. If ANY
+   signal matches (3+ structured comparison sections, personnel
+   page, equipment list with sections, two independent compositions
+   side-by-side, KPI + figure, custom architecture, …), STOP HERE.
+   Skip steps 1–2. Compose bespoke from `h.*` primitives + raw
+   `slide.shapes.add_shape` — see **Example 0** below. Don't talk
+   yourself into a pattern because it's faster; "1 pattern per
+   slide" across a deck is the failure mode this todo exists to
+   prevent.
+
+1. **Only if no trigger matched** — pick a structural type by
+   content *shape*. What do you have to put on this slide?
    - Just a centered title → `p.title_slide` (slide 1) or
      `p.chapter_divider` (mid-deck) or `h.title_block` alone.
    - Title + a list / paragraphs → `p.title_and_body`.
@@ -666,27 +677,156 @@ an intent pattern above if a more loaded design fits:
    - Title + a single figure → `h.image_figure` (full-bleed) or
      `p.zoom_in_callout` (with ROI).
    - Title + multiple images → `p.title_and_image_grid`.
-2. **Intent treatment second** — if a more loaded design fits the
-   *message*, swap to one of the intent patterns
+2. **Intent treatment last** — if a more loaded design fits the
+   *message* AND the catalog entry's "Use ONLY when…" line matches
+   your brief exactly, swap to one of the intent patterns
    (`hero_with_trailing_evidence`, `metric_tile_row`, `evidence_stack`,
-   `flow_pipeline`, `quadrant_map`, `numbered_milestone_arc`).
+   `flow_pipeline`, `quadrant_map`, `numbered_milestone_arc`). If
+   the intent doesn't match exactly, fall back to bespoke — don't
+   force-fit.
 
-**Pattern selection — role → recommended pattern**:
+> There is intentionally **no "role → pattern" mapping table** here.
+> Mapping `method → flow_pipeline` / `result → metric_tile_row` /
+> `discussion → contrast_pair` produces decks where every slide is
+> one pattern call and the composition repeats no matter how the
+> content varies. `role` is a slide *label*, not a design recipe.
+> Design the slide from the content; the role doesn't get a vote.
 
-| Role | First-pick pattern | Backup |
-|---|---|---|
-| `title` (deck opener) | `title_slide` | `chapter_divider` (mid-deck) |
-| `outline` | `flow_pipeline` (steps) | `numbered_milestone_arc` |
-| `background` | `evidence_stack` (claim + 2-3 facts) | `metric_tile_row` |
-| `question` | `hero_with_trailing_evidence` (single line + supporting evidence) | `chapter_divider` |
-| `method` | `flow_pipeline` (most natural) | `before_after_split` |
-| `result` | `metric_tile_row` or `evidence_stack` | `zoom_in_callout` (focus on a figure region) |
-| `discussion` | `contrast_pair` or `before_after_split` | `quadrant_map` |
-| `conclusion` | `hero_with_trailing_evidence` (one big take-home + 3 supporting) | `metric_tile_row` |
-| `qa` | `text` mode (acknowledgments) | — |
+**Rotation is not a goal.** You do NOT need a "different pattern
+per consecutive slide" — most consecutive slides should both be
+bespoke, with different *compositions* (not different patterns)
+appropriate to their content. If three slides in a row each call
+a different pattern, you've turned the deck into a pattern menu
+demo. The visual rhythm comes from content-driven composition,
+not from rotating through the catalog.
 
-Pick a different pattern per consecutive slides — visual rhythm
-across the deck matters as much as quality of any single slide.
+**Example 0 — bespoke composition (where most content slides land)**
+(todo 013):
+
+A proposal-grade content slide with 3 structured comparison cards
++ a 5-stage pipeline row + a target-metrics line. ~50 shapes,
+hand-composed with `h.text` + `slide.shapes.add_shape`. **No
+pattern call.** This is the shape of a typical content slide — the
+two pattern-driven examples below are the *narrow* case.
+
+```python
+mcp__co_scientist__add_slide(
+  slug, deck_id, slide_number=N, role="method",
+  title="Part 1 — 참조 유전체 구축 (3중 플랫폼 전략)",
+  body="3 sequencing platforms compared on mode / spec / tag, "
+       "then the assembly pipeline they feed into, then the "
+       "QV / N50 / BUSCO targets.",
+  render_mode="code",
+  code="""
+h.accent_stripe(slide, palette=palette, sw=sw)
+h.title_block(slide, title, palette=palette, fonts=fonts,
+              type_scale=type_scale, sw=sw, sh=sh)
+h.deck_chrome(slide, eyebrow="HOW · 추진 방법",
+              footer="기러기류 종 특이적 마커 발굴 · ㈜디보",
+              page_number=5, total=13,
+              palette=palette, fonts=fonts, sw=sw, sh=sh)
+
+# ── 3 platform comparison cards (top half) ────────────────────────────
+g = h.grid(sw=sw, sh=sh, cols=12, rows=6,
+           margin_top=Inches(2.0), margin_bot=Inches(0.6))
+plats = [
+    {"name": "PacBio HiFi",    "mode": "외주 시퀀싱", "spec": "≥30×, Q30+",
+     "tag": "단일 리드 정확도"},
+    {"name": "ONT PromethION", "mode": "자체 운영",   "spec": "≥20×, R10.4.1, Q20+",
+     "tag": "Ultra-long (>100 kb), 복원서열 통과"},
+    {"name": "DNBSEQ-G99",     "mode": "자체 운영",   "spec": "Short-read",
+     "tag": "Hybrid polishing + k-mer QC"},
+]
+for i, plat in enumerate(plats):
+    cell = g.cell(col=1 + i*4, span=4, row=1, row_span=2)
+    box = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,
+        cell.left, cell.top, cell.width, cell.height)
+    box.fill.solid(); box.fill.fore_color.rgb = palette["surface"]
+    box.line.color.rgb = palette["accent"]; box.line.width = Pt(0.75)
+    box.shadow.inherit = False
+    stripe = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,
+        cell.left, cell.top, cell.width, Pt(4))
+    stripe.line.fill.background()
+    stripe.fill.solid(); stripe.fill.fore_color.rgb = palette["accent"]
+    stripe.shadow.inherit = False
+    h.text(slide, plat["name"],
+           left=cell.left + Pt(10), top=cell.top + Pt(10),
+           width=cell.width - Pt(20), height=Pt(28),
+           palette=palette, size_pt=18, bold=True,
+           font_name=fonts.get("display"))
+    h.text(slide, plat["mode"],
+           left=cell.left + Pt(10), top=cell.top + Pt(38),
+           width=cell.width - Pt(20), height=Pt(18),
+           palette=palette, size_pt=11, color=palette["muted"],
+           font_name=fonts.get("body"))
+    h.text(slide, plat["spec"],
+           left=cell.left + Pt(10), top=cell.top + Pt(62),
+           width=cell.width - Pt(20), height=Pt(20),
+           palette=palette, size_pt=14, bold=True,
+           font_name=fonts.get("body"))
+    h.text(slide, plat["tag"],
+           left=cell.left + Pt(10), top=cell.top + Pt(88),
+           width=cell.width - Pt(20), height=Pt(40),
+           palette=palette, size_pt=11, color=palette["muted"],
+           font_name=fonts.get("body"))
+
+# ── 5-stage pipeline row (hand-composed) ──────────────────────────────
+stages = ["시료 QC HMW DNA", "라이브러리 시퀀싱", "K-mer (Meryl/GS2)",
+          "de novo (Verkko)", "Hybrid Polishing"]
+h.text(slide, "어셈블리 파이프라인 (척추동물 reference-grade 표준 접근)",
+       left=Inches(0.6), top=Inches(4.5),
+       width=Inches(12), height=Pt(20),
+       palette=palette, size_pt=13, bold=True,
+       font_name=fonts.get("display"))
+stage_top = Inches(4.85); stage_h = Inches(0.7)
+stage_total_w = sw - Inches(1.2)
+stage_w = (stage_total_w - Pt(8) * (len(stages) - 1)) // len(stages)
+for i, s in enumerate(stages):
+    sx = Inches(0.6) + i * (stage_w + Pt(8))
+    box = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,
+        sx, stage_top, stage_w, stage_h)
+    box.fill.solid(); box.fill.fore_color.rgb = palette["background"]
+    box.line.color.rgb = palette["secondary"]; box.line.width = Pt(0.75)
+    box.shadow.inherit = False
+    h.text(slide, f"{i+1}", left=sx + Pt(6), top=stage_top + Pt(4),
+           width=Pt(20), height=Pt(20),
+           palette=palette, size_pt=10, bold=True,
+           color=palette["secondary"], font_name=fonts.get("display"))
+    h.text(slide, s, left=sx + Pt(6), top=stage_top + Pt(22),
+           width=stage_w - Pt(12), height=stage_h - Pt(24),
+           palette=palette, size_pt=11, font_name=fonts.get("body"))
+
+# ── Target metrics line at the bottom ─────────────────────────────────
+h.text(slide, "▶ 목표 산출물",
+       left=Inches(0.6), top=Inches(5.8),
+       width=Inches(2.0), height=Pt(20),
+       palette=palette, size_pt=12, bold=True,
+       color=palette["accent"], font_name=fonts.get("display"))
+h.text(slide,
+       "Contig N50 ≥ 5 Mb · BUSCO(aves_odb10) C ≥ 95% · "
+       "Mercury QV ≥ 40 · scaffold/T2T-급 chromosome-level reference "
+       "+ Mitogenome",
+       left=Inches(2.6), top=Inches(5.8),
+       width=sw - Inches(3.2), height=Pt(34),
+       palette=palette, size_pt=11, color=palette["foreground"],
+       font_name=fonts.get("body"))
+""",
+)
+```
+
+Notice what's NOT there: no `p.flow_pipeline`, no `p.metric_tile_row`,
+no `p.card_grid`. The slide *contains* a card row and a pipeline
+row and a metric line, but each is composed directly from
+primitives so they share one coherent layout instead of three
+stacked pattern boxes. This is the default shape for any slide
+with multiple coordinated regions — and that's most slides.
+
+Source mirror: `reference_corpus/generate.py` under
+`"proposal_dense"`; rendered preview at
+`reference_corpus/proposal_dense.png` (42 shapes). For a
+side-by-side bespoke variant (personnel table on the left,
+equipment list on the right, both dense), see
+`reference_corpus/generate.py` under `"personnel_equipment"`.
 
 **Example 1 — title + 4-card grid + take-home quote**:
 
