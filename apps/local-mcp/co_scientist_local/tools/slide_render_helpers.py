@@ -648,7 +648,7 @@ def text(slide, content: str, *, left, top, width, height,
          palette, size_pt: int = 20, color=None, font_name=None,
          bold: bool = False, italic: bool = False, align=None,
          anchor=None, line_spacing: float = 1.22,
-         autofit: bool = True, min_pt: int = 10, fonts=None):
+         autofit: bool = True, min_pt: int = 12, fonts=None):
     """One-call themed textbox (todo 007 §D — DX helper). Drops the
     5-line `add_textbox + text_frame + paragraph + run + font` ceremony
     to a single call. Color defaults to `palette["foreground"]`; pass
@@ -885,7 +885,7 @@ def bullet_list(slide, items, *, palette, fonts, type_scale,
         "\n".join(rendered),
         max_width_emu=width, max_height_emu=height,
         start_pt=body_pt, line_spacing=line_spacing,
-        min_pt=max(10, body_pt - 8),
+        min_pt=max(12, body_pt - 6),
     )
     if pack and rendered:
         natural_pt = sum(
@@ -1009,7 +1009,7 @@ def card(slide, *, left, top, width, height, title: str, body: str,
         body_actual_pt = autofit_pt(
             body, max_width_emu=inner_w, max_height_emu=body_h,
             start_pt=body_pt, line_spacing=line_spacing,
-            min_pt=max(9, body_pt - 6),
+            min_pt=max(12, body_pt - 4),
         )
         p = bf.paragraphs[0]
         p.line_spacing = line_spacing

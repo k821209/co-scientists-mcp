@@ -288,12 +288,22 @@ slide's narrative impact?* Rough heuristics by role:
 
 | Role / shape | Image candidate? | Why |
 |---|---|---|
-| `title` (cover) | **Almost always** | The cover sets tone; a single evocative image carries it. |
-| `chapter_divider` / hook / vignette | **Almost always** | Pure narrative beats benefit from a scene. |
+| `title` (cover) | **REQUIRED when image_gen is configured** — full-bleed | The cover is what the audience sees for the longest. Text-only covers read as placeholder slides; a single full-bleed evocative image with the title overlaid is the difference between "draft" and "finished". Do not skip this. |
+| `chapter_divider` / hook / vignette | **REQUIRED when image_gen is configured** — full-bleed or large top-band | Same reasoning — these are pause beats in the narrative where the audience expects a visual breath. Text-only chapter dividers feel like missing slides. |
 | narrative / story-time content slide | **Often** | Anywhere you'd want to "show, not tell". |
 | concept / abstract idea (e.g., "Protocol의 도착", "무엇이 가로막는가") | **Sometimes** | A metaphorical image can anchor an abstract concept — but only if you can name the metaphor cleanly in 1 sentence. Otherwise skip. |
 | `method` step-by-step / `result` numbers / table | **Rarely** | The data IS the message; an image dilutes it. |
 | `qa` / closing thanks | **Sometimes** | A small closing image can land the tone. |
+
+> **REQUIRED-when-configured (todo 017):** If the deck has
+> `image_style` set (i.e., user expected images), then cover + every
+> chapter divider MUST have an ai-image — there is no "would an
+> image improve this" judgment call for those roles. The judgment
+> is reserved for the other rows in the table. If `image_gen` isn't
+> wired (Pro feature) AND user expected images, surface a single
+> note in §8 ("AI image generation isn't configured; cover and
+> chapter dividers fell back to text-only") rather than silently
+> producing a deck the user will reject.
 
 For every "yes", DRAFT the scene prompt in 1–2 sentences (no style
 hint — that comes from `image_style` automatically). Examples:
@@ -1065,6 +1075,37 @@ final_y = h.vstack(slide, [
 ], left=x, top=y, width=w, palette=palette, fonts=fonts)
 # downstream items go at `final_y + Pt(...)`.
 ```
+
+**Timeline / milestone-row alignment (todo 017)** — for horizontal
+multi-column timelines (year + dot on the rail + content stack
+below), every element in a single column must share an X axis.
+Common bug (v7 p.6 "Era I — 네 단계의 milestone"): year textboxes
+were left-aligned in their column (`PP_ALIGN.LEFT`, the default),
+but the dots were placed at column-center. Result: the year reads
+at the column's left edge, the dot ~Inches(1.5) to the right —
+visually disconnected.
+
+```python
+# WRONG — year textbox starts at col_left (left-aligned default),
+# but dot is at col_center. They visibly drift apart.
+h.text(slide, str(year), left=col_left, top=y, width=col_w, ...)
+slide.shapes.add_shape(
+    MSO_SHAPE.OVAL,
+    col_left + col_w // 2 - dot_r, dot_y, 2 * dot_r, 2 * dot_r,
+)
+
+# RIGHT — pick ONE alignment and stick to it. Centered version:
+h.text(slide, str(year), left=col_left, top=y, width=col_w,
+       align=PP_ALIGN.CENTER, ...)
+slide.shapes.add_shape(
+    MSO_SHAPE.OVAL,
+    col_left + col_w // 2 - dot_r, dot_y, 2 * dot_r, 2 * dot_r,
+)
+# (title/body textboxes below also align=PP_ALIGN.CENTER to follow.)
+```
+
+If you go with column-left (no `align=` on textboxes), the dot's
+LEFT edge must equal `col_left` — not its CENTER.
 
 ### 5c. Compositional effects — why arrangement matters (todo 006)
 

@@ -831,7 +831,7 @@ def _render_simple_body(slide, body: str, *, box, fg, fonts, Pt,
         "\n".join(lines),
         max_width_emu=w, max_height_emu=h,
         start_pt=body_pt, line_spacing=line_spacing,
-        min_pt=max(10, body_pt - 8),
+        min_pt=max(12, body_pt - 6),
     )
     tb = slide.shapes.add_textbox(left, top, w, h)
     tf = tb.text_frame
