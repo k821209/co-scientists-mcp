@@ -1245,6 +1245,20 @@ one PNG per slide rendered from the sibling PDF (so what the agent
 sees is exactly what an opener of the .pptx / .pdf will see). Use them
 to **score and rewrite weak slides** before declaring the deck done.
 
+**First: check `result["overlap_warnings"]`** (todo 016 —
+render-time text-on-text detector). It's a list of
+`{slide_number, slide_id, pairs: [{a_preview, b_preview,
+overlap_ratio}]}` entries — any slide that appears here has
+textbox bounding boxes intersecting by ≥20% of the smaller box's
+area, which means text is visibly rendered on top of other text
+in the export. These are **automatic FAIL regardless of the visual
+rubric**. For each entry, find the two textboxes in the slide's
+`code` (the `a_preview` / `b_preview` strings are the first line
+of each box's text), and replace the manual `h.text(...)` /
+`add_textbox(...)` calls with `h.vstack(...)` for stacked content
+in a single column, or fix the y-coordinates so the boxes don't
+overlap. Re-export until `overlap_warnings == []`.
+
 ```
 res = mcp__co_scientist__export_deck_to_pptx(slug, deck_id)
 for png in res["slide_pngs"]:
@@ -1259,7 +1273,7 @@ for png in res["slide_pngs"]:
 
 | Category | Question |
 |---|---|
-| **Visual integrity** (todo 014 — automatic FAIL) | Look for any of these in the PNG and **rewrite the slide bespoke** if you see them: (a) two text elements rendered at the same coordinates (e.g., a step number "01" superimposed on the first hangul of its label — see v4 p.13 Harness 4-primitive cards) → cause is calling `h.text(...)` twice at the same `top` for stacked content → fix by replacing both calls with one `h.vstack(slide, lines=[...], left=, top=, width=)` that auto-advances `y` between items; (b) text extending past its visible container's bottom/right edge (e.g., body wrapping below a card's border — see v4 p.15 card 4 "Synthesis + provenance" wrap, v4 p.12 STACK cards' muted captions) → cause is a fixed-height container with content that doesn't fit at autofit's min_pt → fix by replacing the manual rect + h.text combo with `h.callout(slide, *, fill, items=, left=, top=, width=)` which sizes its bg rect to fit the measured content; (c) a decorative shape (accent bar / rule / line) crossing through text (e.g., v4 p.1 cover where the accent_rule cut through the italic subtitle) → cause is a hand-computed `top=` for the bar that landed on the text region → fix by deleting the manual bar and letting `h.title_block(accent_rule=True)` place its rule for slide titles, or for non-title accents use `h.pull_quote` whose bar tracks its text. Any of these = automatic FAIL regardless of other scores. |
+| **Visual integrity** (todo 014/016 — automatic FAIL) | Also flagged automatically by `result["overlap_warnings"]` for the text-on-text case. Look for any of these in the PNG and **rewrite the slide bespoke** if you see them: (a) two text elements rendered at the same coordinates (e.g., a step number "01" superimposed on the first hangul of its label — see v4 p.13 Harness 4-primitive cards) → cause is calling `h.text(...)` twice at the same `top` for stacked content → fix by replacing both calls with one `h.vstack(slide, lines=[...], left=, top=, width=)` that auto-advances `y` between items; (b) text extending past its visible container's bottom/right edge (e.g., body wrapping below a card's border — see v4 p.15 card 4 "Synthesis + provenance" wrap, v4 p.12 STACK cards' muted captions) → cause is a fixed-height container with content that doesn't fit at autofit's min_pt → fix by replacing the manual rect + h.text combo with `h.callout(slide, *, fill, items=, left=, top=, width=)` which sizes its bg rect to fit the measured content; (c) a decorative shape (accent bar / rule / line) crossing through text (e.g., v4 p.1 cover where the accent_rule cut through the italic subtitle) → cause is a hand-computed `top=` for the bar that landed on the text region → fix by deleting the manual bar and letting `h.title_block(accent_rule=True)` place its rule for slide titles, or for non-title accents use `h.pull_quote` whose bar tracks its text. Any of these = automatic FAIL regardless of other scores. |
 | Visual hierarchy | Is the focal point obvious within 1 second? |
 | Whitespace | Does the slide breathe, or is it crowded? |
 | Alignment | Are elements on an implicit grid? (no rogue offsets) |

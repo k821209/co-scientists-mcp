@@ -1191,18 +1191,75 @@ def _build_code_namespace(slide, row, state, slug, tmpd, *,
     }
 
 
+def _detect_text_overlaps(slide, *, min_overlap_ratio: float = 0.2) -> list[dict]:
+    """Walk `slide.shapes` and find pairs of textbox shapes whose
+    bounding boxes intersect by at least `min_overlap_ratio` of the
+    SMALLER box's area (todo 016).
+
+    Only textbox↔textbox pairs count: card border rectangles, accent
+    rules, dividers, and other decorative shapes lack `text_frame` so
+    they're filtered out automatically — that's intentional, since a
+    card border rect always "overlaps" the title textbox inside it
+    and we don't want to flag those.
+
+    Returns a list of `{a_preview, b_preview, overlap_ratio}` dicts.
+    Empty list = clean slide.
+    """
+    boxes = []
+    for shape in slide.shapes:
+        if not shape.has_text_frame:
+            continue
+        text = (shape.text_frame.text or "").strip()
+        if not text:
+            continue
+        try:
+            l, t, w, h = shape.left, shape.top, shape.width, shape.height
+        except AttributeError:
+            continue
+        if w <= 0 or h <= 0:
+            continue
+        preview = text.splitlines()[0][:40]
+        boxes.append(((l, t, l + w, t + h), preview))
+
+    out: list[dict] = []
+    for i in range(len(boxes)):
+        for j in range(i + 1, len(boxes)):
+            (l1, t1, r1, b1), p1 = boxes[i]
+            (l2, t2, r2, b2), p2 = boxes[j]
+            ix1, iy1 = max(l1, l2), max(t1, t2)
+            ix2, iy2 = min(r1, r2), min(b1, b2)
+            if ix1 >= ix2 or iy1 >= iy2:
+                continue
+            inter = (ix2 - ix1) * (iy2 - iy1)
+            a1 = (r1 - l1) * (b1 - t1)
+            a2 = (r2 - l2) * (b2 - t2)
+            min_area = min(a1, a2) or 1
+            ratio = inter / min_area
+            if ratio >= min_overlap_ratio:
+                out.append({
+                    "a_preview": p1,
+                    "b_preview": p2,
+                    "overlap_ratio": round(ratio, 2),
+                })
+    return out
+
+
 def _add_code_slide(slide, row, state, slug, tmpd, *, sw, sh,
                     accent, fg, bg, fonts, palette_full, Inches, Pt,
                     MSO_SHAPE,
-                    type_scale: dict = _DEFAULT_TYPE_SCALE) -> str | None:
+                    type_scale: dict = _DEFAULT_TYPE_SCALE) -> tuple[str | None, list[dict]]:
     """Execute the slide's `code` against a prepared namespace.
 
-    Returns the error message string when execution raises (the caller
-    then degrades to plain text); returns None on success.
+    Returns `(err, overlap_warnings)`. `err` is the error message
+    string when execution raises (the caller then degrades to plain
+    text), or None on success. `overlap_warnings` is the list of
+    text-on-text overlap pairs found AFTER successful execution —
+    empty when no overlap or when execution failed (no shapes to
+    check).
     """
     code = (row.get("code") or "").strip()
     if not code:
-        return "no code on slide"
+        return "no code on slide", []
     # Full 7-key palette as RGBColor objects (todo 007 axis 4).
     palette = {
         "accent": accent, "background": bg, "foreground": fg,
@@ -1219,9 +1276,10 @@ def _add_code_slide(slide, row, state, slug, tmpd, *, sw, sh,
     )
     try:
         exec(compile(code, f"<slide {row.get('id', '?')} code>", "exec"), ns)
-        return None
     except Exception as e:  # noqa: BLE001 — surface to the caller
-        return f"{type(e).__name__}: {e}"
+        return f"{type(e).__name__}: {e}", []
+    warnings = _detect_text_overlaps(slide)
+    return None, warnings
 
 
 def _render_pdf_to_pngs(pdf_path: pathlib.Path, out_dir: pathlib.Path,
@@ -1331,6 +1389,7 @@ def export_deck_to_pptx(
 
     missing_renders: list[int] = []
     code_errors: list[dict] = []
+    overlap_warnings: list[dict] = []
     image_slides = 0
     text_slides = 0
     hybrid_slides = 0
@@ -1344,13 +1403,19 @@ def export_deck_to_pptx(
                 # natively (docs/todo/002). On exec failure we degrade
                 # to plain text so the deck still exports — the error
                 # surfaces in `code_errors[]` of the result.
-                err = _add_code_slide(
+                err, overlaps = _add_code_slide(
                     slide, s, state, slug, tmpd, sw=sw, sh=sh,
                     accent=accent, fg=fg, bg=bg, fonts=fonts,
                     palette_full=colors,
                     Inches=Inches, Pt=Pt, MSO_SHAPE=MSO_SHAPE,
                     type_scale=type_scale,
                 )
+                if overlaps:
+                    overlap_warnings.append({
+                        "slide_number": s.get("slide_number"),
+                        "slide_id": s.get("id"),
+                        "pairs": overlaps,
+                    })
                 if err is None:
                     code_slides += 1
                 else:
@@ -1479,6 +1544,7 @@ def export_deck_to_pptx(
         "code_slides": code_slides,
         "missing_renders": missing_renders,
         "code_errors": code_errors,
+        "overlap_warnings": overlap_warnings,
         "local_path": str(out),
         "blob_path": pptx_blob,
         "pdf_local_path": str(pdf_path) if pdf_path else None,
