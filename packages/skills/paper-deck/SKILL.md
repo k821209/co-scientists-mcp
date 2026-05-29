@@ -250,6 +250,89 @@ signals → code, figure_number → paper-figure, prompt → ai-image,
 otherwise → text). Pass an explicit `render_mode` only when you want
 to lock the strategy at outline time (rare).
 
+### 4.5. AI image opportunities — decide at outline (todo 015)
+
+While you're still in outline mode, sweep the slide list and decide
+which slides would visibly improve with a generative AI image. This
+is a separate pass from §5 design — get the decisions made BEFORE
+you start authoring code, so the agent isn't re-deciding mid-author.
+
+**Step 1 — set the deck-wide image style ONCE.** Call
+`update_deck(slug, deck_id, image_style="<style hint>")` near the
+start of the deck. The exporter prepends this string to every
+ai-image region's prompt, so all generated images share one visual
+treatment without you repeating the style hint on every slide. A
+useful template:
+
+```
+<medium>, <lighting>, <subject framing>, <mood>, no text, no captions
+```
+
+Examples that work well together for a single deck:
+
+- *"minimalist watercolor on cream paper, soft natural morning light,
+  Korean researcher aesthetic, muted earth tones, no text"*
+- *"isometric line illustration on warm cream background, single
+  accent color matching deck accent (#7A2A1A), generous whitespace,
+  no labels, no logos"*
+- *"editorial photograph, shallow depth of field, available light,
+  shot on 35mm film, neutral grading, no text overlays"*
+
+If you skip this step, regions still render but with no shared
+treatment — each scene comes out with whatever default style the
+generator picks, which looks incoherent across the deck.
+
+**Step 2 — sweep each slide for image opportunity.** For each
+slide, ask one question: *would an AI image visibly improve this
+slide's narrative impact?* Rough heuristics by role:
+
+| Role / shape | Image candidate? | Why |
+|---|---|---|
+| `title` (cover) | **Almost always** | The cover sets tone; a single evocative image carries it. |
+| `chapter_divider` / hook / vignette | **Almost always** | Pure narrative beats benefit from a scene. |
+| narrative / story-time content slide | **Often** | Anywhere you'd want to "show, not tell". |
+| concept / abstract idea (e.g., "Protocol의 도착", "무엇이 가로막는가") | **Sometimes** | A metaphorical image can anchor an abstract concept — but only if you can name the metaphor cleanly in 1 sentence. Otherwise skip. |
+| `method` step-by-step / `result` numbers / table | **Rarely** | The data IS the message; an image dilutes it. |
+| `qa` / closing thanks | **Sometimes** | A small closing image can land the tone. |
+
+For every "yes", DRAFT the scene prompt in 1–2 sentences (no style
+hint — that comes from `image_style` automatically). Examples:
+
+- cover slide for "2036년 김 박사의 화요일" → `"a Korean plant
+  breeding researcher at their desk in early morning, opening a
+  laptop, a single hot drink steaming on the desk, soft window
+  light from the right"`
+- concept slide "Protocol 의 도착" → `"a clean handshake between
+  two abstract robotic forms across a shared cable, symbolic, mid-
+  air"`
+- chapter divider "무엇이 가로막는가" → `"five concentric layers
+  of fabric overlapping with a small gap between each, top-down,
+  symbolic of friction"`
+
+**Step 3 — wire the placeholder.** For each slide that needs an
+image, decide whether the image is the WHOLE slide or a REGION:
+
+- **Whole-slide image** (covers, full-bleed dividers): `add_slide(
+  …, render_mode="ai-image", prompt="<scene>", …)`. No regions
+  needed.
+- **Image alongside text** (most narrative content slides): leave
+  `render_mode` unset, then call `set_slide_regions(slug, deck_id,
+  slide_id, regions=[{"render_mode": "ai-image", "prompt":
+  "<scene>", "x": 0.05, "y": 0.15, "w": 0.45, "h": 0.7}])` with a
+  region box that matches your text layout (text on the OTHER half
+  of the slide).
+
+After §5 authoring + §6 render, the renderer materializes every
+region — Pro-gated; cost is charged at render time. If the user
+isn't on a Pro plan, the renderer will error on ai-image regions
+and the rest of the deck still exports — surface this in §8.
+
+**When NOT to add an image.** If you'd struggle to write a clean
+1-sentence scene prompt, skip the image — a generic prompt produces
+generic stock-image output that drags the deck down. Better to
+leave the slide text-only with strong typography than fill it with
+a weak image.
+
 ### 5. Design + author each slide
 
 > **Content slides are BESPOKE by default — target ≥ 25 shapes per

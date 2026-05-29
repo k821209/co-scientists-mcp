@@ -95,6 +95,22 @@ def resolve_placeholders(text: str, concept: str | None) -> str:
     return re.sub(r"\{([a-zA-Z_][\w-]*)\}", _sub, text)
 
 
+def _apply_image_style(prompt: str, deck: dict) -> str:
+    """Prepend `deck.image_style` (if set) to an ai-image prompt so every
+    region in the deck inherits a consistent visual treatment without
+    the agent having to repeat the style hint per slide. No-op when
+    image_style is empty / missing. Style goes FIRST so the rest of the
+    prompt anchors the subject — gpt-image-2 weights early tokens.
+    """
+    style = (deck.get("image_style") or "").strip()
+    if not style:
+        return prompt
+    body = (prompt or "").strip()
+    if not body:
+        return style
+    return f"{style}. {body}"
+
+
 # ─── slide rendering ────────────────────────────────────────────────────────
 
 # Deck aspect ratio → (width_in, height_in) for the PPTX page.
@@ -278,6 +294,7 @@ def render_slide(
         png = _figure_png(state, slug, fig_num)
     elif mode == "ai-image":
         prompt = resolve_placeholders(slide.get("prompt") or "", deck.get("concept"))
+        prompt = _apply_image_style(prompt, deck)
         if not prompt.strip():
             raise ValueError("ai-image slide has no prompt")
         png = state.require_image_gen().generate(prompt=prompt, aspect_ratio="16:9")
@@ -346,6 +363,7 @@ def _render_one_region(
         png = _figure_png(state, slug, region["figure_number"])
     elif rmode == "ai-image":
         prompt = resolve_placeholders(region.get("prompt") or "", deck.get("concept"))
+        prompt = _apply_image_style(prompt, deck)
         if not prompt.strip():
             raise ValueError(f"region {region_id}: ai-image needs a prompt")
         w_in, h_in = _deck_aspect_size(deck)

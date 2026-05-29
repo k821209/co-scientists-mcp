@@ -889,17 +889,22 @@ def build_mcp(state: State) -> FastMCP:
         audience: str | None = None,
         duration_min: int | None = None,
         theme: str | None = None,
+        image_style: str | None = None,
         aspect_ratio: str = "16:9",
         deck_id: str | None = None,
     ) -> dict[str, Any]:
         """Create or retrieve a presentation deck attached to a paper.
         Idempotent: returns the existing deck unchanged if `deck_id` is
         provided and already exists. `aspect_ratio` ('16:9' | '16:10' |
-        '4:3') sets the exported PPTX page size.
+        '4:3') sets the exported PPTX page size. `image_style` is a
+        free-form style hint prepended to every ai-image region's
+        prompt for visual consistency (e.g., "minimalist watercolor,
+        soft natural light, Korean researcher aesthetic, no text").
         """
         return _decks.create_deck(
             state, slug, title=title, audience=audience,
             duration_min=duration_min, theme=theme,
+            image_style=image_style,
             aspect_ratio=aspect_ratio, deck_id=deck_id,
         )
 
@@ -919,6 +924,7 @@ def build_mcp(state: State) -> FastMCP:
         audience: str | None = None,
         duration_min: int | None = None,
         theme: str | None = None,
+        image_style: str | None = None,
         aspect_ratio: str | None = None,
         concept: str | None = None,
         status: str | None = None,
@@ -927,10 +933,14 @@ def build_mcp(state: State) -> FastMCP:
         (palette / typography / motif) inherited by every slide's
         prompt — the PPTX export also harvests accent/bg/text colors
         from it to theme native text slides. `aspect_ratio` is
-        '16:9' | '16:10' | '4:3'."""
+        '16:9' | '16:10' | '4:3'. `image_style` is a free-form style
+        hint prepended to every ai-image region's prompt for visual
+        consistency across the deck — set ONCE at outline time, then
+        per-slide prompts only describe the scene."""
         return _decks.update_deck(
             state, slug, deck_id, title=title, audience=audience,
             duration_min=duration_min, theme=theme,
+            image_style=image_style,
             aspect_ratio=aspect_ratio, concept=concept, status=status,
         )
 

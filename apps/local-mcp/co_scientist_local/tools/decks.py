@@ -95,6 +95,7 @@ def create_deck(
     audience: str | None = None,
     duration_min: int | None = None,
     theme: str | None = None,
+    image_style: str | None = None,
     aspect_ratio: str = "16:9",
     deck_id: str | None = None,
 ) -> dict:
@@ -122,6 +123,7 @@ def create_deck(
         "audience": audience,
         "duration_min": duration_min,
         "theme": theme,
+        "image_style": image_style,  # deck-wide AI-image style hint
         "aspect_ratio": aspect_ratio,
         "concept": None,            # set later via update_deck
         "status": "draft",
@@ -163,6 +165,7 @@ def update_deck(
     audience: str | None = None,
     duration_min: int | None = None,
     theme: str | None = None,
+    image_style: str | None = None,
     aspect_ratio: str | None = None,
     concept: str | None = None,
     status: str | None = None,
@@ -177,6 +180,7 @@ def update_deck(
     if audience is not None: fields["audience"] = audience
     if duration_min is not None: fields["duration_min"] = duration_min
     if theme is not None: fields["theme"] = theme
+    if image_style is not None: fields["image_style"] = image_style
     if aspect_ratio is not None:
         if aspect_ratio not in _VALID_ASPECT:
             raise ValueError(
