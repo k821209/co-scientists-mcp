@@ -938,16 +938,28 @@ def card(slide, *, left, top, width, height, title: str, body: str,
     """
     bg = palette.get("surface", palette["background"])
     border = palette["accent"]
-    title_pt = max(14, type_scale.get("head", 26) - 4)
+    title_pt_start = max(14, type_scale.get("head", 26) - 4)
     body_pt = max(12, type_scale.get("body", 20) - 4)
     line_spacing = type_scale.get("line_spacing", 1.22)
     pad = Pt(10)
     inner_w = width - 2 * pad
+    # Autofit the TITLE so a long title shrinks to fit (max 2 lines)
+    # rather than wrapping past its allocated height and overlapping
+    # the body region (todo 018 — visible in v8 p.2 where "Era I —
+    # sequence 기반 / 예측" wrap overlapped "GWAS" body line).
+    title_max_h_pt = title_pt_start * 2.2  # 2-line budget at line_spacing 1.1
+    title_pt = autofit_pt(
+        title or "", max_width_emu=inner_w,
+        max_height_emu=Pt(int(title_max_h_pt)),
+        start_pt=title_pt_start, line_spacing=1.1, min_pt=14,
+    )
     title_h_natural_pt = (
         measure_text_height_pt(title or "", max_width_emu=inner_w,
                                font_pt=title_pt, line_spacing=1.1)
     )
-    title_h = Pt(max(int(title_pt * 1.6), int(title_h_natural_pt) + 4))
+    # +6pt safety pad (was +4) — covers small renderer-vs-estimate
+    # width differences on Korean glyphs without leaving big gaps.
+    title_h = Pt(max(int(title_pt * 1.6), int(title_h_natural_pt) + 6))
     body_h_natural_pt = (
         measure_text_height_pt(body or "", max_width_emu=inner_w,
                                font_pt=body_pt, line_spacing=line_spacing)
@@ -1046,11 +1058,12 @@ def card_grid(slide, items, *, left, top, width, height,
     cell_w = (width - gap * (cols - 1)) // cols
     requested_cell_h = (height - gap * (rows - 1)) // rows
 
-    title_pt = max(14, type_scale.get("head", 26) - 4)
+    title_pt_start = max(14, type_scale.get("head", 26) - 4)
     body_pt = max(12, type_scale.get("body", 20) - 4)
     line_spacing = type_scale.get("line_spacing", 1.22)
     pad = Pt(10)
     inner_w = cell_w - 2 * pad
+    title_max_h_pt = title_pt_start * 2.2  # 2-line budget at line_spacing 1.1
 
     def _resolve_text(item, primary, fallback):
         return ((item.get(primary) if isinstance(item, dict) else None)
@@ -1061,10 +1074,17 @@ def card_grid(slide, items, *, left, top, width, height,
     for item in items:
         title = _resolve_text(item, "title", "tag")
         body = _resolve_text(item, "body", "note")
+        # Match card()'s title autofit so the cell_h estimate aligns
+        # with what card() will actually emit (todo 018).
+        title_pt = autofit_pt(
+            title, max_width_emu=inner_w,
+            max_height_emu=Pt(int(title_max_h_pt)),
+            start_pt=title_pt_start, line_spacing=1.1, min_pt=14,
+        )
         title_h_pt = measure_text_height_pt(
             title, max_width_emu=inner_w, font_pt=title_pt, line_spacing=1.1
         )
-        title_h = max(int(title_pt * 1.6), int(title_h_pt) + 4)
+        title_h = max(int(title_pt * 1.6), int(title_h_pt) + 6)
         body_h = (
             int(measure_text_height_pt(
                 body, max_width_emu=inner_w,

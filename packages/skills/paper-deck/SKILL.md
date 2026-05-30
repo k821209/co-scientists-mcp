@@ -1076,36 +1076,50 @@ final_y = h.vstack(slide, [
 # downstream items go at `final_y + Pt(...)`.
 ```
 
-**Timeline / milestone-row alignment (todo 017)** — for horizontal
+**Timeline / milestone-row alignment (todo 017/018)** — for horizontal
 multi-column timelines (year + dot on the rail + content stack
-below), every element in a single column must share an X axis.
-Common bug (v7 p.6 "Era I — 네 단계의 milestone"): year textboxes
-were left-aligned in their column (`PP_ALIGN.LEFT`, the default),
-but the dots were placed at column-center. Result: the year reads
-at the column's left edge, the dot ~Inches(1.5) to the right —
-visually disconnected.
+below), **every textbox in a single column** must share an X axis
+with the dot. Not just the year — ALL of {year, dot, title,
+subtitle, body, any footer line in that column}. v7 p.6 had the
+year-vs-dot mismatch; v8 p.5 fixed year+dot but left
+title/subtitle/body left-aligned → titles drifted left of the
+centered year+dot. Both failures share one root: applying align=
+to *some* elements and not the rest.
+
+**Rule**: pick the column's alignment ONCE (`PP_ALIGN.CENTER` for
+center-anchored columns, or omit for left-anchored). Then apply
+that same alignment to **every textbox** in the column. The dot
+shape's coordinate basis follows: center column → dot at
+`col_left + col_w//2 - r`; left column → dot at `col_left`.
 
 ```python
-# WRONG — year textbox starts at col_left (left-aligned default),
-# but dot is at col_center. They visibly drift apart.
-h.text(slide, str(year), left=col_left, top=y, width=col_w, ...)
-slide.shapes.add_shape(
-    MSO_SHAPE.OVAL,
-    col_left + col_w // 2 - dot_r, dot_y, 2 * dot_r, 2 * dot_r,
-)
+# WRONG — only the year carries align=CENTER; title/subtitle/body
+# default to LEFT and drift to the column's left edge.
+align_col = PP_ALIGN.CENTER
+h.text(slide, str(year), left=cx, top=y, width=cw, align=align_col, ...)
+slide.shapes.add_shape(MSO_SHAPE.OVAL,
+    cx + cw // 2 - r, dot_y, 2 * r, 2 * r)
+h.text(slide, title,    left=cx, top=y2, width=cw, ...)  # ← LEFT default
+h.text(slide, subtitle, left=cx, top=y3, width=cw, ...)  # ← LEFT default
+h.text(slide, body,     left=cx, top=y4, width=cw, ...)  # ← LEFT default
 
-# RIGHT — pick ONE alignment and stick to it. Centered version:
-h.text(slide, str(year), left=col_left, top=y, width=col_w,
-       align=PP_ALIGN.CENTER, ...)
-slide.shapes.add_shape(
-    MSO_SHAPE.OVAL,
-    col_left + col_w // 2 - dot_r, dot_y, 2 * dot_r, 2 * dot_r,
-)
-# (title/body textboxes below also align=PP_ALIGN.CENTER to follow.)
+# RIGHT — EVERY textbox in the column inherits the column's align.
+align_col = PP_ALIGN.CENTER
+for col_kwargs in (
+    dict(text=str(year),  size_pt=14, color="muted"),
+    dict(text=title,      size_pt=18, bold=True),
+    dict(text=subtitle,   size_pt=12, italic=True, color="muted"),
+    dict(text=body,       size_pt=14),
+):
+    h.text(slide, **col_kwargs, left=cx, width=cw, top=...,
+           height=..., align=align_col, palette=palette, fonts=fonts)
+slide.shapes.add_shape(MSO_SHAPE.OVAL,
+    cx + cw // 2 - r, dot_y, 2 * r, 2 * r)
 ```
 
-If you go with column-left (no `align=` on textboxes), the dot's
-LEFT edge must equal `col_left` — not its CENTER.
+Even simpler: use `h.vstack(...)` for the column's text stack with
+`align=PP_ALIGN.CENTER` propagated to every item. One alignment
+decision per column, no chance to forget on one of the rows.
 
 ### 5c. Compositional effects — why arrangement matters (todo 006)
 
