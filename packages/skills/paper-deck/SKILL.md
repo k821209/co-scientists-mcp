@@ -710,6 +710,43 @@ skip it. But the eyebrow text comes from YOUR talk's sections (not
 necessarily WHY / HOW / WHAT / WHO — those are one team's
 convention).
 
+**Chrome rules — what NOT to add (todo 020).** `h.deck_chrome` is
+the ONLY chrome the slide gets. Do not invent:
+
+- **Marginalia / sidebars**: vertical rotated text on the slide
+  edge ("§14 horizon", "§ MAP", "note · vignette · hook"),
+  paragraph-mark hashes, book-style edge labels. These are
+  decorative noise to the audience; remove them on sight. Only
+  add a marginal label if the user has explicitly asked for a
+  "marginal notes" aesthetic for the deck.
+- **Duplicate page indicators**: `deck_chrome` already prints
+  "N / total" bottom-right. Don't draw a SECOND copy (top-left,
+  inside a card, etc.) — it confuses the audience and reads as
+  a layout bug.
+- **Decorative dots / pips placed near textboxes you didn't
+  measure**: a small `MSO_SHAPE.OVAL` sitting on a horizontal
+  rail must clear every textbox in its column by ≥ Pt(8) vertical
+  gap. v10 p.4 had timeline dots landing on the "g" of
+  "Diagnosis" and the "i" of "Application" because dot.y and
+  italic_label.y were the same. The overlap detector only
+  catches textbox↔textbox; shape↔textbox needs manual care:
+
+```python
+# WRONG — dot center aligned with italic label's vertical middle.
+rail_y = Inches(3.5)
+slide.shapes.add_shape(MSO_SHAPE.OVAL,
+    cx - r, rail_y - r, 2 * r, 2 * r)
+h.text(slide, label_italic, left=cx_box, top=rail_y - Pt(8),
+       width=cw, height=Pt(16), italic=True, ...)  # ← overlaps the dot
+
+# RIGHT — dot on rail; italic label distinctly below.
+rail_y = Inches(3.3)
+slide.shapes.add_shape(MSO_SHAPE.OVAL,
+    cx - r, rail_y - r, 2 * r, 2 * r)
+h.text(slide, label_italic, left=cx_box, top=rail_y + r + Pt(8),
+       width=cw, height=Pt(16), italic=True, ...)
+```
+
 If the brief has none of the trigger signals AND fits one of the
 patterns below cleanly, you can use a single pattern call. But check
 the pattern's "Use ONLY when…" line — most are tighter than they
