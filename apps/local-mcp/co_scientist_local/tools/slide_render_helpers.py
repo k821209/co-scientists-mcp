@@ -742,7 +742,12 @@ def vstack(slide, lines, *, left, top, width, palette,
             body, max_width_emu=width, font_pt=size_pt,
             line_spacing=item_line_spacing,
         )
-        line_h = Pt(int(natural_pt) + 4)
+        # +8pt safety pad covers the small Korean-width
+        # underestimate in _char_width_factor (todo 019). Without it,
+        # the last wrapped line of a Korean body can render past the
+        # textbox bottom and clip into whatever is below (visible in
+        # v8 p.14 BEFORE/AFTER callouts).
+        line_h = Pt(int(natural_pt) + 8)
         text(slide, body, left=left, top=y, width=width, height=line_h,
              palette=palette, size_pt=size_pt, color=color,
              font_name=font_name, bold=item.get("bold", False),
@@ -826,7 +831,11 @@ def callout(slide, *, left, top, width, fill,
             body_text, max_width_emu=inner_w, font_pt=size_pt,
             line_spacing=item_ls,
         )
-        content_pt += int(natural_pt) + 4
+        # +8pt safety pad (was +4) — matches the vstack interior pad
+        # so the pre-measured callout height covers what vstack will
+        # actually emit. Without this, h.callout under-sized the bg
+        # rect on Korean-heavy content (todo 019, v8 p.14).
+        content_pt += int(natural_pt) + 8
         if i < last_i:
             content_pt += gap_pt
 
