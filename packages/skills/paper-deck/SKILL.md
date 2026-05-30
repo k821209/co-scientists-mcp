@@ -747,6 +747,34 @@ h.text(slide, label_italic, left=cx_box, top=rail_y + r + Pt(8),
        width=cw, height=Pt(16), italic=True, ...)
 ```
 
+- **Repeat-symbol clusters (I/II/III, ★/★★/★★★, N-bar marks)
+  must anchor to their cluster's HORIZONTAL CENTER, not to the
+  left-most element** (todo 021). Drawing the first bar at
+  `col_center` and adding the next bars to its right shifts the
+  cluster's optical center rightward as the symbol grows — by
+  III/3-bars the cluster's center is `bar_width + gap` past
+  column-center, and the accent line + label below (still at
+  column-center) read as floating left of the symbol. v11 cover
+  shows the bug: I lines up cleanly, II drifts slightly right of
+  its accent, III drifts visibly right of "MCP 협업".
+
+```python
+# WRONG — first bar at col_center; cluster grows rightward.
+for k in range(n_bars):
+    slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,
+        col_center + k * (bar_w + gap), top, bar_w, bar_h)
+
+# RIGHT — compute cluster_width first; place from a left edge
+# derived so the cluster's center == col_center.
+cluster_w = n_bars * bar_w + (n_bars - 1) * gap
+cluster_left = col_center - cluster_w // 2
+for k in range(n_bars):
+    slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,
+        cluster_left + k * (bar_w + gap), top, bar_w, bar_h)
+# Now accent_line and label centered at col_center align with the
+# cluster's optical center.
+```
+
 If the brief has none of the trigger signals AND fits one of the
 patterns below cleanly, you can use a single pattern call. But check
 the pattern's "Use ONLY when…" line — most are tighter than they
