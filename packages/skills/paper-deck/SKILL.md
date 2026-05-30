@@ -1121,6 +1121,50 @@ Even simpler: use `h.vstack(...)` for the column's text stack with
 `align=PP_ALIGN.CENTER` propagated to every item. One alignment
 decision per column, no chance to forget on one of the rows.
 
+**Filled rect + text inside → use `h.callout`, never hand-roll
+(todo 019)** — every "filled rectangle containing text" pattern
+the agent hand-composes ends up wrong in one of two directions:
+overflow (text past rect bottom, v8 p.14 BEFORE/AFTER) or
+underfill (rect ~2× taller than its content, leaving an unbalanced
+empty band — v9 p.14 TAKE-HOME footer). Both fail the same way:
+agent computes the rect height before knowing the rendered text
+height. `h.callout` exists to make this impossible — it measures
+content first, then sizes the rect to `content_h + 2*pad_pt`.
+**Hard rule**: any filled rectangle that contains text content
+(dark hero footer band, light info callout, "BEFORE / AFTER"
+comparison pairs, take-home statement boxes, "결산 / 진단 / 핵심"
+type stamps) MUST go through `h.callout`. Drawing
+`slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, ...)` + a hand-placed
+`h.text` inside it is **forbidden for this pattern** — the only
+filled rectangles you should draw by hand are decorative
+non-content shapes (accent strips, dividers, background panels
+that hold images).
+
+```python
+# WRONG — manual rect with hand-guessed height, content under/overflows.
+hero = slide.shapes.add_shape(
+    MSO_SHAPE.RECTANGLE, x, y, w, Inches(2.0),  # ← guessed height
+)
+hero.fill.solid(); hero.fill.fore_color.rgb = palette["foreground"]
+h.text(slide, "TAKE-HOME", left=x + pad, top=y + pad, width=w - 2*pad,
+       height=Pt(20), size_pt=12, color=palette["surface"],
+       bold=True, palette=palette, fonts=fonts)
+h.text(slide, "더 큰 모델이 아니라, 더 나은 연결.",
+       left=x + pad, top=y + pad + Pt(28), width=w - 2*pad,
+       height=Pt(60), size_pt=32, color=palette["surface"],
+       bold=True, palette=palette, fonts=fonts)
+
+# RIGHT — h.callout sizes the rect to its content automatically.
+h.callout(slide,
+    left=x, top=y, width=w, fill=palette["foreground"],
+    headline="TAKE-HOME",
+    body="더 큰 모델이 아니라, 더 나은 연결.",
+    palette=palette, fonts=fonts, type_scale=type_scale,
+)
+# (For richer content, pass items=[{text, size_pt, bold, ...}, …]
+#  instead of headline=/body=.)
+```
+
 ### 5c. Compositional effects — why arrangement matters (todo 006)
 
 Same content lands differently depending on arrangement. The patterns
