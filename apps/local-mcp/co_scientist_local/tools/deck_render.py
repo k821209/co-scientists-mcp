@@ -1522,6 +1522,14 @@ def export_deck_to_pptx(
     slide_pngs: list[dict] = []
     if pdf_path is not None:
         pngs = _render_pdf_to_pngs(pdf_path, out.parent)
+        # Index slides by slide_number for stamping the per-slide
+        # preview_png_blob_path back on each slide doc (todo 022 —
+        # lets the web dashboard show the actual exported rendering
+        # in its slide carousel instead of the CSS-synth fallback).
+        slides_by_number = {
+            (s.get("slide_number") or 0): s for s in slides
+        }
+        now_iso_str = now_iso()
         for i, p in enumerate(pngs, start=1):
             blob_path = state.project_path(
                 "papers", slug, "decks", deck_id, "exports", p.name,
@@ -1532,6 +1540,15 @@ def export_deck_to_pptx(
                 "local_path": str(p),
                 "blob_path": blob_path,
             })
+            target = slides_by_number.get(i)
+            if target and target.get("id"):
+                state.backend.update_doc(
+                    _decks._slide_path(state, slug, deck_id, target["id"]),
+                    {
+                        "preview_png_blob_path": blob_path,
+                        "preview_png_at": now_iso_str,
+                    },
+                )
 
     return {
         "deck_id": deck_id,

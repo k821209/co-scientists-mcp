@@ -71,6 +71,11 @@ interface Slide {
   render_mode?: string;
   figure_number?: number | null;
   image_blob_path?: string | null;
+  /** Path to the per-slide PNG produced by export_deck_to_pptx — the
+   *  actual rendered slide (todo 022). When present, prefer it over
+   *  the CSS-synth fallback so the preview matches the exported PPTX. */
+  preview_png_blob_path?: string | null;
+  preview_png_at?: string | null;
   regions?: Region[];
   status?: string;
 }
@@ -869,6 +874,24 @@ function SlidePreview({ pid, slide, aspectRatio, accentColor }: {
 }) {
   const ar = arCss(aspectRatio);
   const mode = slide.render_mode || "code-shape";
+
+  // Exported PNG → the real rendered slide (todo 022). When the deck has
+  // been exported, every slide gets a preview_png_blob_path stamped on its
+  // doc. Showing that here means the dashboard preview matches the PPTX
+  // exactly — no CSS-synth approximation to drift from the file.
+  if (slide.preview_png_blob_path) {
+    return (
+      <div
+        className="overflow-hidden rounded-md border bg-muted/20"
+        style={{ aspectRatio: ar }}
+      >
+        <StorageImg
+          pid={pid} blobPath={slide.preview_png_blob_path} alt={slide.title}
+          className="h-full w-full object-contain"
+        />
+      </div>
+    );
+  }
 
   // Image slide → full-bleed picture, no frame.
   if (mode !== "hybrid" && slide.image_blob_path) {
