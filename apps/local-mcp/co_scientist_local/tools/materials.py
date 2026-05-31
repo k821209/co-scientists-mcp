@@ -1,13 +1,14 @@
-"""Reference materials: user-uploaded source files attached to a paper.
+"""Reference materials: user-uploaded source files shared across a project.
 
 These are the files a user drops into the dashboard for the agent to consult
-while writing — PDFs to read, datasets to analyze, prior drafts, notes, images.
-Distinct from `references` (the bibliography of cited works): a material is a
-*file*, a reference is a *citation*.
+while working — PDFs to read, datasets to analyze, prior drafts, notes, images.
+They are PROJECT-level (shared by every paper in the project), distinct from
+`references` (the bibliography of cited works): a material is a *file*, a
+reference is a *citation*.
 
 Paths:
-    doc:  projects/{pid}/papers/{slug}/materials/{material_id}
-    blob: projects/{pid}/papers/{slug}/materials/{material_id}__{filename}
+    doc:  projects/{pid}/materials/{material_id}
+    blob: projects/{pid}/materials/{material_id}__{filename}
 
 The doc carries metadata (filename, content_type, size_bytes, description) and
 a `blob_path`; the bytes live in Storage. `get_material` streams the bytes back
@@ -21,7 +22,6 @@ import re
 from ..backends.base import NotFound
 from ..state import State
 from ..util import new_id, now_iso
-from .papers import _paper_path
 
 # Filenames are user-supplied; keep only a safe basename for the blob key.
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -33,28 +33,21 @@ def _safe_filename(name: str) -> str:
     return cleaned[:120]
 
 
-def _materials_collection(state: State, slug: str) -> str:
-    return state.project_path("papers", slug, "materials")
+def _materials_collection(state: State) -> str:
+    return state.project_path("materials")
 
 
-def _material_path(state: State, slug: str, material_id: str) -> str:
-    return state.project_path("papers", slug, "materials", material_id)
-
-
-def _ensure_paper(state: State, slug: str) -> None:
-    if state.backend.get_doc(_paper_path(state, slug)) is None:
-        raise NotFound(f"paper not found: {slug!r} in project {state.project_id!r}")
+def _material_path(state: State, material_id: str) -> str:
+    return state.project_path("materials", material_id)
 
 
 def add_material(
     state: State,
-    slug: str,
     *,
     local_path: str,
     description: str | None = None,
 ) -> dict:
-    """Upload a local file as a reference material for `slug`."""
-    _ensure_paper(state, slug)
+    """Upload a local file as a project reference material."""
     p = pathlib.Path(local_path)
     if not p.is_file():
         raise FileNotFoundError(f"material file not found: {local_path}")
@@ -62,7 +55,7 @@ def add_material(
     data = p.read_bytes()
     material_id = new_id()
     filename = _safe_filename(p.name)
-    blob_path = _material_path(state, slug, f"{material_id}__{filename}")
+    blob_path = _material_path(state, f"{material_id}__{filename}")
     state.backend.put_blob(blob_path, data)
 
     now = now_iso()
@@ -77,14 +70,13 @@ def add_material(
         "created_at": now,
         "updated_at": now,
     }
-    state.backend.set_doc(_material_path(state, slug, material_id), doc)
+    state.backend.set_doc(_material_path(state, material_id), doc)
     return doc
 
 
-def list_materials(state: State, slug: str) -> list[dict]:
-    """List reference materials attached to a paper, newest first."""
-    _ensure_paper(state, slug)
-    pairs = state.backend.list_collection(_materials_collection(state, slug))
+def list_materials(state: State) -> list[dict]:
+    """List the project's reference materials, newest first."""
+    pairs = state.backend.list_collection(_materials_collection(state))
     mats = [data for _, data in pairs]
     mats.sort(key=lambda m: m.get("created_at", ""), reverse=True)
     return mats
@@ -92,7 +84,6 @@ def list_materials(state: State, slug: str) -> list[dict]:
 
 def get_material(
     state: State,
-    slug: str,
     material_id: str,
     *,
     dest_dir: str = ".",
@@ -103,10 +94,9 @@ def get_material(
     Writes to `dest_path` if given, else `dest_dir`/<original-filename>.
     Returns {path, filename, size_bytes, content_type}.
     """
-    _ensure_paper(state, slug)
-    doc = state.backend.get_doc(_material_path(state, slug, material_id))
+    doc = state.backend.get_doc(_material_path(state, material_id))
     if doc is None:
-        raise NotFound(f"material {material_id!r} not found for {slug!r}")
+        raise NotFound(f"material {material_id!r} not found")
     blob_path = doc.get("blob_path")
     if not blob_path:
         raise NotFound(f"material {material_id!r} has no stored file")
@@ -128,10 +118,9 @@ def get_material(
     }
 
 
-def delete_material(state: State, slug: str, material_id: str) -> bool:
+def delete_material(state: State, material_id: str) -> bool:
     """Delete a material's doc + blob. Returns True if it existed."""
-    _ensure_paper(state, slug)
-    path = _material_path(state, slug, material_id)
+    path = _material_path(state, material_id)
     doc = state.backend.get_doc(path)
     if doc is None:
         return False

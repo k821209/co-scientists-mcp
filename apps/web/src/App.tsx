@@ -9,6 +9,7 @@ import { ProjectPapers } from "./pages/ProjectPapers";
 import { ProjectPresentations } from "./pages/ProjectPresentations";
 import { ProjectRuns } from "./pages/ProjectRuns";
 import { ProjectMemory } from "./pages/ProjectMemory";
+import { ProjectMaterials } from "./pages/ProjectMaterials";
 import { ProjectSetup } from "./pages/ProjectSetup";
 import { Account } from "./pages/Account";
 import { Admin } from "./pages/Admin";
@@ -79,6 +80,7 @@ export default function App() {
                   <Route path="presentations" element={<ProjectPresentations />} />
                   <Route path="runs" element={<ProjectRuns />} />
                   <Route path="memory" element={<ProjectMemory />} />
+                  <Route path="materials" element={<ProjectMaterials />} />
                   <Route path="setup" element={<ProjectSetup />} />
                 </Route>
 

@@ -318,22 +318,22 @@ def build_mcp(state: State) -> FastMCP:
     def delete_figure(slug: str, figure_number: int) -> dict[str, Any]:
         return {"deleted": _figures.delete_figure(state, slug, figure_number)}
 
-    # ─── reference materials (user-uploaded source files) ────────────────────
+    # ─── reference materials (project-level user-uploaded source files) ──────
     @mcp.tool()
-    def list_materials(slug: str) -> list[dict[str, Any]]:
-        """List reference materials the user attached to this paper in the
-        dashboard — source files for you to consult while writing (PDFs to
-        read, datasets to analyze, prior drafts, notes, images). Distinct
-        from `references` (cited works): a material is a FILE, a reference
-        is a CITATION. Each entry has {material_id, filename, content_type,
+    def list_materials() -> list[dict[str, Any]]:
+        """List the project's reference materials — source files the user
+        uploaded in the dashboard for you to consult while working (PDFs to
+        read, datasets to analyze, prior drafts, notes, images). Shared
+        across the whole project, not tied to one paper. Distinct from
+        `references` (cited works): a material is a FILE, a reference is a
+        CITATION. Each entry has {material_id, filename, content_type,
         size_bytes, description}. Call at session start to see what the user
         wants you to work from, then `get_material` to pull the file.
         """
-        return _materials.list_materials(state, slug)
+        return _materials.list_materials(state)
 
     @mcp.tool()
     def get_material(
-        slug: str,
         material_id: str,
         dest_dir: str = ".",
         dest_path: str | None = None,
@@ -344,27 +344,26 @@ def build_mcp(state: State) -> FastMCP:
         read the file from the returned path with your normal file tools.
         """
         return _materials.get_material(
-            state, slug, material_id, dest_dir=dest_dir, dest_path=dest_path,
+            state, material_id, dest_dir=dest_dir, dest_path=dest_path,
         )
 
     @mcp.tool()
     def add_material(
-        slug: str,
         local_path: str,
         description: str | None = None,
     ) -> dict[str, Any]:
-        """Upload a local file as a reference material for this paper, so it
-        also appears in the dashboard. Use when YOU produce a source file the
-        user should see alongside the paper. For files the user uploaded,
-        use list_materials/get_material instead.
+        """Upload a local file as a project reference material, so it also
+        appears in the dashboard's Materials tab. Use when YOU produce a
+        source file the user should see. For files the user uploaded, use
+        list_materials/get_material instead.
         """
         return _materials.add_material(
-            state, slug, local_path=local_path, description=description,
+            state, local_path=local_path, description=description,
         )
 
     @mcp.tool()
-    def delete_material(slug: str, material_id: str) -> dict[str, Any]:
-        return {"deleted": _materials.delete_material(state, slug, material_id)}
+    def delete_material(material_id: str) -> dict[str, Any]:
+        return {"deleted": _materials.delete_material(state, material_id)}
 
     # ─── tables ──────────────────────────────────────────────────────────────
     @mcp.tool()

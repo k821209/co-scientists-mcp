@@ -103,10 +103,10 @@ papers · sections · reviews · figures · tables · references · materials
 · analyses · runs · servers (HPC) · exports · journal CSL · requirements
 · project memory · image gen · whoami · project_guide
 
-**Materials** are user-uploaded source files attached to a paper (PDFs to
-read, datasets, prior drafts, notes) — distinct from `references` (cited
-works). Call `list_materials(slug)` at session start; pull any you need
-with `get_material(slug, material_id)` (downloads to disk), then read the
+**Materials** are user-uploaded source files shared across the project
+(PDFs to read, datasets, prior drafts, notes) — distinct from `references`
+(cited works). Call `list_materials()` at session start; pull any you need
+with `get_material(material_id)` (downloads to disk), then read the
 returned path with your file tools.
 
 ## Project memory

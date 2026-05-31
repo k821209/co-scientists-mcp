@@ -1,21 +1,19 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
-  addDoc, collection, deleteDoc, doc, onSnapshot, orderBy, query,
-  setDoc, updateDoc,
+  addDoc, collection, doc, onSnapshot, orderBy, query, updateDoc,
 } from "firebase/firestore";
 import {
   ArrowLeft, MessageSquare, CheckCircle2, Download, Loader2,
   ImageIcon, BookOpen, ExternalLink, Table2, Activity, Beaker,
   FileText, Layers, Clock, RefreshCw, Share2, FileDown, AlertTriangle,
-  Paperclip, UploadCloud, Trash2,
 } from "lucide-react";
 import { db } from "@/firebase";
 import {
   downloadProjectBlobAsText, downloadProjectBlobAsFile, getProjectStorage,
 } from "@/projectAuth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Markdown } from "@/components/Markdown";
@@ -124,18 +122,6 @@ interface ExportRow {
   updated_at?: string;
 }
 
-interface Material {
-  id: string;
-  material_id: string;
-  filename: string;
-  content_type?: string;
-  size_bytes?: number;
-  blob_path?: string | null;
-  description?: string | null;
-  uploaded_by?: string;
-  created_at?: string;
-}
-
 interface Finding {
   id: string;
   doi: string;
@@ -170,7 +156,6 @@ export function Paper() {
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [findings, setFindings] = useState<Finding[]>([]);
   const [exports, setExports] = useState<ExportRow[]>([]);
-  const [materials, setMaterials] = useState<Material[]>([]);
   const [viewMode, setViewMode] = useState<"sections" | "compiled">("sections");
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -225,17 +210,9 @@ export function Paper() {
         setExports(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ExportRow, "id">) }))),
       () => {/* empty subcollection is fine */},
     );
-    const materialsRef = collection(paperRef, "materials");
-    const unsubMat = onSnapshot(
-      materialsRef,
-      (snap) =>
-        setMaterials(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Material, "id">) }))),
-      () => {/* empty subcollection is fine */},
-    );
     return () => {
       unsubPaper(); unsubSec(); unsubRev(); unsubRefs();
       unsubFigs(); unsubTabs(); unsubAna(); unsubAct(); unsubFnd(); unsubExp();
-      unsubMat();
     };
   }, [pid, slug]);
 
@@ -408,8 +385,6 @@ export function Paper() {
             )}
           </CardContent>
         </Card>
-
-        <MaterialsCard pid={pid} slug={slug} materials={materials} />
 
         {mainFigures.length > 0 && (
           <div className="space-y-4">
@@ -794,204 +769,6 @@ function ExportsCard({ pid, exports }: { pid: string; exports: ExportRow[] }) {
             </Button>
           </div>
         ))}
-        {err && <p className="text-xs text-destructive">{err}</p>}
-      </CardContent>
-    </Card>
-  );
-}
-
-
-const MATERIAL_MAX_BYTES = 25 * 1024 * 1024; // 25 MB
-
-function safeMaterialName(name: string): string {
-  const base = name.split(/[/\\]/).pop() || "file";
-  const cleaned = base.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^[._]+|[._]+$/g, "");
-  return (cleaned || "file").slice(0, 120);
-}
-
-function newMaterialId(): string {
-  // 12-char opaque id, matching the MCP's uuid4().hex[:12] shape.
-  const u = (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`).replace(/-/g, "");
-  return u.slice(0, 12);
-}
-
-/** Reference materials: user-uploaded source files Claude Code reads via the
- *  MCP (list_materials / get_material). Stored at
- *  projects/{pid}/papers/{slug}/materials/ — doc + Storage blob, mirroring
- *  what the MCP writes so files uploaded here are pullable locally. */
-function MaterialsCard({ pid, slug, materials }: {
-  pid: string; slug: string; materials: Material[];
-}) {
-  const [busy, setBusy] = useState(false);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const sorted = useMemo(
-    () =>
-      [...materials].sort((a, b) =>
-        (b.created_at ?? "").localeCompare(a.created_at ?? ""),
-      ),
-    [materials],
-  );
-
-  const upload = async (file: File) => {
-    setErr(null);
-    if (file.size > MATERIAL_MAX_BYTES) {
-      setErr(`"${file.name}" is ${formatBytes(file.size)} — over the 25 MB limit.`);
-      return;
-    }
-    setBusy(true);
-    try {
-      const materialId = newMaterialId();
-      const filename = safeMaterialName(file.name);
-      const blobPath = `projects/${pid}/papers/${slug}/materials/${materialId}__${filename}`;
-      const { ref, uploadBytes } = await import("firebase/storage");
-      const storage = await getProjectStorage(pid);
-      await uploadBytes(ref(storage, blobPath), file, {
-        contentType: file.type || "application/octet-stream",
-      });
-      const now = new Date().toISOString();
-      await setDoc(
-        doc(db, "projects", pid, "papers", slug, "materials", materialId),
-        {
-          material_id: materialId,
-          filename,
-          content_type: file.type || "application/octet-stream",
-          size_bytes: file.size,
-          blob_path: blobPath,
-          description: null,
-          uploaded_by: "user",
-          created_at: now,
-          updated_at: now,
-        },
-      );
-    } catch (x) {
-      setErr((x as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onPick = (e: FormEvent<HTMLInputElement>) => {
-    const input = e.currentTarget;
-    const files = Array.from(input.files ?? []);
-    input.value = ""; // allow re-picking the same file
-    (async () => {
-      for (const f of files) await upload(f);
-    })();
-  };
-
-  const download = async (m: Material) => {
-    if (!m.blob_path) return;
-    setBusyId(m.id);
-    setErr(null);
-    try {
-      await downloadProjectBlobAsFile(pid, m.blob_path, m.filename);
-    } catch (x) {
-      setErr((x as Error).message);
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const remove = async (m: Material) => {
-    if (!confirm(`Delete "${m.filename}"? Claude Code will no longer see it.`)) return;
-    setBusyId(m.id);
-    setErr(null);
-    try {
-      if (m.blob_path) {
-        const { ref, deleteObject } = await import("firebase/storage");
-        const storage = await getProjectStorage(pid);
-        await deleteObject(ref(storage, m.blob_path)).catch(() => {/* blob already gone */});
-      }
-      await deleteDoc(doc(db, "projects", pid, "papers", slug, "materials", m.material_id));
-    } catch (x) {
-      setErr((x as Error).message);
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  return (
-    <Card>
-      <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
-        <div>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Paperclip className="h-4 w-4" /> Reference materials
-          </CardTitle>
-          <CardDescription>
-            Source files for Claude Code to consult — PDFs, datasets, prior
-            drafts, notes. Pull them locally with{" "}
-            <code className="rounded bg-muted px-1.5 py-0.5 text-[10px]">
-              list_materials
-            </code>{" "}
-            /{" "}
-            <code className="rounded bg-muted px-1.5 py-0.5 text-[10px]">
-              get_material
-            </code>
-            .
-          </CardDescription>
-        </div>
-        <label
-          className={cn(
-            buttonVariants({ variant: "outline", size: "sm" }),
-            busy ? "pointer-events-none opacity-50" : "cursor-pointer",
-          )}
-        >
-          <input type="file" multiple className="hidden" onChange={onPick} disabled={busy} />
-          {busy ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <UploadCloud className="mr-2 h-4 w-4" />
-          )}
-          {busy ? "Uploading…" : "Upload"}
-        </label>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        {sorted.length === 0 ? (
-          <p className="text-sm italic text-muted-foreground">
-            No materials yet. Upload files here and Claude Code can read them
-            via the MCP.
-          </p>
-        ) : (
-          sorted.map((m) => (
-            <div
-              key={m.id}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm"
-            >
-              <div className="min-w-0">
-                <div className="truncate font-medium">{m.filename}</div>
-                <div className="mt-0.5 text-xs text-muted-foreground">
-                  {typeof m.size_bytes === "number" && formatBytes(m.size_bytes)}
-                  {typeof m.size_bytes === "number" && m.created_at ? " · " : null}
-                  {m.created_at && timeAgo(new Date(m.created_at))}
-                  {m.uploaded_by === "agent" ? " · from Claude Code" : null}
-                </div>
-              </div>
-              <div className="flex items-center gap-1">
-                <Button
-                  size="sm" variant="outline"
-                  disabled={busyId === m.id || !m.blob_path}
-                  onClick={() => download(m)}
-                  aria-label="download"
-                >
-                  {busyId === m.id ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Download className="h-4 w-4" />
-                  )}
-                </Button>
-                <Button
-                  size="sm" variant="ghost"
-                  disabled={busyId === m.id}
-                  onClick={() => remove(m)}
-                  aria-label="delete"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          ))
-        )}
         {err && <p className="text-xs text-destructive">{err}</p>}
       </CardContent>
     </Card>
