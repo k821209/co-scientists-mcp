@@ -15,6 +15,7 @@ from .tools import exports as _exports
 from .tools import imports as _imports
 from .tools import figures as _figures
 from .tools import images as _images
+from .tools import materials as _materials
 from .tools import memory as _memory
 from .tools import papers as _papers
 from .tools import references as _references
@@ -316,6 +317,54 @@ def build_mcp(state: State) -> FastMCP:
     @mcp.tool()
     def delete_figure(slug: str, figure_number: int) -> dict[str, Any]:
         return {"deleted": _figures.delete_figure(state, slug, figure_number)}
+
+    # ─── reference materials (user-uploaded source files) ────────────────────
+    @mcp.tool()
+    def list_materials(slug: str) -> list[dict[str, Any]]:
+        """List reference materials the user attached to this paper in the
+        dashboard — source files for you to consult while writing (PDFs to
+        read, datasets to analyze, prior drafts, notes, images). Distinct
+        from `references` (cited works): a material is a FILE, a reference
+        is a CITATION. Each entry has {material_id, filename, content_type,
+        size_bytes, description}. Call at session start to see what the user
+        wants you to work from, then `get_material` to pull the file.
+        """
+        return _materials.list_materials(state, slug)
+
+    @mcp.tool()
+    def get_material(
+        slug: str,
+        material_id: str,
+        dest_dir: str = ".",
+        dest_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Download a reference material to local disk so you can open it.
+        Writes to `dest_path` if given, else `dest_dir`/<original-filename>.
+        Returns {path, filename, size_bytes, content_type}. After this,
+        read the file from the returned path with your normal file tools.
+        """
+        return _materials.get_material(
+            state, slug, material_id, dest_dir=dest_dir, dest_path=dest_path,
+        )
+
+    @mcp.tool()
+    def add_material(
+        slug: str,
+        local_path: str,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        """Upload a local file as a reference material for this paper, so it
+        also appears in the dashboard. Use when YOU produce a source file the
+        user should see alongside the paper. For files the user uploaded,
+        use list_materials/get_material instead.
+        """
+        return _materials.add_material(
+            state, slug, local_path=local_path, description=description,
+        )
+
+    @mcp.tool()
+    def delete_material(slug: str, material_id: str) -> dict[str, Any]:
+        return {"deleted": _materials.delete_material(state, slug, material_id)}
 
     # ─── tables ──────────────────────────────────────────────────────────────
     @mcp.tool()

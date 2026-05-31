@@ -10,7 +10,7 @@ only) and refers the agent here on every session start.
 """
 from __future__ import annotations
 
-GUIDE_VERSION = "2026-05-25a"
+GUIDE_VERSION = "2026-05-31a"
 
 
 def render_guide() -> str:
@@ -99,9 +99,15 @@ On every session start:
 
 ## Tool surface (~60 tools under `mcp__co_scientist__*`)
 
-papers · sections · reviews · figures · tables · references · analyses · runs
-servers (HPC) · exports · journal CSL · requirements · project memory
-· image gen · whoami · project_guide
+papers · sections · reviews · figures · tables · references · materials
+· analyses · runs · servers (HPC) · exports · journal CSL · requirements
+· project memory · image gen · whoami · project_guide
+
+**Materials** are user-uploaded source files attached to a paper (PDFs to
+read, datasets, prior drafts, notes) — distinct from `references` (cited
+works). Call `list_materials(slug)` at session start; pull any you need
+with `get_material(slug, material_id)` (downloads to disk), then read the
+returned path with your file tools.
 
 ## Project memory
 
