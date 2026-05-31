@@ -3,9 +3,10 @@ import { useOutletContext } from "react-router-dom";
 import { doc, updateDoc } from "firebase/firestore";
 import {
   Copy, Check, Download, KeyRound, RefreshCw, Eye, EyeOff,
-  Sparkles, ArrowRight, ArrowLeft, FolderOpen,
+  Sparkles, ArrowRight, ArrowLeft, FolderOpen, Link2,
 } from "lucide-react";
 import { db } from "@/firebase";
+import { getProjectStorage } from "@/projectAuth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { generateApiKey, maskKey } from "@/lib/projectKey";
@@ -148,6 +149,9 @@ export function ProjectSetup() {
   const { pid, project } = useOutletContext<ProjectContext>();
   const [showKey, setShowKey] = useState(false);
   const [rotating, setRotating] = useState(false);
+  const [wgetUrl, setWgetUrl] = useState<string | null>(null);
+  const [wgetBusy, setWgetBusy] = useState(false);
+  const [wgetErr, setWgetErr] = useState<string | null>(null);
 
   // Backfill api_key on first view if missing (existing projects from before this feature)
   useEffect(() => {
@@ -178,10 +182,34 @@ export function ProjectSetup() {
         api_key: generateApiKey(),
         api_key_created_at: new Date().toISOString(),
       });
+      // The previously generated wget link points at a script with the old key.
+      setWgetUrl(null);
     } catch (err) {
       alert(`Rotate failed: ${(err as Error).message}`);
     } finally {
       setRotating(false);
+    }
+  };
+
+  // Upload the generated setup script to project Storage and surface a
+  // tokenized download URL the user can `wget`. The URL embeds the API key
+  // (same as the script itself), so its secrecy matches the script's.
+  const makeWgetUrl = async () => {
+    if (!setupScript || !pid) return;
+    setWgetBusy(true);
+    setWgetErr(null);
+    try {
+      const { ref, uploadString, getDownloadURL } = await import("firebase/storage");
+      const storage = await getProjectStorage(pid);
+      const r = ref(storage, `projects/${pid}/setup/setup-${projectSlug}.sh`);
+      await uploadString(r, setupScript, "raw", {
+        contentType: "text/x-shellscript",
+      });
+      setWgetUrl(await getDownloadURL(r));
+    } catch (err) {
+      setWgetErr((err as Error).message);
+    } finally {
+      setWgetBusy(false);
     }
   };
 
@@ -267,6 +295,32 @@ pip install -e ~/co-scientists-mcp/apps/local-mcp`} />
               </div>
               <CodeBlock value={`cd /path/to/your/project
 bash ~/Downloads/setup-${projectSlug}.sh`} />
+
+              {/* wget-able URL — for headless/remote machines with no browser */}
+              <div className="rounded-md border border-dashed bg-muted/30 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="flex-1 text-xs text-muted-foreground">
+                    On a remote/headless machine? Generate a one-time URL and
+                    fetch the same script with <code className="text-[10px]">wget</code>.
+                    The link embeds your API key — treat it like the key itself.
+                  </p>
+                  <Button size="sm" variant="outline" disabled={!setupScript || wgetBusy}
+                          onClick={makeWgetUrl}>
+                    <Link2 className={`mr-2 h-4 w-4 ${wgetBusy ? "animate-pulse" : ""}`} />
+                    {wgetBusy ? "Generating…" : wgetUrl ? "Regenerate link" : "Create wget link"}
+                  </Button>
+                </div>
+                {wgetErr && (
+                  <p className="mt-2 text-xs text-destructive">Failed: {wgetErr}</p>
+                )}
+                {wgetUrl && (
+                  <div className="mt-3">
+                    <CodeBlock value={`cd /path/to/your/project
+wget -O setup-${projectSlug}.sh "${wgetUrl}"
+bash setup-${projectSlug}.sh`} />
+                  </div>
+                )}
+              </div>
 
               <details className="rounded-md border bg-muted/30 p-3 text-xs">
                 <summary className="cursor-pointer text-muted-foreground">
