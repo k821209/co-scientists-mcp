@@ -20,10 +20,18 @@ interface Project {
   updated_at?: string;
 }
 
-const FREE_TIER_LIMIT = 3;
+// Project-count cap per user plan (mirrors docs/plans.md). free=3,
+// pro/enterprise=unlimited. Admin custom claim also grants unlimited
+// for ops/dev work even on a free user doc.
+const PROJECT_CAP_BY_PLAN: Record<string, number> = {
+  free: 3,
+  pro: Infinity,
+  enterprise: Infinity,
+};
+const FREE_TIER_LIMIT = PROJECT_CAP_BY_PLAN.free;
 
 export function Projects() {
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, planId } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
@@ -51,9 +59,13 @@ export function Projects() {
     return unsub;
   }, [user]);
 
-  // Admins (custom claim `admin: true`, set via scripts/grant_admin.py)
-  // are not subject to the free-tier project count cap.
-  const atLimit = !isAdmin && projects.length >= FREE_TIER_LIMIT;
+  // Cap from the user's plan (free=3, pro/enterprise=unlimited); admin
+  // custom claim also lifts the cap.
+  const cap = isAdmin
+    ? Infinity
+    : (PROJECT_CAP_BY_PLAN[planId] ?? FREE_TIER_LIMIT);
+  const atLimit = projects.length >= cap;
+  const unlimited = cap === Infinity;
 
   return (
     <div className="space-y-6">
@@ -61,9 +73,9 @@ export function Projects() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Projects</h1>
           <p className="text-sm text-muted-foreground">
-            {isAdmin
-              ? `${projects.length} projects · admin (unlimited)`
-              : `${projects.length}/${FREE_TIER_LIMIT} on free tier.`}{" "}
+            {unlimited
+              ? `${projects.length} projects · ${isAdmin ? "admin" : planId} (unlimited).`
+              : `${projects.length}/${cap} on ${planId} tier.`}{" "}
             Each project gets its own MCP, agent, and skill set.
           </p>
         </div>

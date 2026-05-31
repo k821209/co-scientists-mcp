@@ -6,13 +6,17 @@ import {
   signOut as fbSignOut,
   type User,
 } from "firebase/auth";
-import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot, setDoc, updateDoc } from "firebase/firestore";
 import { auth, db } from "./firebase";
 
 interface AuthContextValue {
   user: User | null;
   loading: boolean;
   isAdmin: boolean;
+  /** plan_id from /users/{uid} — "free" | "pro" | "enterprise". Tracked
+   *  live (onSnapshot) so flipping the field in the Firestore console
+   *  updates the dashboard without a sign-out / sign-in cycle. */
+  planId: string;
   signInGoogle: () => Promise<void>;
   signInEmail: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -56,6 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [planId, setPlanId] = useState<string>("free");
 
   useEffect(() => {
     const unsub = auth.onAuthStateChanged(async (u) => {
@@ -68,11 +73,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await ensureUserDoc(u);
       } else {
         setIsAdmin(false);
+        setPlanId("free");
       }
       setLoading(false);
     });
     return unsub;
   }, []);
+
+  // Live-track the user's plan_id so a Firestore-console flip from
+  // free → pro lifts the dashboard's free-tier caps without needing
+  // sign-out / sign-in.
+  useEffect(() => {
+    if (!user) return;
+    const ref = doc(db, "users", user.uid);
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        const data = snap.data() as { plan_id?: string } | undefined;
+        setPlanId(data?.plan_id || "free");
+      },
+      () => setPlanId("free"),
+    );
+    return unsub;
+  }, [user]);
 
   const signInGoogle = async () => {
     await signInWithPopup(auth, new GoogleAuthProvider());
@@ -85,7 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, isAdmin, signInGoogle, signInEmail, signOut }}>
+    <AuthContext.Provider value={{ user, loading, isAdmin, planId, signInGoogle, signInEmail, signOut }}>
       {children}
     </AuthContext.Provider>
   );
