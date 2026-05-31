@@ -23,7 +23,7 @@ interface Project {
 const FREE_TIER_LIMIT = 3;
 
 export function Projects() {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
@@ -51,7 +51,9 @@ export function Projects() {
     return unsub;
   }, [user]);
 
-  const atLimit = projects.length >= FREE_TIER_LIMIT;
+  // Admins (custom claim `admin: true`, set via scripts/grant_admin.py)
+  // are not subject to the free-tier project count cap.
+  const atLimit = !isAdmin && projects.length >= FREE_TIER_LIMIT;
 
   return (
     <div className="space-y-6">
@@ -59,8 +61,10 @@ export function Projects() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Projects</h1>
           <p className="text-sm text-muted-foreground">
-            {projects.length}/{FREE_TIER_LIMIT} on free tier. Each project gets its own
-            MCP, agent, and skill set.
+            {isAdmin
+              ? `${projects.length} projects · admin (unlimited)`
+              : `${projects.length}/${FREE_TIER_LIMIT} on free tier.`}{" "}
+            Each project gets its own MCP, agent, and skill set.
           </p>
         </div>
         <Button onClick={() => setShowNew(true)} disabled={atLimit}>
