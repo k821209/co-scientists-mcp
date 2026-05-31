@@ -1142,26 +1142,18 @@ def _build_code_namespace(slide, row, state, slug, tmpd, *,
         deck_chrome=_h.deck_chrome,         # todo 009 B — eyebrow/footer/page
         table=_h.table,                     # todo 009 C — native pptx table
     )
-    # Whole-slide patterns (todo 004 §B, 006) — bound as `p`.
+    # Mechanical structural layouts only — bound as `p`. Content-framing
+    # patterns (hero/evidence/comparison/etc.) were removed so the agent
+    # designs body slides bespoke from `h.*` instead of slotting content
+    # into a canned shape.
     p = SimpleNamespace(
-        # Intent-axis patterns (todo 004 §B)
-        hero_with_trailing_evidence=_p.hero_with_trailing_evidence,
+        title_slide=_p.title_slide,
         chapter_divider=_p.chapter_divider,
         metric_tile_row=_p.metric_tile_row,
-        evidence_stack=_p.evidence_stack,
         flow_pipeline=_p.flow_pipeline,
-        before_after_split=_p.before_after_split,
-        contrast_pair=_p.contrast_pair,
-        quadrant_map=_p.quadrant_map,
-        numbered_milestone_arc=_p.numbered_milestone_arc,
-        zoom_in_callout=_p.zoom_in_callout,
-        # Structural-axis patterns (todo 006 — PowerPoint master layouts)
-        title_slide=_p.title_slide,
-        title_and_body=_p.title_and_body,
-        title_two_content=_p.title_two_content,
+        gantt_chart=_p.gantt_chart,          # todo 009 D
+        figure_full=_p.figure_full,          # todo 008 §A
         title_and_image_grid=_p.title_and_image_grid,
-        figure_full=_p.figure_full,         # todo 008 §A
-        gantt_chart=_p.gantt_chart,         # todo 009 D
     )
 
     return {
@@ -1359,6 +1351,7 @@ def export_deck_to_pptx(
         from pptx.util import Inches, Pt                    # type: ignore
         from pptx.enum.shapes import MSO_SHAPE              # type: ignore
         from pptx.enum.text import PP_ALIGN, MSO_ANCHOR    # type: ignore
+        from pptx.oxml.ns import qn                         # type: ignore
     except ImportError as e:
         raise RuntimeError(
             "python-pptx not installed — reinstall the package: "
@@ -1385,6 +1378,13 @@ def export_deck_to_pptx(
     prs = Presentation()
     sw, sh = Inches(w_in), Inches(h_in)
     prs.slide_width, prs.slide_height = sw, sh
+    # python-pptx's default template tags <p:sldSz> with type="screen4x3";
+    # resizing only updates cx/cy and leaves that stale type behind. PowerPoint
+    # and LibreOffice ignore it, but Keynote reads `type` and refuses to import
+    # the file (16:9 dims vs 4:3 tag). Drop the attribute so it loads everywhere.
+    _sldSz = prs._element.find(qn("p:sldSz"))
+    if _sldSz is not None and _sldSz.get("type") is not None:
+        del _sldSz.attrib["type"]
     blank_layout = prs.slide_layouts[6]
 
     missing_renders: list[int] = []

@@ -85,74 +85,6 @@ REFERENCES = [
         "sentence (≤ 50 chars) carries the rhythm.",
     ),
     (
-        "title_and_body.png", "title_and_body",
-        "MCP is the new pipeline",
-        PREAMBLE + (
-            "h.image_path  # noop; just keep the namespace happy if unused\n"
-        ) + "p.title_and_body(slide, title=title,\n"
-        "  body=['Two-week bespoke pipeline collapses to 30 seconds',\n"
-        "        '500 accessions × 4 modalities in a single query',\n"
-        "        'Provenance trail attached to every step'],\n"
-        "  lead='The breeder talks to the data.',\n"
-        "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n",
-        False,
-        "Lead sentence (display italic) sets the thesis; bullets carry "
-        "the evidence. Body lives in the LEFT 60% of the slide — the "
-        "right 40% is intentional whitespace. The audience focuses; "
-        "you don't fill space for the sake of filling it.",
-        "Don't stretch the body to the full slide width. Don't write "
-        "5+ bullets — split into two slides. Don't put a lead sentence "
-        "longer than two lines.",
-    ),
-    (
-        "title_two_content.png", "title_two_content",
-        "In-house vs cloud MCP",
-        PREAMBLE + (
-            "p.title_two_content(slide, title=title,\n"
-            "  left={'heading': 'In-house servers',\n"
-            "        'bullets': ['Full control of data + cost',\n"
-            "                    'No per-query fee',\n"
-            "                    'Ops burden + slow to scale']},\n"
-            "  right={'heading': 'Cloud MCP',\n"
-            "         'bullets': ['Minutes to scale up or down',\n"
-            "                     'No ops overhead',\n"
-            "                     'Per-query cost + vendor lock-in']},\n"
-            "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"
-        ),
-        False,
-        "Mirrored panels, equally weighted — both sides get a small accent "
-        "rule under their heading. Use for *which one for your case* "
-        "comparisons where the panels aren't ordered (old/new) or "
-        "evaluated (pro/con).",
-        "Don't use this if one side is clearly preferred; that's "
-        "`before_after_split` (muted left, accent right). Don't use this "
-        "for pros/cons of competing options; that's `contrast_pair`.",
-    ),
-    (
-        "hero_with_trailing_evidence.png", "hero_with_trailing_evidence",
-        "Thesis with supporting evidence",
-        PREAMBLE + (
-            "p.hero_with_trailing_evidence(slide,\n"
-            "  headline='Two weeks of bespoke pipeline collapse to 30 seconds.',\n"
-            "  items=['500 accessions integrated across geno / pheno / image / env',\n"
-            "         'Four modalities trained into a single joint embedding',\n"
-            "         'Provenance trail attached to every query — auditable end-to-end'],\n"
-            "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"
-        ),
-        False,
-        "Use when the headline is *long* (≥ 3 wrapped lines) AND each "
-        "evidence item is ≥ 50 chars (todo 008 §C). The asymmetric "
-        "left-headline / right-numbered-column layout needs long "
-        "content on both sides to earn its weight — short items "
-        "leave a visible deadspace gap in the right column.",
-        "Don't pick this for short tagged 3-item content (headline ≤ 2 "
-        "lines, items < 50 chars) — `evidence_stack` packs the same "
-        "shape into ~⅔ the vertical space without the asymmetric "
-        "whitespace reservation. The pattern auto-tightens row height "
-        "for short content as a rescue, but the layout-fit answer is "
-        "to pick the other pattern.",
-    ),
-    (
         "metric_tile_row.png", "metric_tile_row",
         "Quantitative summary",
         PREAMBLE + (
@@ -174,27 +106,6 @@ REFERENCES = [
         "one line only.",
     ),
     (
-        "evidence_stack.png", "evidence_stack",
-        "Claim + tagged evidence",
-        PREAMBLE + (
-            "p.evidence_stack(slide,\n"
-            "  claim='MCP queries are the new pipeline.',\n"
-            "  items=[\n"
-            "    {'tag': 'speed',    'body': '30 seconds vs two-week bespoke pipeline'},\n"
-            "    {'tag': 'breadth',  'body': '500 accessions × 4 modalities in one query'},\n"
-            "    {'tag': 'provenance', 'body': 'Trail attached to every step'},\n"
-            "  ],\n"
-            "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"
-        ),
-        False,
-        "Claim on top in display type, tagged evidence below as stacked "
-        "rows — each row is `[ TAG ]  body text`. Tag pills give the "
-        "audience a named axis to remember each evidence by.",
-        "Don't make tag labels long (≤ ~10 chars); they're meant to read "
-        "as section names. Don't use this for unstructured bullets — "
-        "those go in `title_and_body`.",
-    ),
-    (
         "flow_pipeline.png", "flow_pipeline",
         "Process pipeline",
         PREAMBLE + (
@@ -211,30 +122,9 @@ REFERENCES = [
         "Use for *sequential* processes — method, workflow, lifecycle. "
         "3–5 steps is the readable range.",
         "Don't use this for non-sequential lists (peers without an order) "
-        "— that's `title_and_image_grid` or `card_grid`. Don't write a "
+        "— compose a bespoke grid from `h.*` instead. Don't write a "
         "long body per step; the readability comes from short headings "
         "and quick descriptions.",
-    ),
-    (
-        "before_after_split.png", "before_after_split",
-        "Before vs after",
-        PREAMBLE + (
-            "p.before_after_split(slide,\n"
-            "  before={'title': 'Bespoke pipeline',\n"
-            "          'body': 'Two weeks per query. Every column hand-joined; every plot hand-coded.'},\n"
-            "  after={'title': 'MCP query',\n"
-            "         'body': '30 seconds per query. Natural language in, provenance trail out.'},\n"
-            "  transition_label='150× faster',\n"
-            "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"
-        ),
-        False,
-        "Muted left panel (history / problem), accent-bordered right "
-        "panel (solution / future). A single right-arrow + short label "
-        "between. The asymmetric weight (left muted, right vibrant) "
-        "carries the *direction of improvement* visually.",
-        "Don't use this for equal-weight comparisons (`title_two_content` "
-        "or `contrast_pair`). Don't put long paragraphs on either side — "
-        "≤ ~140 chars each, 4 lines max.",
     ),
     (
         "figure_full.png", "figure_full",
@@ -524,11 +414,10 @@ for title_text, items in sections:
         "the slide carries TWO independent dense compositions side-by-"
         "side (personnel + infrastructure, methodology + outputs, "
         "criteria + verification).",
-        "Don't try to fit two independent tabular blocks into "
-        "`title_two_content` — that pattern's panels are equally "
-        "weighted with simple bullet lists, not multi-row labeled "
-        "structures. When each side has its own internal layout, "
-        "compose them bespoke side-by-side.",
+        "Don't try to fit two independent tabular blocks into a single "
+        "canned two-panel shape — when each side has its own internal "
+        "multi-row layout, compose them bespoke side-by-side from h.* "
+        "primitives.",
     ),
 ]
 
@@ -574,10 +463,17 @@ def main() -> int:
         "generated_at": "2026-05-27",
         "generator": "packages/skills/paper-deck/reference_corpus/generate.py",
         "note": (
-            "Each entry shows one canonical pattern with curated content + "
-            "do/dont notes. Agent grep flow: read manifest.json, pick the "
-            "pattern that fits the current slide's intent, Read the PNG to "
-            "see what a good rendering looks like."
+            "Body slides are bespoke by default — compose them directly "
+            "from h.* primitives (see proposal_dense / personnel_equipment "
+            "for the density vocabulary). The named patterns here are "
+            "MECHANICAL scaffolds only: structural layouts (gantt, image "
+            "grids, metric rows, pipelines, dividers, figure-only, title) "
+            "that are tedious to hand-roll and content-neutral. Do NOT "
+            "reach for a pattern to frame argument/evidence/comparison "
+            "content — design that layout yourself. Agent flow: read "
+            "manifest.json; if the slide is one of the mechanical "
+            "structures below, Read its PNG and call the pattern; "
+            "otherwise compose bespoke from h.*."
         ),
         "patterns": {},
     }

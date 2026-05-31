@@ -517,13 +517,16 @@ HELPERS  (h.* — primitives)
                start_pt, line_spacing=1.22, min_pt=10)
   h.estimate_text_width_pt(text, font_pt)
 
-STRUCTURAL PATTERNS  (p.* — content shape, PowerPoint master layouts)
+MECHANICAL LAYOUTS  (p.* — structural scaffolds ONLY; see note below)
+  # These are content-NEUTRAL structural layouts that are tedious to
+  # hand-roll (grids, bars, numbered cards). They do NOT frame an
+  # argument. For ANY body slide that carries a thesis / evidence /
+  # comparison, do NOT reach for a pattern — compose it bespoke from
+  # h.* primitives (see proposal_dense / personnel_equipment exemplars).
   p.title_slide(slide, *, title, subtitle="", eyebrow="", # OWNS SLIDE
                 palette, fonts, type_scale, sw, sh)
-  p.title_and_body(slide, *, title, body, lead="",        # under title
-                   palette, fonts, type_scale, sw, sh)
-  p.title_two_content(slide, *, title, left, right,       # under title
-                      palette, fonts, type_scale, sw, sh)
+  p.chapter_divider(slide, *, chapter_label, summary="",  # OWNS SLIDE
+                    palette, fonts, type_scale, sw, sh)
   p.title_and_image_grid(slide, *, title, images, cols=2, # under title
                          palette, fonts, type_scale, sw, sh)
   p.figure_full(slide, *, image_path=None,                # under title
@@ -531,45 +534,14 @@ STRUCTURAL PATTERNS  (p.* — content shape, PowerPoint master layouts)
                 palette, fonts, type_scale, sw, sh)
                        # Pass ONE of image_path / image_callable.
                        # Full-grid figure + caption in bottom margin.
-
-INTENT PATTERNS  (p.* — design treatment)
-  p.chapter_divider(slide, *, chapter_label, summary="",  # OWNS SLIDE
-                    palette, fonts, type_scale, sw, sh)
-  p.hero_with_trailing_evidence(slide, *, headline,       # under title
-      items=..., palette, fonts, type_scale, sw, sh)
-                       # items: list[str | {body}]
-                       # legacy alias: evidence=
   p.metric_tile_row(slide, *, items=..., palette, fonts,  # under title
       type_scale, sw, sh, top=None, height=None)
                        # items: list[tuple | {value/tag, label/body, unit?}]
                        # legacy alias: tiles=
-  p.evidence_stack(slide, *, claim, items=..., palette,   # under title
-      fonts, type_scale, sw, sh)
-                       # items: list[{tag, body}]
-                       # legacy alias: evidence=
   p.flow_pipeline(slide, *, items=..., palette, fonts,    # under title
       type_scale, sw, sh)
                        # items: list[{tag, body}]
                        # legacy alias: steps=
-  p.before_after_split(slide, *, before, after,           # under title
-      transition_label="", palette, fonts, type_scale,
-      sw, sh)
-                       # before / after: {title, body}
-  p.contrast_pair(slide, *, left_item, right_item,        # under title
-      axis_label="", palette, fonts, type_scale, sw, sh)
-                       # *_item: {title, pros: list[str], cons: list[str]}
-  p.quadrant_map(slide, *, items, axes,                   # under title
-      palette, fonts, type_scale, sw, sh)
-                       # items: list[{label, x, y}]
-                       # axes:  {x, y, x_low?, x_high?}
-  p.numbered_milestone_arc(slide, *, items=..., palette,  # under title
-      fonts, type_scale, sw, sh)
-                       # items: list[{tag, body | note}]
-                       # legacy alias: milestones=
-  p.zoom_in_callout(slide, *, context_image_path,         # under title
-      callout, note="", palette, fonts, type_scale,
-      sw, sh)
-                       # callout: {x, y, w, h}, all in [0,1]
   p.gantt_chart(slide, *, items=..., periods=None,        # under title
                 period_count=None, palette, fonts,         # todo 009 D
                 type_scale, sw, sh)
@@ -586,8 +558,8 @@ Contract rules:
   so dense body content can't overflow its box (todo 005 + autofit
   follow-up).
 - Every list-of-items parameter is canonically `items=`. Legacy
-  names (`evidence` / `tiles` / `steps` / `milestones`) still work
-  as aliases. Passing both raises `TypeError`.
+  names (`tiles` / `steps`) still work as aliases. Passing both
+  raises `TypeError`.
 - Image helpers (`h.image_*`) accept slide as the first positional
   arg OR rely on the closure-bound `slide`. Both forms work.
 
@@ -802,69 +774,55 @@ the preamble before it.
 
 | Pattern | Contract | Intent / when to use | Content shape |
 |---|---|---|---|
+| `p.title_slide(slide, *, title, subtitle="", eyebrow="")` | **owns slide** | Deck opener / cover at slide 1. Centered eyebrow + title + accent rule + subtitle. Distinct from `chapter_divider` (mid-deck). | `title`, `subtitle` (author/venue/date), `eyebrow` (≤ ~24 chars) |
 | `p.chapter_divider(slide, *, chapter_label, summary="")` | **owns slide** | Section opener (Era I/II/III). Big centered label + accent rule + summary. | `chapter_label` (≤ 12 chars), `summary` (≤ 50 chars) |
-| `p.hero_with_trailing_evidence(slide, *, headline, evidence)` | under title | Thesis / takeaway. Big headline on the left + numbered evidence column on the right. | `headline` (≤ 60 chars), `evidence` (2–4 items, ≤ 80 chars) |
-| `p.metric_tile_row(slide, *, tiles)` | under title | KPI / quantitative summary. Big numbers in a row. | `tiles: 3–5 of (value, label)` or `(value, label, unit)` |
-| `p.evidence_stack(slide, *, claim, evidence)` | under title | A claim backed by 2-4 stacked tag-pill rows. | `claim` (≤ 80 chars), `evidence` (2–4 items, `{tag, body}`) |
-| `p.flow_pipeline(slide, *, steps)` | under title | Process / workflow. Numbered cards with right-arrows between. | `steps: 3–5 of {tag, body}` |
-| `p.before_after_split(slide, *, before, after, transition_label="")` | under title | Risk vs mitigation, old vs new. Muted left + accent right + arrow. | `before / after: {title, body}`, `transition_label` (≤ 16 chars) |
-| `p.contrast_pair(slide, *, left_item, right_item, axis_label="")` | under title | Two competing options framed by an axis. Mirrored panels with pros/cons. | `*_item: {title, pros, cons}`, `axis_label` (≤ 40 chars) |
-| `p.quadrant_map(slide, *, items, axes)` | under title | Comparative landscape. Items at (x, y) ∈ [0,1]² on labeled axes. | `items: [{label, x, y}]`, `axes: {x, y, x_low?, x_high?}` |
-| `p.numbered_milestone_arc(slide, *, milestones)` | under title | Progressive timeline. Equal slots; tag + note **below** the line; weight saturates left→right. | `milestones: 3–6 of {tag, note}` |
-| `p.zoom_in_callout(slide, *, context_image_path, callout, note="")` | under title | Focus on a region of a complex figure. Context + outlined ROI + zoomed inset. | `context_image_path` (real path), `callout: {x, y, w, h}` ∈ [0,1] |
+| `p.title_and_image_grid(slide, *, title, images, cols=2)` | under title | N images in a `cols`-column grid (1 = half-bleed, 2 = side-by-side, 4 = 2×2). Optional per-image captions. | `images: [{path, caption?}]`, `cols` (1/2/4) |
+| `p.figure_full(slide, *, image_path=None, image_callable=None, caption="")` | under title | Single figure that owns the FULL grid (~85% slide height); caption rides in the bottom-margin strip outside the grid. Pass `image_path` for filesystem PNGs or `image_callable=lambda **kw: h.image_figure(slide, N, **kw)` for paper figures. (todo 008 §A) | one image + ≤ 120-char caption |
+| `p.metric_tile_row(slide, *, items)` | under title | KPI / quantitative summary. Big numbers in a row. | `items: 3–5 of (value, label)` or `(value, label, unit)` |
+| `p.flow_pipeline(slide, *, items)` | under title | Process / workflow. Numbered cards with right-arrows between. | `items: 3–5 of {tag, body}` |
+| `p.gantt_chart(slide, *, items, periods=None, period_count=None)` | under title | Activity rows × period columns with accent-colored bars at each row's `{start, span}`. Zebra-striped rows + period labels + left-aligned activity labels. Pair with `h.deck_chrome` for proposal rhythm. (todo 009 D) | `items: [{label, start, span}]` (1-indexed) |
 
 All under-title patterns take the same theme kwargs (`palette`,
-`fonts`, `type_scale`, `sw`, `sh`) as `h.*` helpers; `chapter_divider`
-likewise.
+`fonts`, `type_scale`, `sw`, `sh`) as `h.*` helpers; the two
+owns-slide patterns likewise.
 
-**Structural patterns** (todo 006) — pick these *first* by content
-shape (the PowerPoint master-layout taxonomy), then optionally swap to
-an intent pattern above if a more loaded design fits:
+**There is NO pattern for argument / evidence / comparison content.**
+The old hero/evidence/before-after/contrast/quadrant/milestone/
+callout/two-content/title-and-body patterns were removed on purpose
+(they made every deck look templated). For any body slide that
+carries a thesis, supporting points, a comparison, a timeline arc,
+or a figure callout, **compose it bespoke** from `h.*` primitives —
+that is the default, not the exception.
 
-| Pattern | Contract | PowerPoint base | Use for |
-|---|---|---|---|
-| `p.title_slide(slide, *, title, subtitle="", eyebrow="")` | **owns slide** | (1) Title Slide | Deck opener / cover at slide 1. Centered eyebrow + title + accent rule + subtitle. Distinct from `chapter_divider` (mid-deck). |
-| `p.title_and_body(slide, *, title, body, lead="")` | under title | (2) Title and Content (plain) | The most common slide: title + bulleted body. Body sits in a 60% left column with 40% intentional whitespace on the right (focus discipline). Optional `lead` sentence in display type. |
-| `p.title_two_content(slide, *, title, left, right)` | under title | (4) Two Content | Generic 2-column body, each `{heading?, body?, bullets?}`. Mirrored — for emphasized comparison use `before_after_split`; for pros/cons use `contrast_pair`. |
-| `p.title_and_image_grid(slide, *, title, images, cols=2)` | under title | (4) Two Content extended / (9) Picture with Caption | N images in a `cols`-column grid (1 = half-bleed, 2 = side-by-side, 4 = 2×2). Optional per-image captions. |
-| `p.figure_full(slide, *, image_path=None, image_callable=None, caption="")` | under title | (9) Picture with Caption (figure-only) | Single figure that owns the FULL grid (~85% slide height); caption rides in the bottom-margin strip outside the grid. ~17% more figure area vs `row_span=4` + caption-in-row-6 layouts. Pass `image_path` for filesystem PNGs or `image_callable=lambda **kw: h.image_figure(slide, N, **kw)` for paper figures. (todo 008 §A) |
-| `p.gantt_chart(slide, *, items, periods=None, period_count=None)` | under title | Timeline matrix | Activity rows × period columns with accent-colored bars at each row's `{start, span}`. Zebra-striped rows + period labels + left-aligned activity labels. Pair with `h.deck_chrome` for proposal rhythm. items: `[{label, start, span}]` (1-indexed). (todo 009 D) |
+**Two-step selection** (todo 013 — bespoke-first):
 
-**Three-step selection** (todo 013 — bespoke-first):
+0. **Trigger-table check FIRST.** Re-read the trigger table at the
+   top of §5a against this slide's content. If ANY signal matches
+   (3+ structured comparison sections, personnel page, equipment
+   list with sections, two independent compositions side-by-side,
+   KPI + figure, custom architecture, …), compose bespoke from
+   `h.*` primitives + raw `slide.shapes.add_shape` — see **Example
+   0** below.
 
-0. **Trigger-table check FIRST.** Re-read the "Go bespoke when…"
-   table at the top of §5a against this slide's content. If ANY
-   signal matches (3+ structured comparison sections, personnel
-   page, equipment list with sections, two independent compositions
-   side-by-side, KPI + figure, custom architecture, …), STOP HERE.
-   Skip steps 1–2. Compose bespoke from `h.*` primitives + raw
-   `slide.shapes.add_shape` — see **Example 0** below. Don't talk
-   yourself into a pattern because it's faster; "1 pattern per
-   slide" across a deck is the failure mode this todo exists to
-   prevent.
+1. **Otherwise** — the ONLY time you call a pattern is when the
+   slide IS one of the mechanical structures above:
+   - Cover at slide 1 → `p.title_slide`; mid-deck section break →
+     `p.chapter_divider`.
+   - A single figure that should fill the slide → `p.figure_full`
+     (or `h.image_figure` for finer control).
+   - Multiple images in a grid → `p.title_and_image_grid`.
+   - A row of 3–5 KPI numbers, nothing else → `p.metric_tile_row`.
+   - A 3–5 step *sequential* process, nothing else → `p.flow_pipeline`.
+   - A project timeline / Gantt → `p.gantt_chart`.
 
-1. **Only if no trigger matched** — pick a structural type by
-   content *shape*. What do you have to put on this slide?
-   - Just a centered title → `p.title_slide` (slide 1) or
-     `p.chapter_divider` (mid-deck) or `h.title_block` alone.
-   - Title + a list / paragraphs → `p.title_and_body`.
-   - Title + 2 paired panels → `p.title_two_content` (generic) or
-     `p.contrast_pair` (pros/cons) or `p.before_after_split` (old/new).
-   - Title + a single figure → `h.image_figure` (full-bleed) or
-     `p.zoom_in_callout` (with ROI).
-   - Title + multiple images → `p.title_and_image_grid`.
-2. **Intent treatment last** — if a more loaded design fits the
-   *message* AND the catalog entry's "Use ONLY when…" line matches
-   your brief exactly, swap to one of the intent patterns
-   (`hero_with_trailing_evidence`, `metric_tile_row`, `evidence_stack`,
-   `flow_pipeline`, `quadrant_map`, `numbered_milestone_arc`). If
-   the intent doesn't match exactly, fall back to bespoke — don't
-   force-fit.
+   Everything else — a thesis with supporting points, two ideas
+   compared, a claim with tagged evidence, a before/after — is
+   **bespoke**. Don't force-fit content into a mechanical layout.
 
 > There is intentionally **no "role → pattern" mapping table** here.
 > Mapping `method → flow_pipeline` / `result → metric_tile_row` /
-> `discussion → contrast_pair` produces decks where every slide is
-> one pattern call and the composition repeats no matter how the
+> `discussion → some canned comparison` produces decks where every
+> slide is one pattern call and the composition repeats no matter how the
 > content varies. `role` is a slide *label*, not a design recipe.
 > Design the slide from the content; the role doesn't get a vote.
 
@@ -1239,8 +1197,9 @@ encode these rules; when you build a custom layout, mirror them.
 where the audience arrives — the natural "this is the conclusion"
 position. Place the **subject** on the right when it's the destination;
 on the left when it's the starting fact.
-- `p.before_after_split` deliberately puts BEFORE on the left
-  (history) and AFTER on the right (where you arrive).
+- A before/after composition puts BEFORE on the left (history,
+  muted) and AFTER on the right (where you arrive, accented) — the
+  asymmetric weight carries the direction of improvement.
 
 **Image emphasis — full-bleed vs caption strip.**
 - Full-bleed image, no caption = "the image **IS** the message". Use
@@ -1262,7 +1221,9 @@ on the left when it's the starting fact.
 **Whitespace as design.**
 - Filled body box = density. Defensible for dense reference data.
 - 60% column with 40% whitespace = focus. Use for theses, hero
-  statements, KPI tiles. `p.title_and_body` does this by default.
+  statements, KPI tiles. When composing a text-body slide bespoke,
+  keep the body in a ~60% left column and leave the right 40% as
+  intentional whitespace.
 
 **The 4-color / 4-type-size discipline** (from the deck concept's
 `Design language` block, todo 004 §G). Per slide:
@@ -1349,23 +1310,25 @@ a do / don't pair the agent should mirror in its own slides.
 
 **Recommended flow when authoring a `code` slide**:
 
-1. Decide the structural type + intent treatment (§5a quick-ref table).
-2. Read `packages/skills/paper-deck/reference_corpus/manifest.json` to
-   confirm the canonical example exists for your chosen pattern.
-3. Read the matching PNG (`Read("packages/skills/paper-deck/reference_corpus/<pattern>.png")`)
-   — Claude is multimodal, so the agent SEES what a good rendering of
-   that pattern looks like before authoring its own.
+1. Decide whether the slide is one of the mechanical structures (§5a)
+   or — far more often — a bespoke composition.
+2. Read `packages/skills/paper-deck/reference_corpus/manifest.json`.
+   For a mechanical layout, confirm the canonical example exists; for
+   a bespoke slide, study `proposal_dense` / `personnel_equipment`.
+3. Read the matching PNG (`Read("packages/skills/paper-deck/reference_corpus/<name>.png")`)
+   — Claude is multimodal, so the agent SEES what a good rendering
+   looks like before authoring its own.
 4. Follow the manifest entry's **do**; avoid its **dont**.
 5. Author the `code` snippet against your own content. Run the
    critique loop (§9) against the result and the reference side-by-
    side; rewrite if your rendering diverges visually from the
    exemplar's discipline.
 
-The corpus currently covers 10 patterns: `title_slide`,
-`chapter_divider`, `title_and_body`, `title_two_content`,
-`title_and_image_grid`, `hero_with_trailing_evidence`,
-`metric_tile_row`, `evidence_stack`, `flow_pipeline`, and
-`before_after_split`. Regenerate with:
+The corpus covers the 7 mechanical layouts — `title_slide`,
+`chapter_divider`, `title_and_image_grid`, `figure_full`,
+`metric_tile_row`, `flow_pipeline`, `gantt_chart` — plus two
+bespoke density exemplars (`proposal_dense`, `personnel_equipment`)
+that show what hand-composed body slides look like. Regenerate with:
 
 ```bash
 PYTHONPATH=apps/local-mcp python \

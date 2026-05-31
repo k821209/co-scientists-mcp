@@ -1199,20 +1199,6 @@ def _slide_text(slide):
     )
 
 
-def test_pattern_hero_with_trailing_evidence(state, tmp_path, monkeypatch):
-    res, slide = _run_pattern_slide(state, tmp_path, monkeypatch, code=(
-        "p.hero_with_trailing_evidence(slide, headline='The thesis',\n"
-        "    evidence=['point one', 'point two', 'point three'],\n"
-        "    palette=palette, fonts=fonts, type_scale=type_scale,\n"
-        "    sw=sw, sh=sh)\n"
-    ))
-    assert res["code_errors"] == []
-    txt = _slide_text(slide)
-    assert "The thesis" in txt
-    for line in ("point one", "point two", "point three"):
-        assert line in txt
-
-
 def test_pattern_chapter_divider(state, tmp_path, monkeypatch):
     res, slide = _run_pattern_slide(state, tmp_path, monkeypatch, code=(
         "p.chapter_divider(slide, chapter_label='Era II',\n"
@@ -1242,22 +1228,6 @@ def test_pattern_metric_tile_row(state, tmp_path, monkeypatch):
         assert token in txt
 
 
-def test_pattern_evidence_stack(state, tmp_path, monkeypatch):
-    res, slide = _run_pattern_slide(state, tmp_path, monkeypatch, code=(
-        "p.evidence_stack(slide, claim='AI breeding scales',\n"
-        "    evidence=[\n"
-        "        {'tag': 'data', 'body': '500 accessions multi-modal'},\n"
-        "        {'tag': 'speed', 'body': '30s vs 2 weeks per query'},\n"
-        "    ], palette=palette, fonts=fonts, type_scale=type_scale,\n"
-        "       sw=sw, sh=sh)\n"
-    ))
-    assert res["code_errors"] == []
-    txt = _slide_text(slide)
-    assert "AI breeding scales" in txt
-    assert "DATA" in txt
-    assert "SPEED" in txt
-
-
 def test_pattern_flow_pipeline(state, tmp_path, monkeypatch):
     res, slide = _run_pattern_slide(state, tmp_path, monkeypatch, code=(
         "p.flow_pipeline(slide, steps=[\n"
@@ -1271,76 +1241,6 @@ def test_pattern_flow_pipeline(state, tmp_path, monkeypatch):
     txt = _slide_text(slide)
     for token in ("Collect", "Model", "Deploy", "multi-modal data",
                   "breeder queries"):
-        assert token in txt
-
-
-def test_pattern_before_after_split(state, tmp_path, monkeypatch):
-    res, slide = _run_pattern_slide(state, tmp_path, monkeypatch, code=(
-        "p.before_after_split(slide,\n"
-        "    before={'title': 'Manual', 'body': 'two weeks per query'},\n"
-        "    after={'title': 'MCP', 'body': '30 seconds per query'},\n"
-        "    transition_label='150× faster',\n"
-        "    palette=palette, fonts=fonts, type_scale=type_scale,\n"
-        "    sw=sw, sh=sh)\n"
-    ))
-    assert res["code_errors"] == []
-    txt = _slide_text(slide)
-    assert "Manual" in txt
-    assert "MCP" in txt
-    assert "150" in txt
-
-
-def test_pattern_contrast_pair(state, tmp_path, monkeypatch):
-    res, slide = _run_pattern_slide(state, tmp_path, monkeypatch, code=(
-        "p.contrast_pair(slide,\n"
-        "    left_item={'title': 'In-house', 'pros': ['control'],\n"
-        "               'cons': ['slow']},\n"
-        "    right_item={'title': 'Cloud', 'pros': ['fast'],\n"
-        "                'cons': ['lock-in']},\n"
-        "    axis_label='deploy time vs control',\n"
-        "    palette=palette, fonts=fonts, type_scale=type_scale,\n"
-        "    sw=sw, sh=sh)\n"
-    ))
-    assert res["code_errors"] == []
-    txt = _slide_text(slide)
-    assert "In-house" in txt
-    assert "Cloud" in txt
-    assert "control" in txt
-    assert "lock-in" in txt
-    assert "DEPLOY TIME VS CONTROL" in txt
-
-
-def test_pattern_quadrant_map(state, tmp_path, monkeypatch):
-    res, slide = _run_pattern_slide(state, tmp_path, monkeypatch, code=(
-        "p.quadrant_map(slide, items=[\n"
-        "    {'label': 'A', 'x': 0.2, 'y': 0.8},\n"
-        "    {'label': 'B', 'x': 0.8, 'y': 0.2},\n"
-        "], axes={'x': 'cost', 'y': 'impact',\n"
-        "         'x_low': 'cheap', 'x_high': 'expensive'},\n"
-        "   palette=palette, fonts=fonts, type_scale=type_scale,\n"
-        "   sw=sw, sh=sh)\n"
-    ))
-    assert res["code_errors"] == []
-    txt = _slide_text(slide)
-    assert "A" in txt
-    assert "B" in txt
-    assert "cost" in txt
-    assert "impact" in txt
-
-
-def test_pattern_numbered_milestone_arc(state, tmp_path, monkeypatch):
-    res, slide = _run_pattern_slide(state, tmp_path, monkeypatch, code=(
-        "p.numbered_milestone_arc(slide, milestones=[\n"
-        "    {'tag': 'Era I', 'note': 'paper records'},\n"
-        "    {'tag': 'Era II', 'note': 'data digital'},\n"
-        "    {'tag': 'Era III', 'note': 'practice digital'},\n"
-        "], palette=palette, fonts=fonts, type_scale=type_scale,\n"
-        "   sw=sw, sh=sh)\n"
-    ))
-    assert res["code_errors"] == []
-    txt = _slide_text(slide)
-    for token in ("Era I", "Era II", "Era III", "paper records",
-                  "data digital", "practice digital", "1", "2", "3"):
         assert token in txt
 
 
@@ -1405,22 +1305,11 @@ def _build_pattern_slide(state, tmp_path, monkeypatch, *,
     return prs.slides[0], prs.slide_width, prs.slide_height
 
 
-# Each (name, snippet, owns_whole_slide) — pattern + Korean-ish content
+# Each (name, snippet) — mechanical under-title layout + Korean-ish content
 _UNDER_TITLE_PATTERNS = [
-    ("hero_with_trailing_evidence",
-     "p.hero_with_trailing_evidence(slide,\n"
-     "  headline='앞으로 10년의 농업 AI는 데이터에 말을 거는 일이다.',\n"
-     "  evidence=['500종 통합', '4 모달리티 결합', '쿼리당 30초'],\n"
-     "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"),
     ("metric_tile_row",
      "p.metric_tile_row(slide, tiles=[('30','초당 쿼리','s'),\n"
      "  ('500','accession',None),('4','modality',None)],\n"
-     "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"),
-    ("evidence_stack",
-     "p.evidence_stack(slide, claim='MCP가 새 파이프라인이다.',\n"
-     "  evidence=[{'tag': '속도', 'body': '2주가 30초로'},\n"
-     "            {'tag': '범위', 'body': '500 accession × 4 modality'},\n"
-     "            {'tag': '재현', 'body': 'provenance trail이 모든 단계'}],\n"
      "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"),
     ("flow_pipeline",
      "p.flow_pipeline(slide, steps=[\n"
@@ -1428,50 +1317,6 @@ _UNDER_TITLE_PATTERNS = [
      "  {'tag': '정제', 'body': 'DOI 도장 + 결측 처리'},\n"
      "  {'tag': '학습', 'body': '단일 임베딩 학습'},\n"
      "  {'tag': '배포', 'body': '자연어 쿼리 인터페이스'}],\n"
-     "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"),
-    ("before_after_split",
-     "p.before_after_split(slide,\n"
-     "  before={'title': '맞춤 파이프라인', 'body': '쿼리당 2주: 컬럼 손으로 조인, 플롯 손으로 코딩.'},\n"
-     "  after={'title': 'MCP 쿼리', 'body': '쿼리당 30초: 자연어 입력 → provenance trail.'},\n"
-     "  transition_label='150× 더 빠름',\n"
-     "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"),
-    ("contrast_pair",
-     "p.contrast_pair(slide,\n"
-     "  left_item={'title': '사내 서버',\n"
-     "             'pros': ['완전한 통제','쿼리당 비용 없음'],\n"
-     "             'cons': ['운영 부담','스케일 느림']},\n"
-     "  right_item={'title': '클라우드 MCP',\n"
-     "              'pros': ['분 단위 스케일','운영 부담 없음'],\n"
-     "              'cons': ['쿼리당 비용','벤더 lock-in']},\n"
-     "  axis_label='배포 시간 vs 운영 부담',\n"
-     "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"),
-    ("quadrant_map",
-     "p.quadrant_map(slide,\n"
-     "  items=[{'label':'A','x':0.2,'y':0.8},{'label':'B','x':0.8,'y':0.3},\n"
-     "         {'label':'C','x':0.1,'y':0.2},{'label':'D','x':0.7,'y':0.6}],\n"
-     "  axes={'x':'배포 시간','y':'재현성','x_low':'일 단위','x_high':'분 단위'},\n"
-     "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"),
-    ("numbered_milestone_arc",
-     "p.numbered_milestone_arc(slide, milestones=[\n"
-     "  {'tag':'Era I (2010–)','note':'시퀀스 예측. 유전체 안에서.'},\n"
-     "  {'tag':'2018 · DL-on-SNP','note':'딥러닝이 SNP를 받아들이기 시작'},\n"
-     "  {'tag':'2024 · Genomic LM','note':'언어모델이 유전체 안으로 진입'},\n"
-     "  {'tag':'Now','note':'육종가가 데이터에 말을 거는 시대'}],\n"
-     "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"),
-    # Structural patterns (todo 006). title_slide is owns-slide → tested
-    # separately. The 3 under-title structural patterns join the suite:
-    ("title_and_body",
-     "p.title_and_body(slide, title='제목과 본문',\n"
-     "  body=['첫 번째 핵심 포인트', '두 번째 보완 포인트',\n"
-     "        '세 번째 결론적인 한 줄'],\n"
-     "  lead='AI 육종은 데이터에 말을 거는 일.',\n"
-     "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"),
-    ("title_two_content",
-     "p.title_two_content(slide, title='2-column generic',\n"
-     "  left={'heading': '맞춤 파이프라인',\n"
-     "        'bullets': ['컬럼 손으로 조인','플롯 손으로 코딩','쿼리당 2주']},\n"
-     "  right={'heading': 'MCP 쿼리',\n"
-     "         'bullets': ['자연어 입력','provenance trail','쿼리당 30초']},\n"
      "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"),
 ]
 
@@ -1768,29 +1613,18 @@ def test_image_figure_accepts_slide_first_positional(state, tmp_path, monkeypatc
 
 def test_patterns_accept_items_canonical_name(state, tmp_path, monkeypatch):
     """Every list-of-items pattern accepts `items=` as the canonical
-    kwarg (todo 007 axis 2). Legacy names (evidence / tiles / steps /
-    milestones) still work as aliases — covered elsewhere by the
-    `_UNDER_TITLE_PATTERNS` suite."""
+    kwarg (todo 007 axis 2). Legacy names (tiles / steps) still work as
+    aliases — covered elsewhere by the `_UNDER_TITLE_PATTERNS` suite."""
     pytest.importorskip("pptx")
     slug = _setup(state)
     decks.update_deck(state, slug, "d", concept="accent: #b58900")
     decks.add_slide(
         state, slug, "d", slide_number=1, role="content",
-        title="items canonical", notes="n", render_mode="code",
+        title="items via flow", notes="n", render_mode="code",
         code=(
             "h.accent_stripe(slide, palette=palette, sw=sw)\n"
             "h.title_block(slide, title, palette=palette, fonts=fonts,\n"
             "              type_scale=type_scale, sw=sw, sh=sh)\n"
-            "# hero — items as list[str]\n"
-            "p.hero_with_trailing_evidence(slide,\n"
-            "  headline='canonical hero', items=['e1', 'e2', 'e3'],\n"
-            "  palette=palette, fonts=fonts, type_scale=type_scale, sw=sw, sh=sh)\n"
-        ),
-    )
-    decks.add_slide(
-        state, slug, "d", slide_number=2, role="content",
-        title="items via flow", notes="n", render_mode="code",
-        code=(
             "p.flow_pipeline(slide, items=[\n"
             "  {'tag': 'A', 'body': 'first'},\n"
             "  {'tag': 'B', 'body': 'second'},\n"
@@ -1802,7 +1636,7 @@ def test_patterns_accept_items_canonical_name(state, tmp_path, monkeypatch):
     out = tmp_path / "deck.pptx"
     res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
     assert res["code_errors"] == [], res["code_errors"]
-    assert res["code_slides"] == 2
+    assert res["code_slides"] == 1
 
 
 def test_metric_tile_row_accepts_dict_items(state, tmp_path, monkeypatch):
@@ -1849,36 +1683,6 @@ def test_passing_both_items_and_legacy_alias_raises(state):
             steps=[{"tag": "B", "body": "y"}],
             palette={}, fonts={}, type_scale={}, sw=0, sh=0,
         )
-
-
-def test_numbered_milestone_arc_canonical_body_field(state, tmp_path, monkeypatch):
-    """numbered_milestone_arc accepts both `note` (legacy) and `body`
-    (canonical) inside each item dict (todo 007 axis 2)."""
-    pytest.importorskip("pptx")
-    from pptx import Presentation
-    slug = _setup(state)
-    decks.add_slide(
-        state, slug, "d", slide_number=1, role="background",
-        title="milestone canonical body", notes="n", render_mode="code",
-        code=(
-            "p.numbered_milestone_arc(slide, items=[\n"
-            "  {'tag': 'A', 'body': 'canonical body field'},\n"   # canonical
-            "  {'tag': 'B', 'note': 'legacy note field'},\n"      # legacy
-            "  {'tag': 'C', 'body': 'mixed works'}],\n"
-            "  palette=palette, fonts=fonts, type_scale=type_scale,\n"
-            "  sw=sw, sh=sh)\n"
-        ),
-    )
-    monkeypatch.setattr(deck_render, "_pdf_via_soffice", lambda _p: None)
-    out = tmp_path / "deck.pptx"
-    res = deck_render.export_deck_to_pptx(state, slug, "d", output_path=str(out))
-    assert res["code_errors"] == [], res["code_errors"]
-    flat = " ".join(
-        sh.text_frame.text for sh in Presentation(str(out)).slides[0].shapes
-        if sh.has_text_frame
-    )
-    assert "canonical body field" in flat
-    assert "legacy note field" in flat
 
 
 # ─── Text autofit (Korean-aware) ─────────────────────────────────────────
@@ -2096,32 +1900,7 @@ def test_type_scale_semantic_role_override(state, tmp_path, monkeypatch):
     assert ts["display_cover"] == 48
 
 
-def test_pattern_zoom_in_callout(state, tmp_path, monkeypatch):
-    """zoom_in_callout needs an image source; smoke-test with a 1×1 PNG."""
-    pytest.importorskip("pptx")
-    from pptx import Presentation
-    from pptx.enum.shapes import MSO_SHAPE_TYPE
-
-    src = tmp_path / "ctx.png"
-    src.write_bytes(_PNG_1x1)
-    code = (
-        f"p.zoom_in_callout(slide, context_image_path={str(src)!r},\n"
-        "    callout={'x': 0.3, 'y': 0.3, 'w': 0.3, 'h': 0.3},\n"
-        "    note='zoom note',\n"
-        "    palette=palette, fonts=fonts, type_scale=type_scale,\n"
-        "    sw=sw, sh=sh)\n"
-    )
-    res, slide = _run_pattern_slide(state, tmp_path, monkeypatch, code=code)
-    assert res["code_errors"] == []
-    pics = [sh for sh in slide.shapes
-            if sh.shape_type == MSO_SHAPE_TYPE.PICTURE]
-    # Two pictures: full context + zoomed inset
-    assert len(pics) == 2
-    txt = _slide_text(slide)
-    assert "zoom note" in txt
-
-
-# ─── figure_full + hero adaptive (todo 008) ─────────────────────────────
+# ─── figure_full (todo 008) ─────────────────────────────────────────────
 
 
 def test_figure_full_renders_image_and_caption(state, tmp_path, monkeypatch):
@@ -2177,63 +1956,6 @@ def test_figure_full_requires_exactly_one_image_source(state, tmp_path):
         slide_patterns.figure_full(
             slide, palette={"foreground": None, "accent": None},
             fonts={}, type_scale={}, sw=0, sh=0,
-        )
-
-
-def test_hero_with_trailing_evidence_tight_on_short_content():
-    """Per todo 008 §C3 — `hero_with_trailing_evidence` should NOT
-    spread short items across the full slide height. The pattern
-    auto-switches to a tight per-item row height when avg item
-    length < 50 chars."""
-    # We can't easily measure shape coordinates without rendering, so
-    # use the export path and check that the right-column textboxes are
-    # closer together than the slide-height-divided naïve placement.
-    pytest.importorskip("pptx")
-    from pptx import Presentation
-    from co_scientist_local.backends.memory import InMemoryBackend
-    from co_scientist_local.state import State
-    s = State(project_id="x", owner_uid="u", backend=InMemoryBackend())
-    papers.create_paper(s, title="t")
-    decks.create_deck(s, "t", title="d", deck_id="d")
-    decks.add_slide(
-        s, "t", "d", slide_number=1, role="thesis",
-        title="hero short", notes="n", render_mode="code",
-        code=(
-            "h.accent_stripe(slide, palette=palette, sw=sw)\n"
-            "h.title_block(slide, title, palette=palette, fonts=fonts,\n"
-            "              type_scale=type_scale, sw=sw, sh=sh)\n"
-            "p.hero_with_trailing_evidence(slide,\n"
-            "  headline='Short thesis line.',\n"
-            "  items=['Speed', 'Breadth', 'Provenance'],\n"
-            "  palette=palette, fonts=fonts, type_scale=type_scale,\n"
-            "  sw=sw, sh=sh)\n"
-        ),
-    )
-    import tempfile, pathlib as _p
-    with tempfile.TemporaryDirectory() as tmpd:
-        out = _p.Path(tmpd) / "deck.pptx"
-        deck_render._pdf_via_soffice = lambda _x: None   # monkey-skip
-        res = deck_render.export_deck_to_pptx(
-            s, "t", "d", output_path=str(out),
-        )
-        assert res["code_errors"] == [], res["code_errors"]
-        slide = Presentation(str(out)).slides[0]
-        # Collect right-column evidence number boxes ("01" / "02" / "03")
-        ev_runs = [
-            sh for sh in slide.shapes
-            if sh.has_text_frame
-            and sh.text_frame.text.strip() in {"01", "02", "03"}
-        ]
-        assert len(ev_runs) == 3
-        ys = sorted(sh.top for sh in ev_runs)
-        gap_01_02 = ys[1] - ys[0]
-        # Without the adaptive fix, gap ≈ body_h / 3 ≈ Inches(1.7) = ~1.5M EMU.
-        # With the adaptive fix (short content → row_h ≈ body_pt * 4.2pt =
-        # ~84pt ≈ 1.07M EMU), gap should be substantially smaller.
-        from pptx.util import Inches as _I
-        assert gap_01_02 < _I(1.4), (
-            f"hero should tighten row gap for short content; got "
-            f"gap={gap_01_02} EMU between '01' and '02'"
         )
 
 
